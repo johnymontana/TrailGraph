@@ -414,23 +414,35 @@ export async function upsertAmenityBridges(
   if (!items.length) return { amenities: 0, refs: 0, edges: 0 };
   const rows = extractAmenityChildIds(items, childArrayKey);
   if (!rows.length) return { amenities: 0, refs: 0, edges: 0 };
-  const refs = rows.reduce((n, row) => n + row.childIds.length, 0);
-  // OPTIONAL MATCH + FOREACH so amenities are still counted when a child id doesn't resolve, and
-  // `edges` reflects only the links actually created — distinguishing a parse miss (refs=0) from an
-  // id-match miss (refs>0, edges=0).
-  const r = await writeGraph<{ amenities: number; edges: number }>(
-    `
-    UNWIND $rows AS row
-    MERGE (am:Amenity {id: row.amenityId}) SET am.name = coalesce(am.name, row.amenityName)
-    WITH am, row
-    UNWIND (CASE WHEN size(row.childIds) = 0 THEN [null] ELSE row.childIds END) AS cid
-    OPTIONAL MATCH (child:\`${childLabel}\` {id: cid})
-    FOREACH (_ IN CASE WHEN child IS NULL THEN [] ELSE [1] END | MERGE (child)-[:HAS_AMENITY]->(am))
-    RETURN count(DISTINCT am) AS amenities, count(child) AS edges
-    `,
-    { rows },
-  );
-  return { amenities: r[0]?.amenities ?? 0, refs, edges: r[0]?.edges ?? 0 };
+
+  // 1) MERGE the amenity vocabulary in one modest transaction (≈127 rows).
+  await writeGraph(`UNWIND $amenities AS a MERGE (am:Amenity {id: a.id}) SET am.name = coalesce(am.name, a.name)`, {
+    amenities: rows.map((r) => ({ id: r.amenityId, name: r.amenityName })),
+  });
+
+  // 2) Create HAS_AMENITY edges in BATCHES. A single UNWIND over all amenities × parks × places is a
+  // huge cartesian that blows past Neo4j's per-transaction memory cap (dbms.memory.transaction.total.max),
+  // so we flatten to (amenity, child) pairs and write fixed-size chunks. `edges` counts only matched
+  // children, so refs>0 & edges=0 would still flag an id mismatch.
+  const pairs: { amenityId: string; cid: string }[] = [];
+  for (const row of rows) for (const cid of row.childIds) pairs.push({ amenityId: row.amenityId, cid });
+  const refs = pairs.length;
+  let edges = 0;
+  const BATCH = 2000;
+  for (let i = 0; i < pairs.length; i += BATCH) {
+    const res = await writeGraph<{ edges: number }>(
+      `
+      UNWIND $batch AS row
+      MATCH (am:Amenity {id: row.amenityId})
+      MATCH (child:\`${childLabel}\` {id: row.cid})
+      MERGE (child)-[:HAS_AMENITY]->(am)
+      RETURN count(*) AS edges
+      `,
+      { batch: pairs.slice(i, i + BATCH) },
+    );
+    edges += res[0]?.edges ?? 0;
+  }
+  return { amenities: new Set(rows.map((r) => r.amenityId)).size, refs, edges };
 }
 
 /** Passport stamps: `(:PassportStamp)-[:IN_PARK]->(:Park)` — the collection/gamification graph. */
