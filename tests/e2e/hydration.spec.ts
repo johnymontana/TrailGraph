@@ -22,7 +22,11 @@ for (const route of ROUTES) {
     page.on('pageerror', (e) => {
       if (HYDRATION_RX.test(e.message)) problems.push(`[pageerror] ${e.message}`);
     });
-    await page.goto(route, { waitUntil: 'networkidle' });
+    // `load` (not `networkidle`): the WebGL canvas pages (/graph, /map) keep network busy so networkidle
+    // never settles. Load fires after scripts run → React hydration runs right after; we then give a
+    // *bounded* networkidle window so the hydration-mismatch console error (if any) is captured.
+    await page.goto(route, { waitUntil: 'load' });
+    await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
     expect(problems, problems.join('\n')).toHaveLength(0);
   });
 }
