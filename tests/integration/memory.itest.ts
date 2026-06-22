@@ -8,10 +8,11 @@ import {
   deletePreference,
   considerPark,
   deleteConsidered,
+  deleteAllConsidered,
   setPreferenceFeedback,
 } from '../../lib/bridges';
 import { isSuppressed, preferenceSignature } from '../../lib/tombstone';
-import { getUserMemory } from '../../lib/memory-graph';
+import { getUserMemory, consideredBounds } from '../../lib/memory-graph';
 import { explainRecommendation } from '../../lib/explain';
 
 /**
@@ -77,5 +78,19 @@ describeIntegration('memory: bridges, durable delete, explain (Neo4j)', () => {
     expect(retry.suppressed).toBe(true);
     const after = await getUserMemory(userId);
     expect(after.preferences.some((p) => p.name === 'Astronomy')).toBe(false);
+  });
+
+  it('consideredBounds returns a bbox of considered parks; deleteAllConsidered clears them (§2.7/§4)', async () => {
+    await considerPark(userId, 'yell');
+    await considerPark(userId, 'grca');
+    const bounds = await consideredBounds(userId);
+    expect(bounds).not.toBeNull();
+    const [[w, s], [e, n]] = bounds!;
+    expect(w).toBeLessThanOrEqual(e);
+    expect(s).toBeLessThanOrEqual(n);
+
+    await deleteAllConsidered(userId);
+    expect((await getUserMemory(userId)).considered).toHaveLength(0);
+    expect(await consideredBounds(userId)).toBeNull();
   });
 });

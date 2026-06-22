@@ -55,7 +55,11 @@ export function ChatPanel() {
 
     parts.forEach((part, j) => {
       if (part.type === 'text' && part.text?.trim()) {
-        nodes.push(streaming ? <Text key={j} whiteSpace="pre-wrap">{part.text}</Text> : <Markdown key={j}>{part.text}</Markdown>);
+        // Render Markdown incrementally even while streaming (R4 §2.4) so headings/tables/bold appear
+        // progressively — react-markdown tolerates partial input — instead of showing seconds of raw
+        // `###`/`|`/`**`. A half-typed token renders as literal for a frame, far better than the old
+        // multi-second raw-syntax window.
+        nodes.push(<Markdown key={j}>{part.text}</Markdown>);
       } else if (part.type === 'reasoning' && part.text) {
         nodes.push(<Text key={j} fontSize="xs" color="fg.muted" fontStyle="italic">{part.text}</Text>);
       } else if (part.type === 'dynamic-tool' && part.state === 'output-available') {

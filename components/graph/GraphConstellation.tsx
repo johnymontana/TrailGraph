@@ -23,19 +23,28 @@ export function GraphConstellation({ data, highlight = [] }: { data: GraphData; 
     return [...s].sort();
   }, [data]);
 
-  // Filter to a single topic (links carrying it + the nodes they touch).
-  const view = useMemo(() => {
-    if (!topic) return data;
-    const links = data.links.filter((l) => l.topics?.includes(topic));
-    const keep = new Set<string>();
-    for (const l of links) {
-      keep.add(l.source);
-      keep.add(l.target);
+  // Topic filter (R4 §2.8): instead of removing non-matching nodes, keep the whole graph and DIM the
+  // ones that don't share the selected topic, plus report a match count — so it's clear what changed.
+  const { nodes, rels, matchCount } = useMemo(() => {
+    const base = neighborhoodToNvl(data, highlight);
+    if (!topic) return { ...base, matchCount: 0 };
+    const matchIds = new Set<string>();
+    for (const l of data.links) {
+      if (l.topics?.includes(topic)) {
+        matchIds.add(l.source);
+        matchIds.add(l.target);
+      }
     }
-    return { nodes: data.nodes.filter((n) => keep.has(n.id)), links };
-  }, [data, topic]);
-
-  const { nodes, rels } = useMemo(() => neighborhoodToNvl(view, highlight), [view, highlight]);
+    const FADE = '#c7ccd4';
+    const nodes = base.nodes.map((n) =>
+      matchIds.has(n.id) ? n : { ...n, color: FADE, size: Math.max(4, (n.size ?? 8) * 0.55) },
+    );
+    const rels = base.rels.map((r) => {
+      const carries = data.links.find((l) => `${l.source}--${l.target}` === r.id)?.topics?.includes(topic);
+      return carries ? r : { ...r, color: 'rgba(180,190,200,0.12)' };
+    });
+    return { nodes, rels, matchCount: matchIds.size };
+  }, [data, highlight, topic]);
 
   const legend = (
     <>
@@ -52,6 +61,11 @@ export function GraphConstellation({ data, highlight = [] }: { data: GraphData; 
               <option key={t} value={t}>{t}</option>
             ))}
           </select>
+          {topic ? (
+            <Text fontSize="xs" color="fg.muted" mt={1}>
+              {matchCount} park{matchCount === 1 ? '' : 's'} share {topic}
+            </Text>
+          ) : null}
         </Box>
       ) : null}
       <Stack position="absolute" bottom={3} right={3} bg="bg.panel" borderWidth="1px" borderRadius="md" px={3} py={2} shadow="md" gap={1}>

@@ -3,6 +3,7 @@ import { darkSkyRating } from './darksky';
 import { deriveBestMonths, crowdLevel, monthNames } from './visitation';
 import { classifyDifficulty, difficultyDot } from './trails';
 import { recreationUrl, parseRidbId } from './recreation';
+import { weatherCodeLabel } from './weather';
 
 describe('darkSkyRating (§5a)', () => {
   it('maps Bortle to a 1–5 star rating (darker = more stars)', () => {
@@ -68,5 +69,16 @@ describe('recreation.gov link (§5d)', () => {
     expect(parseRidbId('https://www.nps.gov/yell')).toBeNull(); // not a recreation.gov campground URL
     expect(parseRidbId('')).toBeNull();
     expect(parseRidbId(null)).toBeNull();
+  });
+});
+
+describe('weatherCodeLabel (§4)', () => {
+  it('maps WMO codes to a label + emoji', () => {
+    expect(weatherCodeLabel(0).label).toBe('Clear');
+    expect(weatherCodeLabel(3).label).toBe('Overcast');
+    expect(weatherCodeLabel(61).label).toBe('Rain');
+    expect(weatherCodeLabel(75).label).toBe('Snow');
+    expect(weatherCodeLabel(95).label).toBe('Thunderstorm');
+    expect(weatherCodeLabel(null).label).toBe('—');
   });
 });

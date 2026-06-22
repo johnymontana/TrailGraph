@@ -62,8 +62,9 @@ export async function seedTestData(): Promise<void> {
     SET grca.darkSkyCertified=true, grca.bortleScale=2,
         glac.darkSkyCertified=true, glac.bortleScale=2, glac.crowdLevel='high', glac.bestMonths=[5,9],
         glac.monthlyVisits=[12000,14000,22000,60000,210000,520000,720000,690000,380000,120000,25000,14000],
+        glac.timedEntry=true, glac.permitUrl='https://www.recreation.gov/timed-entry',
         yell.crowdLevel='very high', yell.bestMonths=[4,10],
-        ttd.difficulty='easy'
+        ttd.difficulty='easy', ttd.lengthMiles=1.5, ttd.elevationGainFt=200
     // Active Closure alert on Yellowstone mentioning the campground (two-tier alert test)
     MERGE (al:Alert {id:'alert-test-1'})
       SET al.title='Road closure near Canyon Campground', al.category='Closure', al.active=true,

@@ -12,7 +12,7 @@ import {
 } from '@chakra-ui/react';
 import NextImage from 'next/image';
 import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph } from '../../../lib/queries';
-import { darkSkyRating, monthNames, difficultyDot, type Difficulty } from '../../../lib/datasources';
+import { darkSkyRating, monthNames, difficultyDot, getWeather, type Difficulty } from '../../../lib/datasources';
 import { explainForParks } from '../../../lib/explain';
 import { getServerUserId } from '../../../lib/session';
 import { MiniMap } from '../../../components/MiniMap';
@@ -37,11 +37,14 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
   const park = await parkDetail(parkCode);
   if (!park) notFound();
 
-  const [similar, nearby, together, graph] = await Promise.all([
+  const [similar, nearby, together, graph, weather] = await Promise.all([
     similarParks(parkCode).catch(() => []),
     nearbyParks(parkCode).catch(() => []),
     oftenPlannedTogether(parkCode).catch(() => []),
     parkGraph(parkCode, { parkName: park.name as string }).catch(() => ({ nodes: [], relationships: [] })),
+    park.lat != null && park.lng != null
+      ? getWeather(park.lat as number, park.lng as number).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   // Personalized rationale (§5f): "because you liked …" on related cards, for signed-in users.
@@ -59,11 +62,23 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
   const images = park.images as { url: string; altText?: string }[];
   const campgrounds = park.campgrounds as { id: string; name: string; reservationUrl: string | null }[];
   const visitorCenters = park.visitorCenters as { id: string; name: string }[];
-  const thingsToDo = park.thingsToDo as { id: string; title: string; difficulty: Difficulty | null }[];
+  const thingsToDo = park.thingsToDo as {
+    id: string;
+    title: string;
+    difficulty: Difficulty | null;
+    length: number | null;
+    elevationGain: number | null;
+  }[];
   const bestMonths = park.bestMonths as number[];
   const monthlyVisits = park.monthlyVisits as number[];
   const dark = park.bortleScale != null ? darkSkyRating(park.bortleScale as number) : null;
   const fees = park.entranceFees as { cost: string; title: string; description: string }[];
+  // "At a glance" strip data (R4 §3): dark-sky, difficulty range, fee.
+  const diffOrder: Record<string, number> = { easy: 0, moderate: 1, strenuous: 2 };
+  const difficulties = [...new Set(thingsToDo.map((n) => n.difficulty).filter(Boolean) as Difficulty[])].sort(
+    (a, b) => diffOrder[a] - diffOrder[b],
+  );
+  const feeLabel = fees.length ? `$${Math.round(Number(fees[0].cost))}` : 'Free entry';
   const hours = park.operatingHours as { name: string; description: string }[];
 
   return (
@@ -97,11 +112,30 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
       </Box>
 
       <Heading as="h1" size="xl">{park.name as string}</Heading>
-      <HStack mt={2} mb={4} gap={3}>
+      <HStack mt={2} gap={3}>
         {park.designation ? <Badge colorPalette="blue">{park.designation as string}</Badge> : null}
         <Text color="fg.muted">
           {(park.states as { name: string }[]).map((s) => s.name).filter(Boolean).join(', ')}
         </Text>
+      </HStack>
+
+      {/* "At a glance" — surface the new data right under the title (R4 §3). */}
+      <HStack mt={2} mb={4} gap={5} wrap="wrap" fontSize="sm" color="fg.muted">
+        {dark ? (
+          <HStack gap={1}><Text aria-hidden>⭐</Text><Text>{dark.label}</Text></HStack>
+        ) : null}
+        {difficulties.length ? (
+          <HStack gap={1}><Text aria-hidden>🥾</Text><Text>{difficulties.map(difficultyDot).join(' ')} hikes</Text></HStack>
+        ) : null}
+        {park.crowdLevel ? (
+          <HStack gap={1}><Text aria-hidden>👥</Text><Text>{park.crowdLevel as string} crowds</Text></HStack>
+        ) : null}
+        <HStack gap={1}><Text aria-hidden>🎟️</Text><Text>{feeLabel}</Text></HStack>
+        {park.timedEntry ? (
+          <CLink href={(park.permitUrl as string) ?? 'https://www.recreation.gov/timed-entry'} gap={1} display="inline-flex" alignItems="center" color="fg.muted">
+            <Text aria-hidden>🎫</Text><Text>Timed entry</Text>
+          </CLink>
+        ) : null}
       </HStack>
 
       <Box mb={5}>
@@ -175,7 +209,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
           </HStack>
 
           {/* §5 conditions: dark sky + best time/crowds (structured, from the data-source adapters). */}
-          {dark || bestMonths.length > 0 || park.crowdLevel || monthlyVisits.length === 12 ? (
+          {dark || bestMonths.length > 0 || park.crowdLevel || monthlyVisits.length === 12 || weather ? (
             <Box>
               <Heading size="sm" mb={2}>Conditions</Heading>
               <Stack gap={3} fontSize="sm">
@@ -203,6 +237,22 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                     {park.crowdLevel as string}
                   </Text>
                 ) : null}
+                {weather ? (
+                  <Box>
+                    <Text>
+                      <Text as="span" color="fg.muted">Weather now: </Text>
+                      {weather.emoji} {weather.condition}
+                      {weather.currentTempF != null ? `, ${weather.currentTempF}°F` : ''}
+                    </Text>
+                    {weather.daily.length > 0 ? (
+                      <HStack gap={3} mt={1} color="fg.muted" fontSize="xs" wrap="wrap">
+                        {weather.daily.map((d) => (
+                          <Text key={d.date}>{d.emoji} {d.hiF}°/{d.loF}°</Text>
+                        ))}
+                      </HStack>
+                    ) : null}
+                  </Box>
+                ) : null}
                 {monthlyVisits.length === 12 ? (
                   <VisitationChart monthly={monthlyVisits} bestMonths={bestMonths} parkName={park.name as string} />
                 ) : null}
@@ -218,6 +268,8 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                 {thingsToDo.slice(0, 8).map((n) => (
                   <Text key={n.id} fontSize="sm">
                     {n.difficulty ? `${difficultyDot(n.difficulty)} ` : ''}{n.title}
+                    {n.length != null ? <Text as="span" color="fg.muted"> · {n.length} mi</Text> : null}
+                    {n.elevationGain != null ? <Text as="span" color="fg.muted"> · {n.elevationGain} ft gain</Text> : null}
                   </Text>
                 ))}
               </Stack>
@@ -270,7 +322,9 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
               <Box key={p.parkCode} minW={0}>
                 <ParkCard park={p} />
                 {because(p.parkCode) ? (
-                  <Text fontSize="xs" color="fg.muted" mt={1} lineClamp={2}>{because(p.parkCode)}</Text>
+                  <CLink href="/me" display="block" fontSize="xs" color="fg.muted" mt={1} title="See this in Your memory">
+                    {because(p.parkCode)}
+                  </CLink>
                 ) : null}
               </Box>
             ))}
@@ -286,7 +340,9 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
               <Box key={p.parkCode} minW={0}>
                 <ParkCard park={p} miles={p.miles} />
                 {because(p.parkCode) ? (
-                  <Text fontSize="xs" color="fg.muted" mt={1} lineClamp={2}>{because(p.parkCode)}</Text>
+                  <CLink href="/me" display="block" fontSize="xs" color="fg.muted" mt={1} title="See this in Your memory">
+                    {because(p.parkCode)}
+                  </CLink>
                 ) : null}
               </Box>
             ))}

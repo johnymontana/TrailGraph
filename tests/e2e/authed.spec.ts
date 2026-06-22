@@ -62,6 +62,16 @@ test('saving a park records it under "Parks you\'ve considered" on /me (§5)', a
   await expect(page.getByText('Grand Canyon National Park')).toBeVisible({ timeout: 15_000 });
 });
 
+test('"Clear all" empties considered parks (R3 §2.7)', async ({ page }) => {
+  await signUp(page);
+  await page.goto('/parks/grca');
+  await page.getByRole('button', { name: /Save/ }).click();
+  await page.goto('/me');
+  await expect(page.getByText('Grand Canyon National Park')).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: 'Clear all' }).click();
+  await expect(page.getByText('None yet.')).toBeVisible();
+});
+
 test('onboarding seeds a preference that shows on /me (§5)', async ({ page }) => {
   await signUp(page);
   await page.goto('/onboarding');

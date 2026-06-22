@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { neighborhoodToNvl, parkNodeNav, HUB_DEGREE } from './graph-nvl';
+import { neighborhoodToNvl, parkNodeNav, labelColor, HUB_DEGREE } from './graph-nvl';
+
+describe('labelColor (per-park graph node palette)', () => {
+  it('maps known labels to distinct colors and unknowns to a neutral gray', () => {
+    expect(labelColor('Park')).toBe('#1864ab');
+    expect(labelColor('Activity')).toBe('#2f9e44');
+    expect(labelColor('Topic')).toBe('#f08c00');
+    expect(labelColor('Whatever')).toBe('#868e96');
+  });
+});
 
 describe('neighborhoodToNvl (/graph → NVL)', () => {
   const data = {

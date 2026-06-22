@@ -9,6 +9,7 @@ import { forYou } from '../../lib/recommend';
 import { applyTrailDifficulty } from '../../lib/datasources/trails';
 import { applyDarkSky } from '../../lib/datasources/darksky';
 import { applyReservations } from '../../lib/datasources/recreation';
+import { applyPermits } from '../../lib/datasources/permits';
 
 /**
  * §5 data sources + weighted recommendations against a real Neo4j (gated by RUN_INTEGRATION=1). The
@@ -54,6 +55,14 @@ describeIntegration('§5 data sources + personalization', () => {
       `MATCH (c:Campground {id:'cg-canyon'}) RETURN c.ridbId AS ridbId`,
     );
     expect(rows[0]?.ridbId).toBe('232449');
+  });
+
+  it('applyPermits flags timed-entry parks + sets a permit URL (§4)', async () => {
+    const n = await applyPermits([{ parkCode: 'grca', url: 'https://www.recreation.gov/timed-entry' }]);
+    expect(n).toBe(1);
+    const grca = await parkDetail('grca');
+    expect(grca?.timedEntry).toBe(true);
+    expect(grca?.permitUrl).toBe('https://www.recreation.gov/timed-entry');
   });
 
   it('forYou ranks by preference weight; muting the only preference falls back to popular', async () => {

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { describeIntegration } from './db';
 import { seedTestData } from '../../scripts/seed-test-data';
 import { closeDriver, writeGraph } from '../../lib/neo4j';
-import { createTrip, addStop, getTrip, removeStop, checkTripAlerts, deleteTrip } from '../../lib/trips';
+import { createTrip, addStop, getTrip, removeStop, renameTrip, checkTripAlerts, deleteTrip } from '../../lib/trips';
 
 describeIntegration('trip service (Neo4j)', () => {
   const userId = `test-${randomUUID()}`;
@@ -81,5 +81,13 @@ describeIntegration('trip service (Neo4j)', () => {
     const remaining = (after!.stops ?? []).filter(Boolean) as { order: number }[];
     expect(remaining).toHaveLength(1);
     expect(remaining[0].order).toBe(0);
+  });
+
+  it('renames a trip (R3 §4.5), userId-scoped', async () => {
+    await renameTrip(userId, tripId, 'Renamed Loop');
+    expect((await getTrip(userId, tripId))!.name).toBe('Renamed Loop');
+    // another user can't rename it
+    await renameTrip(`other-${randomUUID()}`, tripId, 'Hijacked');
+    expect((await getTrip(userId, tripId))!.name).toBe('Renamed Loop');
   });
 });

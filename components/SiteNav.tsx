@@ -1,6 +1,7 @@
 'use client';
 import { Box, Flex, Link as CLink, Spacer, Menu, IconButton } from '@chakra-ui/react';
 import NextLink from 'next/link';
+import { ColorModeButton } from './ui/color-mode-button';
 
 const LINKS = [
   { href: '/explore', label: 'Explore' },
@@ -25,17 +26,19 @@ export function SiteNav() {
         </CLink>
         <Spacer />
 
-        {/* Desktop: inline links */}
+        {/* Desktop: inline links + theme toggle */}
         <Flex align="center" gap={6} display={{ base: 'none', md: 'flex' }}>
           {LINKS.map((l) => (
             <CLink key={l.href} asChild>
               <NextLink href={l.href}>{l.label}</NextLink>
             </CLink>
           ))}
+          <ColorModeButton />
         </Flex>
 
-        {/* Mobile: hamburger menu */}
-        <Box display={{ base: 'block', md: 'none' }}>
+        {/* Mobile: theme toggle + hamburger menu (both always rendered; shown via CSS) */}
+        <Box display={{ base: 'flex', md: 'none' }} alignItems="center" gap={1}>
+          <ColorModeButton />
           <Menu.Root>
             <Menu.Trigger asChild>
               <IconButton aria-label="Open menu" variant="outline" size="sm">☰</IconButton>

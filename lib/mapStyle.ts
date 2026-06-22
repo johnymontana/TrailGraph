@@ -21,7 +21,7 @@ export function registerMapProtocols() {
 
 const GLYPHS = 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf';
 
-export function mapStyle(): string | StyleSpecification {
+export function mapStyle(theme: 'light' | 'dark' = 'light'): string | StyleSpecification {
   const url = process.env.NEXT_PUBLIC_MAP_TILES_URL;
   if (!url) return 'https://demotiles.maplibre.org/style.json';
   if (url.endsWith('.json')) return url;
@@ -33,7 +33,8 @@ export function mapStyle(): string | StyleSpecification {
         sources: {
           protomaps: { type: 'vector', url: `pmtiles://${url}`, attribution: '© OpenStreetMap, © Protomaps' },
         },
-        layers: layers('protomaps', namedTheme('light')),
+        // Match the app's color mode (R4 §2.5) — protomaps-themes-base ships light + dark themes.
+        layers: layers('protomaps', namedTheme(theme === 'dark' ? 'dark' : 'light')),
       } as StyleSpecification;
     } catch {
       return 'https://demotiles.maplibre.org/style.json';

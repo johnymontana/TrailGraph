@@ -3,9 +3,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // maplibre-gl / pmtiles / protomaps-themes-base expect a browser; stub them for node.
 vi.mock('maplibre-gl', () => ({ default: { addProtocol: vi.fn() } }));
 vi.mock('pmtiles', () => ({ Protocol: class { tile = vi.fn(); } }));
+const namedTheme = vi.fn((_name: string) => ({}));
 vi.mock('protomaps-themes-base', () => ({
   layers: () => [{ id: 'water', type: 'fill' }],
-  namedTheme: () => ({}),
+  namedTheme: (name: string) => namedTheme(name),
 }));
 
 import { mapStyle, US_CENTER, US_BOUNDS } from './mapStyle';
@@ -35,6 +36,19 @@ describe('mapStyle', () => {
     expect(s.version).toBe(8);
     expect(s.sources.protomaps).toMatchObject({ type: 'vector', url: 'pmtiles://https://cdn.example/us.pmtiles' });
     expect(Array.isArray(s.layers)).toBe(true);
+  });
+
+  it('selects the protomaps theme matching the color mode (R4 §2.5)', () => {
+    process.env.NEXT_PUBLIC_MAP_TILES_URL = 'https://cdn.example/us.pmtiles';
+    namedTheme.mockClear();
+    mapStyle('dark');
+    expect(namedTheme).toHaveBeenCalledWith('dark');
+    namedTheme.mockClear();
+    mapStyle('light');
+    expect(namedTheme).toHaveBeenCalledWith('light');
+    namedTheme.mockClear();
+    mapStyle(); // default
+    expect(namedTheme).toHaveBeenCalledWith('light');
   });
 });
 

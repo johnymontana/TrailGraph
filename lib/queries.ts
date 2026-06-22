@@ -78,7 +78,7 @@ export async function parkDetail(parkCode: string) {
     alerts: { id: string; category: string; title: string; url: string | null; description: string }[];
     campgrounds: { id: string; name: string; reservationUrl: string | null }[];
     visitorCenters: { id: string; name: string }[];
-    thingsToDo: { id: string; title: string; difficulty: string | null }[];
+    thingsToDo: { id: string; title: string; difficulty: string | null; length: number | null; elevationGain: number | null }[];
   }>(
     // Each list is its own CALL subquery to avoid a cartesian product across relationship types.
     `
@@ -91,7 +91,7 @@ export async function parkDetail(parkCode: string) {
     CALL { WITH p OPTIONAL MATCH (c:Campground)-[:IN_PARK]->(p)
            RETURN collect(DISTINCT {id: c.id, name: c.name, reservationUrl: c.reservationUrl}) AS campgrounds }
     CALL { WITH p OPTIONAL MATCH (v:VisitorCenter)-[:IN_PARK]->(p) RETURN collect(DISTINCT {id: v.id, name: v.name}) AS visitorCenters }
-    CALL { WITH p OPTIONAL MATCH (n:ThingToDo)-[:AT_PARK]->(p) RETURN collect(DISTINCT {id: n.id, title: n.title, difficulty: n.difficulty}) AS thingsToDo }
+    CALL { WITH p OPTIONAL MATCH (n:ThingToDo)-[:AT_PARK]->(p) RETURN collect(DISTINCT {id: n.id, title: n.title, difficulty: n.difficulty, length: n.lengthMiles, elevationGain: n.elevationGainFt}) AS thingsToDo }
     RETURN p{.*} AS p, p.location.latitude AS lat, p.location.longitude AS lng,
       activities, topics, states, alerts, campgrounds, visitorCenters, thingsToDo
     `,
@@ -135,6 +135,8 @@ export async function parkDetail(parkCode: string) {
     bestMonths: (p.bestMonths as number[]) ?? [],
     monthlyVisits: (p.monthlyVisits as number[]) ?? [],
     annualVisits: (p.annualVisits as number) ?? null,
+    timedEntry: (p.timedEntry as boolean) ?? false,
+    permitUrl: (p.permitUrl as string) ?? null,
   };
 }
 
@@ -403,11 +405,28 @@ export async function parkGraph(
 }
 
 /** "Vibe" search (A4): vector candidates → graph re-rank (ADR-012). */
-export async function vibeSearch(query: string, limit = 15) {
+export async function vibeSearch(
+  query: string,
+  opts: { limit?: number; stateCodes?: string[]; activity?: string; topic?: string } = {},
+) {
+  const { limit = 15, stateCodes, activity, topic } = opts;
   const [vector] = await embed([query]);
+  // Pull more vector candidates when facets will prune them, so enough survive the filter (R4 §2.3:
+  // intent-aware ranking — semantic candidates narrowed by region/activity/topic, then ranked by score).
+  const hasFacets = (stateCodes?.length ?? 0) > 0 || !!activity || !!topic;
   return readGraph<ParkSummary & { score: number }>(
     `CALL db.index.vector.queryNodes('park_embedding', toInteger($k), $vector) YIELD node AS p, score
+     WHERE ($stateCodes IS NULL OR EXISTS { (p)-[:LOCATED_IN]->(s:State) WHERE s.code IN $stateCodes })
+       AND ($activity IS NULL OR (p)-[:OFFERS]->(:Activity {name:$activity}))
+       AND ($topic IS NULL OR (p)-[:HAS_TOPIC]->(:Topic {name:$topic}))
      RETURN ${PARK_SUMMARY_RETURN}, score ORDER BY score DESC LIMIT toInteger($limit)`,
-    { vector, k: limit * 2, limit },
+    {
+      vector,
+      k: limit * (hasFacets ? 6 : 2),
+      limit,
+      stateCodes: stateCodes?.length ? stateCodes : null,
+      activity: activity ?? null,
+      topic: topic ?? null,
+    },
   );
 }

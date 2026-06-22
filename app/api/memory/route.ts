@@ -1,6 +1,6 @@
 import { getUserId } from '../../../lib/session';
 import { getUserMemory } from '../../../lib/memory-graph';
-import { deletePreference, deleteConsidered, setPreferenceFeedback, setPreferenceWeight, recordPreference } from '../../../lib/bridges';
+import { deletePreference, deleteConsidered, deleteAllConsidered, setPreferenceFeedback, setPreferenceWeight, recordPreference } from '../../../lib/bridges';
 
 /** "Your memory" API (E3/E4). All actions userId-scoped from the session (R4). */
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   const userId = await getUserId(req);
   if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
   const body = (await req.json()) as {
-    op: 'deletePreference' | 'deleteConsidered' | 'feedback' | 'addPreference' | 'setWeight';
+    op: 'deletePreference' | 'deleteConsidered' | 'clearConsidered' | 'feedback' | 'addPreference' | 'setWeight';
     kind?: 'activity' | 'topic';
     name?: string;
     parkCode?: string;
@@ -34,6 +34,9 @@ export async function POST(req: Request) {
     case 'addPreference':
       if (!body.category || !body.value) return Response.json({ error: 'category/value required' }, { status: 400 });
       await recordPreference({ userId, category: body.category, value: body.value }); // NAMS + canonical bridge
+      break;
+    case 'clearConsidered':
+      await deleteAllConsidered(userId);
       break;
     case 'deletePreference':
       if (!body.kind || !body.name) return Response.json({ error: 'kind/name required' }, { status: 400 });

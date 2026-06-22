@@ -6,9 +6,9 @@ import { ThemeProvider, useTheme, type ThemeProviderProps } from 'next-themes';
  * `next-themes` writing a `class` on <html> (matches Chakra's `.dark &` token condition); the root
  * layout sets `suppressHydrationWarning` because that class is written before React hydrates.
  *
- * TrailGraph is light-only for now (`enableSystem={false}`, `defaultTheme="light"`), so the markup is
- * deterministic server/client. Flip `enableSystem` on to support a real dark mode later — the hooks
- * below are already wired.
+ * Fresh visitors follow their OS preference (`defaultTheme="system"` + `enableSystem`); the nav toggle
+ * (`ColorModeButton`) stores an explicit, persistent choice. Any component that renders theme-dependent
+ * markup must gate on a mounted flag (see `color-mode-button.tsx`) so SSR === first CSR (R4 §2.2).
  */
 export type ColorModeProviderProps = ThemeProviderProps;
 
@@ -16,8 +16,8 @@ export function ColorModeProvider(props: ColorModeProviderProps) {
   return (
     <ThemeProvider
       attribute="class"
-      defaultTheme="light"
-      enableSystem={false}
+      defaultTheme="system"
+      enableSystem
       disableTransitionOnChange
       {...props}
     />

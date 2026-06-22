@@ -36,7 +36,14 @@ test('park detail shows description, alert, related parks, and actions', async (
 test('park detail shows §5 conditions (dark sky) and difficulty dots', async ({ page }) => {
   await page.goto('/parks/grca');
   await expect(page.getByRole('heading', { name: 'Conditions' })).toBeVisible();
-  await expect(page.getByText(/dark skies/i)).toBeVisible(); // seeded Bortle 2 → "Very/Excellent dark skies"
+  // "dark skies" now appears in both the at-a-glance strip and the Conditions panel → scope to first.
+  await expect(page.getByText(/dark skies/i).first()).toBeVisible(); // seeded Bortle 2 → "Excellent dark skies"
+});
+
+test('park header "at a glance" strip shows timed-entry + dark sky (R4 §3/§4)', async ({ page }) => {
+  await page.goto('/parks/glac'); // seeded: dark-sky, high crowds, timed entry
+  await expect(page.getByText(/Timed entry/i).first()).toBeVisible();
+  await expect(page.getByText(/dark skies/i).first()).toBeVisible();
 });
 
 test('park detail renders the monthly visitation chart (§5b, Chakra charts)', async ({ page }) => {
@@ -106,6 +113,17 @@ test('activity chips on a park page are traversable to Explore (graph traversal,
   await chip.click();
   await expect(page).toHaveURL(/activity=Astronomy/);
   await expect(page.getByText('Grand Canyon National Park')).toBeVisible();
+});
+
+test('theme toggle switches color mode (R4 §2.2)', async ({ page }) => {
+  await page.goto('/');
+  const toggle = page.getByRole('button', { name: /mode/i }).first(); // sun/moon toggle in the nav
+  await expect(toggle).toBeVisible();
+  const before = await page.evaluate(() => document.documentElement.className);
+  await toggle.click();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.className))
+    .not.toBe(before); // <html> class flips light↔dark
 });
 
 test('mobile nav exposes the hamburger menu (CSS-responsive SiteNav, R3 §4 carryover)', async ({ page }) => {

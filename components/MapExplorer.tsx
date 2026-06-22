@@ -5,6 +5,7 @@ import type { FeatureCollection, Point } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Box, Stack, Checkbox, Text, Spinner, HStack } from '@chakra-ui/react';
 import { mapStyle, US_CENTER, US_BOUNDS, registerMapProtocols, attachBasemapFallback } from '../lib/mapStyle';
+import { useColorMode } from './ui/color-mode';
 import type { ParkSummary } from '../lib/queries';
 
 /**
@@ -20,9 +21,10 @@ const POI_LAYERS = [
 
 type LayerKey = (typeof POI_LAYERS)[number]['key'];
 
-export function MapExplorer() {
+export function MapExplorer({ initialBounds }: { initialBounds?: [[number, number], [number, number]] | null }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
+  const { colorMode } = useColorMode();
   // Default the Campgrounds layer on (§2.11) so the map isn't empty on first load.
   const enabledRef = useRef<Record<string, boolean>>({ campgrounds: true });
   const [enabled, setEnabled] = useState<Record<string, boolean>>({ campgrounds: true });
@@ -119,7 +121,7 @@ export function MapExplorer() {
     registerMapProtocols();
     let map: MlMap;
     try {
-      map = new maplibregl.Map({ container: ref.current, style: mapStyle(), center: US_CENTER, zoom: 3.2 });
+      map = new maplibregl.Map({ container: ref.current, style: mapStyle(colorMode === 'dark' ? 'dark' : 'light'), center: US_CENTER, zoom: 3.2 });
       attachBasemapFallback(map);
     } catch (err) {
       console.warn('[MapExplorer] map unavailable (WebGL?):', (err as Error).message);
@@ -174,14 +176,17 @@ export function MapExplorer() {
       for (const { key } of POI_LAYERS) {
         if (enabledRef.current[key]) map.setLayoutProperty(`poi-${key}`, 'visibility', 'visible');
       }
-      map.fitBounds(US_BOUNDS, { padding: 20, duration: 0 });
+      // Center on the user's considered parks when we have them (R4 §4), else the continental US.
+      map.fitBounds(initialBounds ?? US_BOUNDS, { padding: initialBounds ? 64 : 20, maxZoom: 9, duration: 0 });
       loadAll(map);
       map.on('moveend', () => loadAll(map));
     });
 
     return () => map.remove();
+    // Re-init on color-mode change so the basemap matches light/dark (R4 §2.5); the 'load' handler
+    // re-adds the cluster + POI layers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [colorMode]);
 
   return (
     <>

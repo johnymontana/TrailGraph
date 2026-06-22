@@ -12,6 +12,7 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
   const [mem, setMem] = useState<UserMemory>(initial);
   const [busy, setBusy] = useState(false);
   const [learning, setLearning] = useState(true);
+  const [showAllConsidered, setShowAllConsidered] = useState(false);
 
   // On load, reconcile NAMS-extracted chat preferences into the graph so implicit prefs show up
   // here (§2.1/§5), then refresh. Eventually-consistent — this "catches up" the display.
@@ -86,18 +87,31 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
       </Box>
 
       <Box>
-        <Heading size="sm" mb={3}>Parks you&apos;ve considered</Heading>
+        <HStack justify="space-between" mb={3}>
+          <Heading size="sm">
+            Parks you&apos;ve considered{mem.considered.length ? ` (${mem.considered.length})` : ''}
+          </Heading>
+          {mem.considered.length > 0 ? (
+            <Button size="xs" variant="ghost" colorPalette="red" disabled={busy}
+              onClick={() => act({ op: 'clearConsidered' })}>Clear all</Button>
+          ) : null}
+        </HStack>
         {mem.considered.length === 0 ? (
           <Text color="fg.muted" fontSize="sm">None yet.</Text>
         ) : (
           <Stack gap={2}>
-            {mem.considered.map((c) => (
+            {(showAllConsidered ? mem.considered : mem.considered.slice(0, 8)).map((c) => (
               <HStack key={c.parkCode} borderWidth="1px" borderRadius="md" p={2}>
                 <CLink asChild flex="1"><NextLink href={`/parks/${c.parkCode}`}>{c.name}</NextLink></CLink>
                 <Button size="xs" colorPalette="red" variant="ghost" disabled={busy}
                   onClick={() => act({ op: 'deleteConsidered', parkCode: c.parkCode })}>Delete</Button>
               </HStack>
             ))}
+            {mem.considered.length > 8 ? (
+              <Button size="xs" variant="ghost" alignSelf="start" onClick={() => setShowAllConsidered((v) => !v)}>
+                {showAllConsidered ? 'Show fewer' : `Show all ${mem.considered.length}`}
+              </Button>
+            ) : null}
           </Stack>
         )}
       </Box>

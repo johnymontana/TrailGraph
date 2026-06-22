@@ -1,9 +1,14 @@
 import { Box, Heading, SimpleGrid, Stack, Text, Input, Button, NativeSelect, Flex, Badge, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
+import { unstable_cache } from 'next/cache';
 import { searchParks, facets } from '../../lib/queries';
 import { forYou } from '../../lib/recommend';
 import { getServerUserId } from '../../lib/session';
 import { ParkCard } from '../../components/ParkCard';
+
+// Facets are global + rarely change → cache for an hour (R4 §2.9). The per-user `forYou` and the
+// param-specific park search stay dynamic for correctness.
+const cachedFacets = unstable_cache(facets, ['explore-facets'], { revalidate: 3600 });
 
 /**
  * Explore (A1, A3) — RSC. Faceted + full-text search. The filter form is a plain GET form so it
@@ -29,7 +34,7 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
       limit: pageSize,
       offset: (page - 1) * pageSize,
     }),
-    facets(),
+    cachedFacets(),
     userId ? forYou(userId, { limit: 4 }) : Promise.resolve(null),
   ]);
   const results = search.items;
@@ -62,9 +67,9 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
               <Box key={p.parkCode}>
                 <ParkCard park={p} />
                 {recs.source === 'personalized' && p.matched.length > 0 ? (
-                  <Text fontSize="xs" color="fg.muted" mt={1}>
+                  <CLink href="/me" display="block" fontSize="xs" color="fg.muted" mt={1} title="See this in Your memory">
                     Because you liked {p.matched.slice(0, 3).join(', ')}
-                  </Text>
+                  </CLink>
                 ) : null}
               </Box>
             ))}

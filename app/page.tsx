@@ -1,4 +1,4 @@
-import { Box, Heading, Text, Button, HStack, SimpleGrid, Stack, Badge } from '@chakra-ui/react';
+import { Box, Heading, Text, Button, HStack, SimpleGrid, Stack, Badge, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
 import { searchParks } from '../lib/queries';
 import { forYou } from '../lib/recommend';
@@ -45,7 +45,9 @@ export default async function Home() {
               <Box key={p.parkCode} minW={0}>
                 <ParkCard park={p} />
                 {p.matched.length > 0 ? (
-                  <Text fontSize="xs" color="fg.muted" mt={1} lineClamp={2}>Because you liked {p.matched.slice(0, 3).join(', ')}</Text>
+                  <CLink href="/me" display="block" fontSize="xs" color="fg.muted" mt={1} title="See this in Your memory">
+                    Because you liked {p.matched.slice(0, 3).join(', ')}
+                  </CLink>
                 ) : null}
               </Box>
             ))}

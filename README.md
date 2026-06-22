@@ -102,8 +102,12 @@ A companion deep-dive on this integration is written up as a blog post ([lyonwj.
   builds trips for you — remembering what you like across sessions.
 - **Your memory** (`/me`): see, tune (boost/down-rank), and delete everything the app remembers — with
   durable deletes (tombstones) so extraction won't resurrect them.
-- **Conditions** on each park: dark-sky/Bortle rating, best months + a monthly-visitation chart, and
-  trail difficulty — graph-native data behind swappable adapters.
+- **Conditions** on each park: dark-sky/Bortle rating, best months + a monthly-visitation chart, trail
+  difficulty/length, current weather, and timed-entry status — graph-native data behind swappable adapters.
+- **Dark mode** (system-aware, with a toggle in the nav) across the whole app, including the map basemap.
+
+> Builds use the **webpack** bundler (`next dev/build --webpack`) — Chakra v3 + next-themes hit a
+> hydration-ordering bug under Next 16's default Turbopack; webpack is the documented fix.
 
 ---
 

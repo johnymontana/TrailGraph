@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import maplibregl, { type Map as MlMap } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { mapStyle, US_CENTER, registerMapProtocols, attachBasemapFallback } from '../../lib/mapStyle';
+import { useColorMode } from '../ui/color-mode';
 
 /** Itinerary overlay (B4): numbered stop markers + a route line for the selected trip. */
 export interface TripMapStop {
@@ -15,13 +16,14 @@ export interface TripMapStop {
 export function TripMap({ stops }: { stops: TripMapStop[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
+  const { colorMode } = useColorMode();
 
   useEffect(() => {
     if (!ref.current) return;
     registerMapProtocols();
     let map: MlMap;
     try {
-      map = new maplibregl.Map({ container: ref.current, style: mapStyle(), center: US_CENTER, zoom: 3 });
+      map = new maplibregl.Map({ container: ref.current, style: mapStyle(colorMode === 'dark' ? 'dark' : 'light'), center: US_CENTER, zoom: 3 });
       attachBasemapFallback(map);
     } catch (err) {
       console.warn('[TripMap] map unavailable (WebGL?):', (err as Error).message);
@@ -31,7 +33,7 @@ export function TripMap({ stops }: { stops: TripMapStop[] }) {
     map.on('load', () => render(map, stops));
     return () => map.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [colorMode]);
 
   // Re-render markers/line when stops change.
   useEffect(() => {

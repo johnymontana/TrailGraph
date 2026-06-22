@@ -47,3 +47,4 @@ pnpm-debug.log*
 # root markdown (keep README.md)
 /*.md
 !/README.md
+.vercel

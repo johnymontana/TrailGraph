@@ -131,3 +131,8 @@ export async function deleteConsidered(userId: string, parkCode: string): Promis
     { userId, parkCode },
   );
 }
+
+/** Clear every CONSIDERED bridge for the user (R4 §2.7 — "considered" grows unbounded). */
+export async function deleteAllConsidered(userId: string): Promise<void> {
+  await writeGraph(`MATCH (:User {userId:$userId})-[r:CONSIDERED]->(:Park) DELETE r`, { userId });
+}
