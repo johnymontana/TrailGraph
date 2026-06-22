@@ -37,8 +37,9 @@ pnpm-debug.log*
 # self-hosted basemap extract (large; build with `pnpm build:basemap`, host on a CDN for prod)
 /public/basemap/*.pmtiles
 
-# dot directories
+# dot directories (hide .eve/, .idea/, etc.) — but keep the CI workflow
 .*/
+!.github/
 
 # blog
 /blog/
