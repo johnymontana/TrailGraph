@@ -51,6 +51,17 @@ export function composeArticleText(a: { title?: string; description?: string }):
   return [a.title, a.description].filter(Boolean).join('\n');
 }
 
+/**
+ * Embedding models cap input length (text-embedding-3-small: 8192 tokens). Some `:Place` bodies far
+ * exceed that, so we clamp by characters as a tokenizer-free guard before sending. ~12k chars is well
+ * under 8192 tokens even for dense English+markup (~2–4 chars/token), and the leading text carries the
+ * semantic gist a search needs. Deterministic, so content-hash gating stays stable.
+ */
+export const MAX_EMBED_CHARS = 12000;
+export function clampForEmbedding(text: string): string {
+  return text.length > MAX_EMBED_CHARS ? text.slice(0, MAX_EMBED_CHARS) : text;
+}
+
 export async function embed(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
   const res = await fetch(`${GATEWAY_URL}/embeddings`, {
@@ -59,7 +70,7 @@ export async function embed(texts: string[]): Promise<number[][]> {
       Authorization: `Bearer ${env.models.aiGatewayKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ model: env.models.embedding, input: texts }),
+    body: JSON.stringify({ model: env.models.embedding, input: texts.map(clampForEmbedding) }),
   });
   if (!res.ok) throw new Error(`AI Gateway embeddings ${res.status}: ${await res.text()}`);
   const json = (await res.json()) as { data: { embedding: number[] }[] };

@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { composeParkText, composePlaceText, composePersonText, composeArticleText, contentHash } from './embeddings';
+import {
+  composeParkText,
+  composePlaceText,
+  composePersonText,
+  composeArticleText,
+  contentHash,
+  clampForEmbedding,
+  MAX_EMBED_CHARS,
+} from './embeddings';
 
 describe('composeParkText', () => {
   it('folds relationships into the embedding document and drops empties', () => {
@@ -41,6 +49,19 @@ describe('composeArticleText', () => {
   it('joins title + description and drops empties', () => {
     expect(composeArticleText({ title: 'Geysers', description: 'How they work.' })).toBe('Geysers\nHow they work.');
     expect(composeArticleText({ title: 'Just a title' })).toBe('Just a title');
+  });
+});
+
+describe('clampForEmbedding (8192-token input guard)', () => {
+  it('truncates oversized text to the char cap and leaves short text untouched', () => {
+    expect(clampForEmbedding('short').length).toBe(5);
+    const big = 'x'.repeat(MAX_EMBED_CHARS + 5000);
+    expect(clampForEmbedding(big).length).toBe(MAX_EMBED_CHARS);
+  });
+
+  it('is deterministic so content-hash gating stays stable', () => {
+    const big = 'y'.repeat(MAX_EMBED_CHARS + 100);
+    expect(clampForEmbedding(big)).toBe(clampForEmbedding(big));
   });
 });
 
