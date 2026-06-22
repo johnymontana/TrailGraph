@@ -81,3 +81,46 @@ test('onboarding seeds a preference that shows on /me (§5)', async ({ page }) =
   // The canonical preference (Astronomy) lands as a PREFERS bridge and renders on the memory page.
   await expect(page.getByText('Astronomy')).toBeVisible({ timeout: 15_000 });
 });
+
+test('signed-in nav shows an account menu with sign-out (ADR-038 P0.1)', async ({ page }) => {
+  await signUp(page);
+  await page.goto('/');
+
+  // The "Sign in" link is replaced by the account control once the session resolves.
+  const account = page.getByRole('button', { name: 'Account menu' });
+  await expect(account).toBeVisible();
+  await account.click();
+
+  await expect(page.getByText(/Signed in as/)).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Your memory' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Edit preferences' })).toBeVisible();
+
+  // Sign out returns to the signed-out state.
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  await expect(page.getByRole('link', { name: 'Sign in' }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Account menu' })).toHaveCount(0);
+});
+
+test('considered parks show a "why" provenance hint on /me (ADR-039 #10)', async ({ page }) => {
+  await signUp(page);
+  await page.goto('/parks/grca');
+  await page.getByRole('button', { name: /Save/ }).click(); // ParkActions Save → source 'saved'
+
+  await page.goto('/me');
+  await expect(page.getByText('Grand Canyon National Park')).toBeVisible({ timeout: 15_000 });
+  // The CONSIDERED edge's source ('saved') is surfaced as a human-readable reason.
+  await expect(page.getByText('You saved this')).toBeVisible();
+});
+
+test('onboarding ?welcome=1 bounces a returning user with preferences to /explore (ADR-038)', async ({ page }) => {
+  await signUp(page);
+  // Seed a preference first so this user is no longer "fresh".
+  await page.goto('/onboarding');
+  await page.getByRole('button', { name: 'Dark skies' }).click();
+  await page.getByRole('button', { name: /Save/ }).click();
+  await page.waitForURL('**/me');
+
+  // The magic-link welcome landing must not dead-end an existing user on the seed screen.
+  await page.goto('/onboarding?welcome=1');
+  await expect(page).toHaveURL(/\/explore/);
+});

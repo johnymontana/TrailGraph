@@ -2,6 +2,8 @@ import { Box, Heading, SimpleGrid, Stack, Text, Badge, Flex, Link as CLink } fro
 import NextLink from 'next/link';
 import { thematicTrail, trailThemes } from '../../lib/queries';
 import { ParkCard } from '../../components/ParkCard';
+import { ThemeChips, type ThemeChipItem } from '../../components/trails/ThemeChips';
+import { TrailMiniGraph } from '../../components/graph/TrailMiniGraph';
 
 /**
  * Thematic trails (NPS-expansion P0 #2) — RSC. A "trail" is the set of parks connected by a
@@ -19,11 +21,28 @@ export default async function TrailsPage({ searchParams }: { searchParams: Promi
   const selected = person || topic;
 
   const [themes, trail] = await Promise.all([
-    trailThemes(),
+    // Pull the full taxonomy (capped high) — ThemeChips collapses + searches client-side so the list
+    // no longer looks silently truncated (friction #6).
+    trailThemes(500),
     selected ? thematicTrail({ person, topic }) : Promise.resolve([]),
   ]);
 
   const graphHref = person ? `/graph?person=${encodeURIComponent(person)}` : topic ? `/graph?topic=${encodeURIComponent(topic)}` : '/graph';
+
+  const peopleChips: ThemeChipItem[] = themes.people.map((p) => ({
+    key: p.title,
+    label: p.title,
+    parks: p.parks,
+    href: `/trails?person=${encodeURIComponent(p.title)}`,
+    active: person === p.title,
+  }));
+  const topicChips: ThemeChipItem[] = themes.topics.map((t) => ({
+    key: t.name,
+    label: t.name,
+    parks: t.parks,
+    href: `/trails?topic=${encodeURIComponent(t.name)}`,
+    active: topic === t.name,
+  }));
 
   return (
     <Box maxW="6xl" mx="auto" px={{ base: 4, md: 8 }} py={6}>
@@ -39,38 +58,18 @@ export default async function TrailsPage({ searchParams }: { searchParams: Promi
       <Stack gap={5} mb={8}>
         <Box>
           <Heading size="sm" mb={2}>People &amp; stories</Heading>
-          {themes.people.length === 0 ? (
+          {peopleChips.length === 0 ? (
             <Text color="fg.muted" fontSize="sm">No multi-park figures yet — run the data sync to populate them.</Text>
           ) : (
-            <Flex wrap="wrap" gap={2}>
-              {themes.people.map((p) => (
-                <CLink key={p.title} asChild>
-                  <NextLink href={`/trails?person=${encodeURIComponent(p.title)}`}>
-                    <Badge size="lg" colorPalette={person === p.title ? 'purple' : 'gray'} px={3} py={1} cursor="pointer">
-                      {p.title} <Text as="span" color="fg.muted">· {p.parks}</Text>
-                    </Badge>
-                  </NextLink>
-                </CLink>
-              ))}
-            </Flex>
+            <ThemeChips items={peopleChips} activeColor="purple" />
           )}
         </Box>
         <Box>
           <Heading size="sm" mb={2}>Topics</Heading>
-          {themes.topics.length === 0 ? (
+          {topicChips.length === 0 ? (
             <Text color="fg.muted" fontSize="sm">No topics span enough parks yet.</Text>
           ) : (
-            <Flex wrap="wrap" gap={2}>
-              {themes.topics.map((t) => (
-                <CLink key={t.name} asChild>
-                  <NextLink href={`/trails?topic=${encodeURIComponent(t.name)}`}>
-                    <Badge size="lg" colorPalette={topic === t.name ? 'green' : 'gray'} px={3} py={1} cursor="pointer">
-                      {t.name} <Text as="span" color="fg.muted">· {t.parks}</Text>
-                    </Badge>
-                  </NextLink>
-                </CLink>
-              ))}
-            </Flex>
+            <ThemeChips items={topicChips} activeColor="green" />
           )}
         </Box>
       </Stack>
@@ -90,11 +89,18 @@ export default async function TrailsPage({ searchParams }: { searchParams: Promi
           {trail.length === 0 ? (
             <Text color="fg.muted">No parks found for this theme.</Text>
           ) : (
-            <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={4}>
-              {trail.map((p) => (
-                <ParkCard key={p.parkCode} park={p} />
-              ))}
-            </SimpleGrid>
+            <>
+              {/* See the trail as a connected graph before the card grid (ADR-039, friction #5). */}
+              <TrailMiniGraph
+                themeLabel={selected}
+                parks={trail.map((p) => ({ parkCode: p.parkCode, name: p.name }))}
+              />
+              <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={4}>
+                {trail.map((p) => (
+                  <ParkCard key={p.parkCode} park={p} />
+                ))}
+              </SimpleGrid>
+            </>
           )}
         </Box>
       ) : (

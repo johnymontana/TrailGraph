@@ -25,6 +25,8 @@ import { VisitationChart } from '../../../components/parks/VisitationChart';
 import { ParkGraph } from '../../../components/parks/ParkGraph';
 import { TourList } from '../../../components/parks/TourList';
 import { StampList } from '../../../components/parks/StampList';
+import { Placeholder } from '../../../components/Placeholder';
+import { cleanTags } from '../../../lib/people';
 
 export const dynamic = 'force-dynamic';
 
@@ -111,9 +113,6 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
         mb={5}
         borderRadius="lg"
         overflow="hidden"
-        bgGradient="to-br"
-        gradientFrom="green.600"
-        gradientTo="blue.700"
       >
         {images[0]?.url ? (
           <NextImage
@@ -125,9 +124,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
             style={{ objectFit: 'cover' }}
           />
         ) : (
-          <Box position="absolute" inset={0} display="flex" alignItems="center" justifyContent="center">
-            <Text fontSize="2xl" color="whiteAlpha.900">🏞️ {park.name as string}</Text>
-          </Box>
+          <Placeholder name={String(park.parkCode)} label={String(park.name)} />
         )}
       </Box>
 
@@ -379,14 +376,17 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
           <Heading size="md" mb={1}>People &amp; stories</Heading>
           <Text fontSize="sm" color="fg.muted" mb={3}>Figures tied to {park.name as string} — each spans a cross-park trail.</Text>
           <Stack gap={2}>
-            {people.map((per) => (
-              <Box key={per.id}>
-                <Text fontWeight="medium" display="inline">{per.title}</Text>
-                {per.tags?.length ? (
-                  <Text as="span" fontSize="sm" color="fg.muted"> — {per.tags.slice(0, 3).join(', ')}</Text>
-                ) : null}
-              </Box>
-            ))}
+            {people.map((per) => {
+              const tags = cleanTags(per.title, per.tags);
+              return (
+                <Box key={per.id}>
+                  <Text fontWeight="medium" display="inline">{per.title}</Text>
+                  {tags.length ? (
+                    <Text as="span" fontSize="sm" color="fg.muted"> — {tags.slice(0, 3).join(', ')}</Text>
+                  ) : null}
+                </Box>
+              );
+            })}
           </Stack>
         </Box>
       ) : null}
@@ -425,10 +425,13 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
           <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={4}>
             {places.map((pl) => (
               <Box key={pl.id} borderWidth="1px" borderRadius="lg" overflow="hidden" bg="bg.panel">
-                <Box h="120px" position="relative" bgGradient="to-br" gradientFrom="green.600" gradientTo="blue.700">
+                <Box h="120px" position="relative" overflow="hidden">
                   {pl.image ? (
                     <NextImage src={pl.image} alt={pl.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
-                  ) : null}
+                  ) : (
+                    // Icon-only: the place title renders right below the thumbnail, so don't duplicate it.
+                    <Placeholder name={pl.id} iconOnly />
+                  )}
                 </Box>
                 <Stack p={3} gap={1}>
                   <HStack>

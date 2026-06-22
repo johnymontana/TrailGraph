@@ -3,6 +3,8 @@ import NextLink from 'next/link';
 import NextImage from 'next/image';
 import { vibeSearch, semanticSearch, type SemanticHit } from '../../lib/queries';
 import { ParkCard } from '../../components/ParkCard';
+import { Placeholder } from '../../components/Placeholder';
+import { cleanTags } from '../../lib/people';
 
 /**
  * Unified semantic search (NPS-expansion). One query box → three vector-ranked sections: parks (via
@@ -117,10 +119,13 @@ function NodeCard({ hit, type }: { hit: SemanticHit; type: 'place' | 'person' })
   const card = (
     <Box minW={0} borderWidth="1px" borderRadius="lg" overflow="hidden" bg="bg.panel" _hover={park ? { shadow: 'md' } : undefined} h="100%">
       {type === 'place' ? (
-        <Box h="120px" position="relative" bgGradient="to-br" gradientFrom="green.600" gradientTo="blue.700">
+        <Box h="120px" position="relative" overflow="hidden">
           {hit.image ? (
             <NextImage src={hit.image} alt={hit.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
-          ) : null}
+          ) : (
+            // Icon-only: the place title renders right below the thumbnail, so don't duplicate it.
+            <Placeholder name={hit.id} iconOnly />
+          )}
         </Box>
       ) : null}
       <Stack p={3} gap={1}>
@@ -130,11 +135,14 @@ function NodeCard({ hit, type }: { hit: SemanticHit; type: 'place' | 'person' })
           </Text>
           {type === 'place' && hit.isStamp ? <Badge colorPalette="orange">stamp</Badge> : null}
         </HStack>
-        {type === 'person' && hit.tags.length ? (
-          <Text fontSize="sm" color="fg.muted" lineClamp={1}>
-            {hit.tags.slice(0, 4).join(', ')}
-          </Text>
-        ) : null}
+        {type === 'person' ? (() => {
+          const tags = cleanTags(hit.title, hit.tags);
+          return tags.length ? (
+            <Text fontSize="sm" color="fg.muted" lineClamp={1}>
+              {tags.slice(0, 4).join(', ')}
+            </Text>
+          ) : null;
+        })() : null}
         <Text fontSize="xs" color="fg.muted" lineClamp={1}>
           {park ? `at ${park.parkName}` : 'no linked park'}
         </Text>

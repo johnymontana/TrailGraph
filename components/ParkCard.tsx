@@ -1,7 +1,8 @@
-import { Box, Text, Badge, Stack, Link as CLink } from '@chakra-ui/react';
+import { Box, Text, Badge, Stack, HStack, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
 import NextImage from 'next/image';
 import type { ParkSummary } from '../lib/queries';
+import { Placeholder } from './Placeholder';
 
 /** Graph-grounded park card (R6): always links to the canonical park detail page. */
 export function ParkCard({ park, miles }: { park: ParkSummary & { miles?: number }; miles?: number }) {
@@ -15,7 +16,7 @@ export function ParkCard({ park, miles }: { park: ParkSummary & { miles?: number
     <CLink asChild _hover={{ textDecoration: 'none' }}>
       <NextLink href={`/parks/${park.parkCode}`}>
       <Box minW={0} borderWidth="1px" borderRadius="lg" overflow="hidden" bg="bg.panel" _hover={{ shadow: 'md' }}>
-        <Box h="140px" position="relative" bgGradient="to-br" gradientFrom="green.600" gradientTo="blue.700">
+        <Box h="140px" position="relative" overflow="hidden">
           {park.image ? (
             <NextImage
               src={park.image}
@@ -25,13 +26,30 @@ export function ParkCard({ park, miles }: { park: ParkSummary & { miles?: number
               style={{ objectFit: 'cover' }}
             />
           ) : (
-            // Branded placeholder for parks with no dataset image (§3.5).
-            <Box position="absolute" inset={0} display="flex" alignItems="center" justifyContent="center" p={3}>
-              <Text fontSize="sm" fontWeight="medium" color="whiteAlpha.900" textAlign="center" lineClamp={2}>
-                🏞️ {park.name}
-              </Text>
-            </Box>
+            // Branded placeholder for parks with no dataset image (§3.5, ADR-039).
+            <Placeholder name={park.parkCode} label={park.name} />
           )}
+          {/* At-a-glance facets as badges (ADR-039): dark-sky + accessible, surfaced from the summary. */}
+          {park.darkSky || park.accessible ? (
+            <HStack position="absolute" top={1} right={1} gap={1}>
+              {park.darkSky ? (
+                <Badge bg="blackAlpha.700" color="white" title="Dark-sky park" aria-label="Dark-sky park" role="img">
+                  ⭐
+                </Badge>
+              ) : null}
+              {park.accessible ? (
+                <Badge
+                  bg="blackAlpha.700"
+                  color="white"
+                  title="Wheelchair-accessible camping"
+                  aria-label="Wheelchair-accessible camping"
+                  role="img"
+                >
+                  ♿
+                </Badge>
+              ) : null}
+            </HStack>
+          ) : null}
         </Box>
         <Stack p={3} gap={1}>
           <Text fontWeight="semibold" lineClamp={1}>

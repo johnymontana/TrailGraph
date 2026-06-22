@@ -16,7 +16,9 @@ export default function SignInPage() {
       return;
     }
     setState('sending');
-    const { error } = await signIn.magicLink({ email: email.trim(), callbackURL: '/explore' });
+    // New users land on /onboarding to seed a few preferences (the onboarding route bounces returning
+    // users with existing preferences straight to /explore). See ADR-038.
+    const { error } = await signIn.magicLink({ email: email.trim(), callbackURL: '/onboarding?welcome=1' });
     setState(error ? 'error' : 'sent');
   }
 
@@ -25,8 +27,12 @@ export default function SignInPage() {
       <Heading as="h1" size="lg" mb={2}>
         Sign in to TrailGraph
       </Heading>
-      <Text color="fg.muted" mb={6}>
+      <Text color="fg.muted" mb={2}>
         We&apos;ll email you a one-time sign-in link — no password.
+      </Text>
+      <Text color="fg.muted" fontSize="sm" mb={6}>
+        Browse freely without an account. Sign in to unlock the ranger and let TrailGraph remember what
+        you love.
       </Text>
 
       {state === 'sent' ? (

@@ -1,14 +1,22 @@
-'use client';
+import { redirect } from 'next/navigation';
 import { Flex, Box, Heading } from '@chakra-ui/react';
+import { getServerUserId } from '../../lib/session';
 import { TripBuilder } from '../../components/plan/TripBuilder';
 import { ChatPanel } from '../../components/chat/ChatPanel';
 
 /**
- * Trip planner. Single responsive layout (no `useBreakpointValue` branching — that caused an SSR↔CSR
- * hydration mismatch, R2 §2.1): desktop is a two-pane row; mobile stacks the builder above the chat,
- * each panel scrollable. Both panels mount exactly once (the Eve chat session isn't duplicated).
+ * Trip planner. The ranger + trip builder only do anything for a signed-in user (memory/trip writes are
+ * userId-scoped and 401 otherwise), so we gate the whole surface behind sign-in rather than letting it
+ * fail silently (ADR-038). Browse surfaces stay public.
+ *
+ * Single responsive layout (no `useBreakpointValue` branching — that caused an SSR↔CSR hydration
+ * mismatch, R2 §2.1): desktop is a two-pane row; mobile stacks the builder above the chat, each panel
+ * scrollable. Both panels mount exactly once (the Eve chat session isn't duplicated).
  */
-export default function PlanPage() {
+export default async function PlanPage() {
+  const userId = await getServerUserId();
+  if (!userId) redirect('/signin');
+
   return (
     <Flex
       position="fixed"
