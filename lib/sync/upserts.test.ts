@@ -92,4 +92,9 @@ describe('extractAmenityChildIds (NPS /amenities/parksplaces|parksvisitorcenters
     const items = [[{ id: 'am5', name: 'Z', parks: [{ parkCode: 'yell' }] }]];
     expect(extractAmenityChildIds(items, 'places')[0].childIds).toEqual([]);
   });
+
+  it('ignores malformed parks payloads that are not arrays', () => {
+    const items = [[{ id: 'am6', name: 'Q', parks: { parkCode: 'yell', places: [{ id: 'p1' }] } }]];
+    expect(extractAmenityChildIds(items, 'places')[0].childIds).toEqual([]);
+  });
 });

@@ -76,5 +76,5 @@ test('explore exposes an amenity facet that filters parks', async ({ page }) => 
   await page.selectOption('select[name="amenity"]', 'Accessible Restrooms');
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page).toHaveURL(/amenity=Accessible/);
-  await expect(page.getByText('Yellowstone National Park')).toBeVisible();
+  await expect(page.getByText('Yellowstone National Park', { exact: true })).toBeVisible();
 });

@@ -1,5 +1,5 @@
 import { readGraph, writeGraph } from '../neo4j';
-import { embed, contentHash, composePlaceText, composePersonText, composeArticleText } from '../embeddings';
+import { embed, contentHash, composePlaceText, composePersonText, composeArticleText, clampForEmbedding } from '../embeddings';
 
 /**
  * Content-hash-gated embedding for the NPS-expansion nodes (Place/Person/Article), mirroring
@@ -17,7 +17,7 @@ async function embedLabeledNodes<R extends { key: string; hash: string | null }>
   const rows = await readGraph<R>(query);
   const stale = rows
     .map((r) => {
-      const text = compose(r);
+      const text = clampForEmbedding(compose(r));
       return { key: r.key, text, hash: contentHash(text), prev: r.hash };
     })
     .filter((r) => r.text.trim().length > 0 && r.hash !== r.prev);

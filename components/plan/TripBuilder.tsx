@@ -39,6 +39,7 @@ export function TripBuilder() {
     holdsAtb: boolean;
     atbSaves: boolean;
   } | null>(null);
+  const [costErr, setCostErr] = useState<string | null>(null);
   const [dayMap, setDayMap] = useState<Record<string, number>>({});
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -79,6 +80,7 @@ export function TripBuilder() {
     setTrip(opened);
     setAlerts(null);
     setCost(null);
+    setCostErr(null);
     setDayMap({});
     setEditingName(false);
   }
@@ -120,6 +122,8 @@ export function TripBuilder() {
     const { trip: updated } = await res.json();
     if (updated) {
       setTrip(updated);
+      setCost(null);
+      setCostErr(null);
       loadTrips(); // refresh the sidebar stop counts (§2.14)
     }
   }
@@ -133,6 +137,8 @@ export function TripBuilder() {
     const { trip: updated } = await res.json();
     if (updated) {
       setTrip(updated);
+      setCost(null);
+      setCostErr(null);
       loadTrips(); // refresh the sidebar stop counts (§2.14)
     }
   }
@@ -149,19 +155,23 @@ export function TripBuilder() {
   async function checkCost() {
     if (!trip) return;
     try {
+      setCostErr(null);
       const res = await fetch(`/api/trips/${trip.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ op: 'cost' }),
       });
       if (!res.ok) {
-        setErr('Failed to estimate trip cost. Please try again.');
+        setCost(null);
+        setCostErr('Failed to estimate trip cost. Please try again.');
         return;
       }
       const { cost } = await res.json();
       setCost(cost ?? null);
+      setCostErr(null);
     } catch {
-      setErr('Network error. Please try again.');
+      setCost(null);
+      setCostErr('Network error. Please try again.');
     }
   }
   async function share() {
@@ -187,6 +197,8 @@ export function TripBuilder() {
     if (updated) {
       setTrip(updated);
       setDayMap({});
+      setCost(null);
+      setCostErr(null);
     }
   }
   async function suggestDayPlan() {
@@ -353,6 +365,7 @@ export function TripBuilder() {
               )}
             </Box>
           ) : null}
+          {costErr ? <Text fontSize="sm" color="red.600">{costErr}</Text> : null}
         </>
       ) : (
         <Text color="fg.muted" fontSize="sm">Create or select a trip to start building an itinerary.</Text>

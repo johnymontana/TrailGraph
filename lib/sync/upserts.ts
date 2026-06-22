@@ -392,7 +392,9 @@ export function extractAmenityChildIds(
     .filter((it) => it && typeof it === 'object' && it.id != null)
     .map((it) => {
       const childIds: string[] = [];
-      for (const park of (it.parks as Record<string, unknown>[]) ?? []) {
+      const parks = Array.isArray(it.parks) ? it.parks : [];
+      for (const park of parks) {
+        if (!park || typeof park !== 'object') continue;
         let arr = park[childArrayKey] as { id?: string }[] | undefined;
         if (!Array.isArray(arr) || arr.length === 0) {
           arr = Object.values(park).find(
@@ -416,9 +418,17 @@ export async function upsertAmenityBridges(
   if (!rows.length) return { amenities: 0, refs: 0, edges: 0 };
 
   // 1) MERGE the amenity vocabulary in one modest transaction (≈127 rows).
-  await writeGraph(`UNWIND $amenities AS a MERGE (am:Amenity {id: a.id}) SET am.name = coalesce(am.name, a.name)`, {
+  await writeGraph(
+    `UNWIND $amenities AS a
+     MERGE (am:Amenity {id: a.id})
+     SET am.name = CASE
+       WHEN trim(coalesce(a.name, '')) <> '' THEN a.name
+       ELSE am.name
+     END`,
+    {
     amenities: rows.map((r) => ({ id: r.amenityId, name: r.amenityName })),
-  });
+    },
+  );
 
   // 2) Create HAS_AMENITY edges in BATCHES. A single UNWIND over all amenities × parks × places is a
   // huge cartesian that blows past Neo4j's per-transaction memory cap (dbms.memory.transaction.total.max),

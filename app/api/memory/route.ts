@@ -65,7 +65,9 @@ export async function POST(req: Request) {
       break;
     case 'collectStamp':
       if (!body.stampId) return Response.json({ error: 'stampId required' }, { status: 400 });
-      await collectStamp(userId, body.stampId);
+      if (!(await collectStamp(userId, body.stampId))) {
+        return Response.json({ error: 'stamp not found' }, { status: 404 });
+      }
       break;
     case 'uncollectStamp':
       if (!body.stampId) return Response.json({ error: 'stampId required' }, { status: 400 });
