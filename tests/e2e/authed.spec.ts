@@ -39,7 +39,7 @@ test('build a trip: create → add stops → drive segment → day plan → aler
 
   // Graph-aware ordering (§P3) — reorders without error; stops still present.
   await page.getByRole('button', { name: 'Optimize route' }).click();
-  await expect(page.getByText(/Yellowstone|Glacier/)).toBeVisible();
+  await expect(page.getByText(/Yellowstone|Glacier/).first()).toBeVisible();
 
   // Per-trip alert check (C3) — Yellowstone has a seeded Closure alert.
   await page.getByRole('button', { name: 'Check alerts' }).click();

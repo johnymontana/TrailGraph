@@ -10,6 +10,9 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
+  // The e2e server runs `pnpm dev` (not a prod build), so first-hit route compiles + Neo4j round-trips
+  // can blow past Playwright's 30s default under CI load. Give cold navigations headroom.
+  timeout: 60_000,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: 'http://localhost:3000',

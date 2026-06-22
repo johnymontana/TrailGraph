@@ -5,7 +5,8 @@ import { test, expect } from '@playwright/test';
 test('landing page renders the value prop and nav', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: /Explore and plan trips/i })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Explore' })).toBeVisible();
+  // Nav "Explore" link; `exact` so it doesn't also match the hero "Explore parks" button-link.
+  await expect(page.getByRole('link', { name: 'Explore', exact: true }).first()).toBeVisible();
 });
 
 test('explore lists seeded parks', async ({ page }) => {
@@ -19,14 +20,16 @@ test('faceted search filters by activity', async ({ page }) => {
   await page.selectOption('select[name="activity"]', 'Astronomy');
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page).toHaveURL(/activity=Astronomy/);
-  await expect(page.getByText('Grand Canyon National Park')).toBeVisible();
+  // `exact` so the card title matches but not the "🏞️ Grand Canyon National Park" placeholder text.
+  await expect(page.getByText('Grand Canyon National Park', { exact: true })).toBeVisible();
   // Yellowstone offers Hiking, not Astronomy → filtered out
-  await expect(page.getByText('Yellowstone National Park')).toHaveCount(0);
+  await expect(page.getByText('Yellowstone National Park', { exact: true })).toHaveCount(0);
 });
 
 test('park detail shows description, alert, related parks, and actions', async ({ page }) => {
   await page.goto('/parks/yell');
-  await expect(page.getByRole('heading', { name: 'Yellowstone National Park' })).toBeVisible();
+  // `exact` so the h1 matches but not the "How Yellowstone National Park connects" graph h2.
+  await expect(page.getByRole('heading', { name: 'Yellowstone National Park', exact: true })).toBeVisible();
   await expect(page.getByText('Closure')).toBeVisible(); // seeded active Closure alert
   await expect(page.getByRole('button', { name: /Save/ })).toBeVisible(); // §4 actions
   await expect(page.getByText('Canyon Campground')).toBeVisible(); // §7 park-local data
@@ -49,8 +52,9 @@ test('park header "at a glance" strip shows timed-entry + dark sky (R4 §3/§4)'
 test('park detail renders the monthly visitation chart (§5b, Chakra charts)', async ({ page }) => {
   await page.goto('/parks/glac'); // seeded with monthlyVisits
   await expect(page.getByText(/Monthly recreation visits/i)).toBeVisible();
-  // Recharts draws an SVG inside the Conditions panel.
-  await expect(page.locator('.recharts-surface').first()).toBeVisible();
+  // Recharts draws an SVG inside the Conditions panel — it mounts client-side after hydration, so allow
+  // extra time under CI load.
+  await expect(page.locator('.recharts-surface').first()).toBeVisible({ timeout: 15_000 });
 });
 
 test('explore dark-sky facet filters to certified parks (§5a)', async ({ page }) => {
@@ -58,14 +62,14 @@ test('explore dark-sky facet filters to certified parks (§5a)', async ({ page }
   await page.getByLabel('Dark-sky parks').check();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page).toHaveURL(/darkSky=1/);
-  await expect(page.getByText('Grand Canyon National Park')).toBeVisible();
-  await expect(page.getByText('Yellowstone National Park')).toHaveCount(0); // not certified in fixtures
+  await expect(page.getByText('Grand Canyon National Park', { exact: true })).toBeVisible();
+  await expect(page.getByText('Yellowstone National Park', { exact: true })).toHaveCount(0); // not certified in fixtures
 });
 
 test('park detail surfaces "Similar parks" (graph relationships, §6)', async ({ page }) => {
   await page.goto('/parks/grca');
   await expect(page.getByRole('heading', { name: 'Similar parks' })).toBeVisible();
-  await expect(page.getByText('Glacier National Park')).toBeVisible(); // shares Astronomy + Hiking
+  await expect(page.getByText('Glacier National Park', { exact: true })).toBeVisible(); // shares Astronomy + Hiking
 });
 
 test('explore shows accurate paginated count', async ({ page }) => {
@@ -112,7 +116,7 @@ test('activity chips on a park page are traversable to Explore (graph traversal,
   await expect(chip).toBeVisible();
   await chip.click();
   await expect(page).toHaveURL(/activity=Astronomy/);
-  await expect(page.getByText('Grand Canyon National Park')).toBeVisible();
+  await expect(page.getByText('Grand Canyon National Park', { exact: true })).toBeVisible();
 });
 
 test('theme toggle switches color mode (R4 §2.2)', async ({ page }) => {
@@ -138,5 +142,6 @@ test('mobile nav exposes the hamburger menu (CSS-responsive SiteNav, R3 §4 carr
 test('your-memory page gates on sign-in', async ({ page }) => {
   await page.goto('/me');
   await expect(page.getByRole('heading', { name: 'Your memory' })).toBeVisible();
-  await expect(page.getByText(/Sign in/i)).toBeVisible();
+  // A "Sign in" link appears in both the nav and the gate prompt — assert at least one is visible.
+  await expect(page.getByRole('link', { name: 'Sign in' }).first()).toBeVisible();
 });

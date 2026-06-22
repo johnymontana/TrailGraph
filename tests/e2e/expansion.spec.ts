@@ -15,8 +15,9 @@ test('thematic trails page lists people and traces a cross-park trail', async ({
   await page.getByRole('link', { name: /Ferdinand Hayden/ }).click();
   await expect(page).toHaveURL(/person=Ferdinand(%20|\+)Hayden/);
   await expect(page.getByRole('heading', { name: /Parks tied to Ferdinand Hayden/ })).toBeVisible();
-  await expect(page.getByText('Yellowstone National Park')).toBeVisible();
-  await expect(page.getByText('Glacier National Park')).toBeVisible();
+  // `exact` so the card title matches but not the "🏞️ … National Park" placeholder text.
+  await expect(page.getByText('Yellowstone National Park', { exact: true })).toBeVisible();
+  await expect(page.getByText('Glacier National Park', { exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: /See it on the graph/ })).toBeVisible();
 });
 
@@ -41,7 +42,8 @@ test('park page surfaces an official tour with a "Start a trip" action', async (
 test('park page surfaces passport stamps, events, places, articles, and parking', async ({ page }) => {
   await page.goto('/parks/yell');
   await expect(page.getByRole('heading', { name: 'Passport stamps' })).toBeVisible();
-  await expect(page.getByText('Canyon Village')).toBeVisible();
+  // The stamp renders as "🎫 Canyon Village"; scope to it so it doesn't collide with "Canyon Village Lot".
+  await expect(page.getByText('🎫 Canyon Village')).toBeVisible();
 
   await expect(page.getByRole('heading', { name: 'Events' })).toBeVisible();
   await expect(page.getByText('Perseid Star Party')).toBeVisible();
