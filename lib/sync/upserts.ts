@@ -380,30 +380,41 @@ export async function upsertAmenityBridges(
   items: NpsGeneric[],
   childLabel: 'Place' | 'VisitorCenter',
   childArrayKey: 'places' | 'visitorCenters',
-): Promise<number> {
-  if (!items.length) return 0;
+): Promise<{ amenities: number; refs: number; edges: number }> {
+  if (!items.length) return { amenities: 0, refs: 0, edges: 0 };
   const rows = items.map((it) => {
     const childIds: string[] = [];
-    for (const park of (it.parks as { [k: string]: unknown }[]) ?? []) {
-      for (const child of (park[childArrayKey] as { id?: string }[]) ?? []) {
-        if (child?.id) childIds.push(String(child.id));
+    for (const park of (it.parks as Record<string, unknown>[]) ?? []) {
+      // Preferred key, then fall back to the first array-of-{id} on the park object — guards against
+      // an unexpected key name/casing in the NPS payload (which would otherwise silently yield 0 edges).
+      let arr = park[childArrayKey] as { id?: string }[] | undefined;
+      if (!Array.isArray(arr) || arr.length === 0) {
+        arr = Object.values(park).find(
+          (v): v is { id?: string }[] =>
+            Array.isArray(v) && v.length > 0 && typeof v[0] === 'object' && v[0] !== null && 'id' in (v[0] as object),
+        );
       }
+      for (const child of arr ?? []) if (child?.id) childIds.push(String(child.id));
     }
     return { amenityId: String(it.id), amenityName: String(it.name ?? ''), childIds };
   });
-  const r = await writeGraph<{ c: number }>(
+  const refs = rows.reduce((n, row) => n + row.childIds.length, 0);
+  // OPTIONAL MATCH + FOREACH so amenities are still counted when a child id doesn't resolve, and
+  // `edges` reflects only the links actually created — distinguishing a parse miss (refs=0) from an
+  // id-match miss (refs>0, edges=0).
+  const r = await writeGraph<{ amenities: number; edges: number }>(
     `
     UNWIND $rows AS row
     MERGE (am:Amenity {id: row.amenityId}) SET am.name = coalesce(am.name, row.amenityName)
     WITH am, row
-    UNWIND row.childIds AS cid
-    MATCH (child:\`${childLabel}\` {id: cid})
-    MERGE (child)-[:HAS_AMENITY]->(am)
-    RETURN count(DISTINCT am) AS c
+    UNWIND (CASE WHEN size(row.childIds) = 0 THEN [null] ELSE row.childIds END) AS cid
+    OPTIONAL MATCH (child:\`${childLabel}\` {id: cid})
+    FOREACH (_ IN CASE WHEN child IS NULL THEN [] ELSE [1] END | MERGE (child)-[:HAS_AMENITY]->(am))
+    RETURN count(DISTINCT am) AS amenities, count(child) AS edges
     `,
     { rows },
   );
-  return r[0]?.c ?? 0;
+  return { amenities: r[0]?.amenities ?? 0, refs, edges: r[0]?.edges ?? 0 };
 }
 
 /** Passport stamps: `(:PassportStamp)-[:IN_PARK]->(:Park)` — the collection/gamification graph. */

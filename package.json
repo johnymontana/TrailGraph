@@ -18,6 +18,7 @@
     "ontology:setup": "tsx scripts/setup-ontology.ts",
     "seed:test": "tsx scripts/seed-test-data.ts",
     "cleanup:orphan-stops": "tsx scripts/cleanup-orphan-stops.ts",
+    "sync:reset": "tsx scripts/reset-sync-checkpoint.ts",
     "build:basemap": "tsx scripts/build-basemap.ts",
     "basemap:upload": "tsx scripts/upload-basemap.ts",
     "datasources:sync": "tsx scripts/sync-datasources.ts",

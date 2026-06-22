@@ -283,18 +283,14 @@ export async function runSlowSync(): Promise<StepResult[]> {
   out.push(await pagedStep<NpsPerson>('people', 'people', ['images', 'tags'], upsertPeople));
   out.push(await pagedStep<NpsTour>('tours', 'tours', undefined, upsertTours));
   out.push(
-    await step('amenities-places', 'slow', async () => ({
-      count: await upsertAmenityBridges(await fetchAll<NpsGeneric>('amenities/parksplaces'), 'Place', 'places'),
-    })),
+    await step('amenities-places', 'slow', async () =>
+      upsertAmenityBridges(await fetchAll<NpsGeneric>('amenities/parksplaces'), 'Place', 'places'),
+    ),
   );
   out.push(
-    await step('amenities-vcs', 'slow', async () => ({
-      count: await upsertAmenityBridges(
-        await fetchAll<NpsGeneric>('amenities/parksvisitorcenters'),
-        'VisitorCenter',
-        'visitorCenters',
-      ),
-    })),
+    await step('amenities-vcs', 'slow', async () =>
+      upsertAmenityBridges(await fetchAll<NpsGeneric>('amenities/parksvisitorcenters'), 'VisitorCenter', 'visitorCenters'),
+    ),
   );
 
   // Content endpoints (Phase 1 cont.): passport stamps, parking lots, articles. Entrance passes are
