@@ -22,7 +22,7 @@ export async function seedTestData(): Promise<void> {
       SET yell.name='Yellowstone', yell.fullName='Yellowstone National Park',
           yell.designation='National Park', yell.description='Geysers, wildlife, and the Yellowstone caldera.',
           yell.states='WY,MT,ID', yell.url='https://www.nps.gov/yell', yell.feeFree=false,
-          yell.images=['https://example.test/yell.jpg'], yell.imagesFull='[{"url":"https://example.test/yell.jpg"}]',
+          yell.images=['https://www.nps.gov/test/yell.jpg'], yell.imagesFull='[{"url":"https://www.nps.gov/test/yell.jpg"}]',
           yell.entranceFees='[{"cost":"35.00","title":"Private Vehicle","description":"7 days"}]',
           yell.operatingHours='[]', yell.contacts='{}',
           yell.location=point({latitude:44.6, longitude:-110.5})
