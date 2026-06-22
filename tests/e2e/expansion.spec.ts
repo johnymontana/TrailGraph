@@ -56,6 +56,19 @@ test('park page surfaces passport stamps, events, places, articles, and parking'
   await expect(page.getByText('Canyon Village Lot')).toBeVisible();
 });
 
+test('unified search page renders its query form and is in the nav', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: 'Search' })).toBeVisible();
+
+  await page.goto('/search');
+  await expect(page.getByRole('heading', { name: 'Search', level: 1 })).toBeVisible();
+  await expect(page.getByPlaceholder(/quiet alpine overlook/i)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Search' })).toBeVisible();
+  // No query yet → prompt, not results. (Semantic results need populated embeddings + the AI Gateway,
+  // which CI/e2e don't have — same reason vibeSearch has no e2e; results aren't asserted here.)
+  await expect(page.getByText(/search across parks, places, and people/i)).toBeVisible();
+});
+
 test('explore exposes an amenity facet that filters parks', async ({ page }) => {
   await page.goto('/explore');
   await page.selectOption('select[name="amenity"]', 'Accessible Restrooms');

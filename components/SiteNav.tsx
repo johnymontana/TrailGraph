@@ -5,6 +5,7 @@ import { ColorModeButton } from './ui/color-mode-button';
 
 const LINKS = [
   { href: '/explore', label: 'Explore' },
+  { href: '/search', label: 'Search' },
   { href: '/map', label: 'Map' },
   { href: '/graph', label: 'Graph' },
   { href: '/trails', label: 'Trails' },

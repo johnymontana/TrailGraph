@@ -16,6 +16,8 @@ export function ToolCard({ kind, data: raw }: { kind: string; data: unknown }) {
   switch (kind) {
     case 'park_card':
       return <ParkCards data={data} />;
+    case 'node_results':
+      return <NodeResults data={data} />;
     case 'itinerary_preview':
       return <ItineraryCard data={data} />;
     case 'alert_list':
@@ -30,6 +32,7 @@ export function isRenderableToolOutput(kind: string, data: unknown): boolean {
   const d = (data ?? {}) as Record<string, unknown>;
   if (typeof d.error === 'string') return true;
   if (kind === 'park_card') return ((d.parks as unknown[])?.length ?? (d.park ? 1 : 0)) > 0;
+  if (kind === 'node_results') return ((d.results as unknown[])?.length ?? 0) > 0;
   if (kind === 'itinerary_preview') return !!d.trip;
   if (kind === 'alert_list') return ((d.parks as unknown[])?.length ?? 0) > 0;
   return false;
@@ -66,6 +69,46 @@ function ParkCards({ data }: { data: Record<string, unknown> }) {
             </Box>
           </NextLink>
         </CLink>
+      ))}
+    </Stack>
+  );
+}
+
+/** Semantic place/person results (find_place / find_person). Each links to its related park page —
+ * places/people have no detail route, so the park is the navigable target. */
+function NodeResults({ data }: { data: Record<string, unknown> }) {
+  const type = (data.type as 'place' | 'person') ?? 'place';
+  const results = (data.results ?? []) as {
+    id: string;
+    title: string;
+    parks?: { parkCode: string; parkName: string }[];
+    isStamp?: boolean;
+    tags?: string[];
+  }[];
+  if (!results.length) return null;
+  return (
+    <Stack gap={2} my={2}>
+      {results.map((r) => (
+        <Box key={r.id} borderWidth="1px" borderRadius="md" p={3} bg="bg.panel">
+          <HStack mb={r.tags?.length || r.parks?.length ? 1 : 0} wrap="wrap" gap={2}>
+            <Badge colorPalette={type === 'place' ? 'purple' : 'teal'}>{type}</Badge>
+            <Text as="span" fontWeight="semibold">{r.title}</Text>
+            {type === 'place' && r.isStamp ? <Badge colorPalette="orange">stamp</Badge> : null}
+          </HStack>
+          {type === 'person' && r.tags?.length ? (
+            <Text fontSize="xs" color="fg.muted">{r.tags.slice(0, 4).join(', ')}</Text>
+          ) : null}
+          {r.parks?.length ? (
+            <HStack wrap="wrap" gap={2} mt={1}>
+              <Text fontSize="xs" color="fg.muted">at</Text>
+              {r.parks.map((p) => (
+                <CLink key={p.parkCode} asChild fontSize="xs" color="blue.600">
+                  <NextLink href={`/parks/${p.parkCode}`}>{p.parkName}</NextLink>
+                </CLink>
+              ))}
+            </HStack>
+          ) : null}
+        </Box>
       ))}
     </Stack>
   );
