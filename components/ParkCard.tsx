@@ -33,10 +33,20 @@ export function ParkCard({ park, miles }: { park: ParkSummary & { miles?: number
           {park.darkSky || park.accessible ? (
             <HStack position="absolute" top={1} right={1} gap={1}>
               {park.darkSky ? (
-                <Badge bg="blackAlpha.700" color="white" title="Dark-sky park">⭐</Badge>
+                <Badge bg="blackAlpha.700" color="white" title="Dark-sky park" aria-label="Dark-sky park" role="img">
+                  ⭐
+                </Badge>
               ) : null}
               {park.accessible ? (
-                <Badge bg="blackAlpha.700" color="white" title="Wheelchair-accessible camping">♿</Badge>
+                <Badge
+                  bg="blackAlpha.700"
+                  color="white"
+                  title="Wheelchair-accessible camping"
+                  aria-label="Wheelchair-accessible camping"
+                  role="img"
+                >
+                  ♿
+                </Badge>
               ) : null}
             </HStack>
           ) : null}
