@@ -27,10 +27,11 @@ import { embedParks } from './embed-parks';
  * async function locally. We ALSO record per-step checkpoints in a `:SyncState` node so progress is
  * inspectable and resumable regardless of the runtime. Idempotent MERGE makes every step re-runnable.
  *
- * Tiers (§9.2): SLOW (corpus, 6–12h) and FAST (alerts/events, 2h aligned to upstream).
+ * Tiers (§9.2): SLOW (corpus, 6–12h) and FAST (alerts/events, 2h aligned to upstream). ALL runs both
+ * in one invocation — used by the once-daily cron on Vercel Hobby (which caps cron frequency at daily).
  */
 
-export type Tier = 'slow' | 'fast';
+export type Tier = 'slow' | 'fast' | 'all';
 
 export interface StepResult {
   resource: string;
@@ -168,7 +169,9 @@ export async function runFastSync(): Promise<StepResult[]> {
 }
 
 export async function runSync(tier: Tier): Promise<StepResult[]> {
-  return tier === 'fast' ? runFastSync() : runSlowSync();
+  if (tier === 'fast') return runFastSync();
+  if (tier === 'all') return [...(await runSlowSync()), ...(await runFastSync())];
+  return runSlowSync();
 }
 
 /** Current sync health for observability dashboards. */

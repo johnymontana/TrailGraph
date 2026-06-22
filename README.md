@@ -135,7 +135,7 @@ pnpm nams:spike                   # ✅ proves NAMS writes land in YOUR Neo4j (t
 pnpm dev                          # Next + the Eve ranger together — open http://localhost:3000/plan
 ```
 
-Then populate the domain graph from the NPS API: `curl "http://localhost:3000/api/sync?tier=slow"`
+Then populate the domain graph from the NPS API: `curl "http://localhost:3000/api/sync?tier=all"`
 (and `pnpm datasources:sync` for the dark-sky / crowds / trail-difficulty conditions).
 
 > `pnpm dev` auto-starts the Eve agent behind the app via Eve's `withEve`. To run the app **without** the
@@ -174,12 +174,14 @@ step (those are for standalone agent projects). The build command stays `next bu
      deployments through `vercelOidc()` (`agent/channels/eve.ts`). **Do not set `EVE_BASE_URL`.**
    - `CRON_SECRET` — Vercel sends it as the `Authorization: Bearer` on cron calls; `/api/sync` checks it.
    - `NEXT_PUBLIC_MAP_TILES_URL` — the Blob URL from the next section.
-3. **Deploy.** The scheduled jobs in [`vercel.json`](vercel.json) (NPS sync slow/fast + memory
-   reconcile) start running automatically; `/api/sync`'s long runtime comes from its route-segment
+3. **Deploy.** The scheduled jobs in [`vercel.json`](vercel.json) start automatically: a once-daily
+   full sync (`/api/sync?tier=all` — corpus + alerts/events + data sources) and a once-daily memory
+   reconcile. This fits **Vercel Hobby** (≤2 cron jobs, daily). On Pro you can split into more frequent
+   `tier=slow`/`tier=fast` schedules. `/api/sync`'s long runtime comes from its route-segment
    `export const maxDuration` (Fluid Compute / Pro).
 4. **One-time data setup** against the production Neo4j (run locally with prod `NEO4J_*` in
    `.env.local`): `pnpm db:migrate` · `pnpm ontology:setup` · `pnpm nams:spike`, then seed the graph
-   (`curl -H "Authorization: Bearer $CRON_SECRET" "https://<your-domain>/api/sync?tier=slow"` and
+   (`curl -H "Authorization: Bearer $CRON_SECRET" "https://<your-domain>/api/sync?tier=all"` and
    `pnpm datasources:sync`).
 
 ### Host the basemap on Vercel Blob (CDN)

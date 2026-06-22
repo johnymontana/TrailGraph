@@ -3,7 +3,8 @@ import { syncDataSources } from '../../../lib/datasources';
 
 /**
  * Cron-triggered NPS sync (ADR-007). Vercel Cron calls this with the configured Authorization
- * bearer (CRON_SECRET). GET ?tier=slow|fast runs that tier; GET (no tier) returns sync health.
+ * bearer (CRON_SECRET). GET ?tier=slow|fast|all runs that tier (all = slow+fast in one call, for the
+ * once-daily Vercel Hobby cron); GET (no tier) returns sync health.
  */
 export const dynamic = 'force-dynamic';
 export const maxDuration = 800; // Fluid Compute; long jobs still park/resume via the workflow
@@ -24,8 +25,8 @@ export async function GET(req: Request) {
   }
   try {
     const results = await runSync(tier);
-    // The §5 data-source adapters (dark-sky, crowds, trail difficulty, reservations) ride the slow tier.
-    const dataSources = tier === 'slow' ? await syncDataSources().catch(() => null) : undefined;
+    // The §5 data-source adapters (dark-sky, crowds, trail difficulty, reservations) ride the corpus run.
+    const dataSources = tier === 'slow' || tier === 'all' ? await syncDataSources().catch(() => null) : undefined;
     return Response.json({ tier, results, dataSources });
   } catch (err) {
     return Response.json({ tier, error: (err as Error).message }, { status: 500 });

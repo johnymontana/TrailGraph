@@ -1,8 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
-    { "path": "/api/sync?tier=slow", "schedule": "0 */8 * * *" },
-    { "path": "/api/sync?tier=fast", "schedule": "0 */2 * * *" },
-    { "path": "/api/memory/reconcile", "schedule": "30 */6 * * *" }
+    { "path": "/api/sync?tier=all", "schedule": "0 8 * * *" },
+    { "path": "/api/memory/reconcile", "schedule": "30 8 * * *" }
   ]
 }
