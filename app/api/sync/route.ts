@@ -7,7 +7,10 @@ import { syncDataSources } from '../../../lib/datasources';
  * once-daily Vercel Hobby cron); GET (no tier) returns sync health.
  */
 export const dynamic = 'force-dynamic';
-export const maxDuration = 800; // Fluid Compute; long jobs still park/resume via the workflow
+// Hobby caps Serverless Functions at 300s. The sync steps run as a Vercel Workflow ('use workflow' in
+// lib/sync), so long jobs checkpoint and park/resume across invocations rather than needing one long
+// function. Raise this on Pro (up to 800 with Fluid Compute) if you want fewer resumes.
+export const maxDuration = 300;
 
 function authorized(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
