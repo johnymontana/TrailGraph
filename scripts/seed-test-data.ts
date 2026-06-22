@@ -22,7 +22,7 @@ export async function seedTestData(): Promise<void> {
       SET yell.name='Yellowstone', yell.fullName='Yellowstone National Park',
           yell.designation='National Park', yell.description='Geysers, wildlife, and the Yellowstone caldera.',
           yell.states='WY,MT,ID', yell.url='https://www.nps.gov/yell', yell.feeFree=false,
-          yell.images=['https://example.test/yell.jpg'], yell.imagesFull='[{"url":"https://example.test/yell.jpg"}]',
+          yell.images=['https://www.nps.gov/test/yell.jpg'], yell.imagesFull='[{"url":"https://www.nps.gov/test/yell.jpg"}]',
           yell.entranceFees='[{"cost":"35.00","title":"Private Vehicle","description":"7 days"}]',
           yell.operatingHours='[]', yell.contacts='{}',
           yell.location=point({latitude:44.6, longitude:-110.5})
@@ -71,6 +71,61 @@ export async function seedTestData(): Promise<void> {
           al.description='A road near Canyon Campground is closed due to weather.',
           al.url='https://www.nps.gov/yell/alert1'
     MERGE (al)-[:AFFECTS]->(yell)
+    // Accessibility fixtures (NPS-expansion P0 #1): normalized campground accessibility props +
+    // shared Amenity nodes so REQUIRES/TRAVELS_WITH filters + explain() have something to match.
+    SET cg.wheelchairAccessible=true, cg.rvMaxLengthFt=40, cg.adaInfo='Accessible restrooms and paved sites.'
+    MERGE (cg2:Campground {id:'cg-fishing-bridge'})
+      SET cg2.name='Fishing Bridge RV Park', cg2.location=point({latitude:44.56, longitude:-110.37}),
+          cg2.wheelchairAccessible=false, cg2.rvMaxLengthFt=null
+    MERGE (cg2)-[:IN_PARK]->(yell)
+    MERGE (am:Amenity {id:'amen-restrooms'}) SET am.name='Accessible Restrooms'
+    MERGE (amwater:Amenity {id:'amen-water'}) SET amwater.name='Potable Water'
+    MERGE (cg)-[:HAS_AMENITY]->(am)
+    MERGE (vc)-[:HAS_AMENITY]->(am)
+    MERGE (vc)-[:HAS_AMENITY]->(amwater)
+    // Place fixture (HAS_PLACE) with an amenity + passport-stamp flag
+    MERGE (pl:Place {id:'place-artist-point'})
+      SET pl.title='Artist Point', pl.bodyText='Iconic view of the Lower Falls.',
+          pl.location=point({latitude:44.72, longitude:-110.48}), pl.isStamp=true,
+          pl.audioDescription='An audio description of the Lower Falls overlook.'
+    MERGE (yell)-[:HAS_PLACE]->(pl)
+    MERGE (pl)-[:HAS_AMENITY]->(am)
+    // Person fixture spanning two parks → a thematic trail (ASSOCIATED_WITH + RELATES_TO_TOPIC)
+    MERGE (per:Person {id:'person-ferdinand-hayden'})
+      SET per.title='Ferdinand Hayden', per.firstName='Ferdinand', per.lastName='Hayden',
+          per.tags=['Volcanoes'], per.listingDescription='Geologist whose survey helped establish Yellowstone.'
+    MERGE (per)-[:ASSOCIATED_WITH]->(yell)
+    MERGE (per)-[:ASSOCIATED_WITH]->(glac)
+    MERGE (per)-[:RELATES_TO_TOPIC]->(volc)
+    // Tour fixture (P1 #3): ordered stops referencing the Place + Visitor Center above.
+    MERGE (tour:Tour {id:'tour-canyon-rim'})
+      SET tour.title='Canyon Rim Tour', tour.description='A short loop along the Grand Canyon of the Yellowstone.'
+    MERGE (tour)-[:IN_PARK]->(yell)
+    MERGE (tstop1:TourStop {id:'tour-canyon-rim-0'}) SET tstop1.ordinal=0, tstop1.title='Artist Point', tstop1.assetType='Place'
+    MERGE (tstop2:TourStop {id:'tour-canyon-rim-1'}) SET tstop2.ordinal=1, tstop2.title='Canyon Visitor Center', tstop2.assetType='VisitorCenter'
+    MERGE (tour)-[:HAS_STOP]->(tstop1) MERGE (tstop1)-[:AT]->(pl)
+    MERGE (tour)-[:HAS_STOP]->(tstop2) MERGE (tstop2)-[:AT]->(vc)
+    // Passport stamp fixture (P2 #8): IN_PARK so "stamps at this park" + collection works.
+    MERGE (stamp:PassportStamp {id:'stamp-yell-canyon'}) SET stamp.label='Canyon Village'
+    MERGE (stamp)-[:IN_PARK]->(yell)
+    // Entrance passes (P2 #9): national AtB pass + a yell park pass for the cost model.
+    MERGE (atb:EntrancePass {id:'atb-annual'}) SET atb.name='America the Beautiful – Annual Pass', atb.cost=80.0, atb.scope='national'
+    MERGE (yellpass:EntrancePass {id:'yell:Annual Pass'}) SET yellpass.name='Annual Pass', yellpass.cost=70.0, yellpass.scope='park'
+    MERGE (yell)-[:OFFERS_PASS]->(yellpass)
+    // Article fixture (P3): ABOUT a park for the "Learn more" section.
+    MERGE (art:Article {id:'article-yell-geysers'})
+      SET art.title='Geysers of Yellowstone', art.url='https://www.nps.gov/yell/geysers.htm',
+          art.description='How the Yellowstone caldera powers the largest geyser field on Earth.'
+    MERGE (art)-[:ABOUT]->(yell)
+    // Parking lot fixture (P3): IN_PARK + accessibility flag.
+    MERGE (lot:ParkingLot {id:'lot-canyon'})
+      SET lot.name='Canyon Village Lot', lot.wheelchairAccessible=true,
+          lot.location=point({latitude:44.73, longitude:-110.49})
+    MERGE (lot)-[:IN_PARK]->(yell)
+    // Event fixture (P2 #7): HELD_AT with dates for the season-aware section.
+    MERGE (ev:Event {id:'event-yell-astro'})
+      SET ev.title='Perseid Star Party', ev.active=true, ev.dateStart='2026-08-11', ev.dateEnd='2026-08-13'
+    MERGE (ev)-[:HELD_AT]->(yell)
   `);
 }
 

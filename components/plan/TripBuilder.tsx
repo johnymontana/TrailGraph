@@ -9,11 +9,18 @@ interface Stop {
   id: string;
   order: number;
   parkName?: string;
+  campgroundName?: string;
+  poiTitle?: string;
+  placeTitle?: string;
   name?: string;
   lat?: number | null;
   lng?: number | null;
   driveTo?: { miles: number; minutes: number; source: string } | null;
 }
+
+/** Display label for any stop kind (park / campground / POI / place / custom). */
+const stopLabel = (s: Stop): string =>
+  s.parkName ?? s.placeTitle ?? s.campgroundName ?? s.poiTitle ?? s.name ?? 'Stop';
 interface Trip {
   id: string;
   name: string;
@@ -25,6 +32,14 @@ export function TripBuilder() {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [newName, setNewName] = useState('');
   const [alerts, setAlerts] = useState<{ park: string; alerts: { category: string; title: string }[] }[] | null>(null);
+  const [cost, setCost] = useState<{
+    perPark: { parkCode: string; parkName: string; fee: number }[];
+    total: number;
+    atbPrice: number;
+    holdsAtb: boolean;
+    atbSaves: boolean;
+  } | null>(null);
+  const [costErr, setCostErr] = useState<string | null>(null);
   const [dayMap, setDayMap] = useState<Record<string, number>>({});
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -39,6 +54,10 @@ export function TripBuilder() {
   }
   useEffect(() => {
     loadTrips();
+    // Deep-link: /plan?trip=<id> opens that trip (used by "Start a trip from this tour" on park pages).
+    const id = new URLSearchParams(window.location.search).get('trip');
+    if (id) openTrip(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Live-refresh when the ranger saves a trip from the chat panel (R3 §4.2). ChatPanel dispatches this
@@ -60,6 +79,8 @@ export function TripBuilder() {
     const { trip: opened } = await res.json();
     setTrip(opened);
     setAlerts(null);
+    setCost(null);
+    setCostErr(null);
     setDayMap({});
     setEditingName(false);
   }
@@ -101,6 +122,8 @@ export function TripBuilder() {
     const { trip: updated } = await res.json();
     if (updated) {
       setTrip(updated);
+      setCost(null);
+      setCostErr(null);
       loadTrips(); // refresh the sidebar stop counts (§2.14)
     }
   }
@@ -114,6 +137,8 @@ export function TripBuilder() {
     const { trip: updated } = await res.json();
     if (updated) {
       setTrip(updated);
+      setCost(null);
+      setCostErr(null);
       loadTrips(); // refresh the sidebar stop counts (§2.14)
     }
   }
@@ -126,6 +151,29 @@ export function TripBuilder() {
     });
     const { alerts } = await res.json();
     setAlerts(alerts ?? []);
+  }
+  async function checkCost() {
+    if (!trip) return;
+    try {
+      setCost(null);
+      setCostErr(null);
+      const res = await fetch(`/api/trips/${trip.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: 'cost' }),
+      });
+      if (!res.ok) {
+        setCost(null);
+        setCostErr('Failed to estimate trip cost. Please try again.');
+        return;
+      }
+      const { cost } = await res.json();
+      setCost(cost ?? null);
+      setCostErr(null);
+    } catch {
+      setCost(null);
+      setCostErr('Network error. Please try again.');
+    }
   }
   async function share() {
     if (!trip) return;
@@ -150,6 +198,8 @@ export function TripBuilder() {
     if (updated) {
       setTrip(updated);
       setDayMap({});
+      setCost(null);
+      setCostErr(null);
     }
   }
   async function suggestDayPlan() {
@@ -216,7 +266,7 @@ export function TripBuilder() {
           <ParkSearchInput onSelect={addPark} />
           {stops.some((s) => s.lat != null && s.lng != null) ? (
             <TripMap
-              stops={stops.map((s) => ({ lat: s.lat ?? null, lng: s.lng ?? null, label: s.parkName ?? s.name ?? 'Stop', order: s.order }))}
+              stops={stops.map((s) => ({ lat: s.lat ?? null, lng: s.lng ?? null, label: stopLabel(s), order: s.order }))}
             />
           ) : null}
 
@@ -233,9 +283,9 @@ export function TripBuilder() {
                   ) : null}
                   <HStack>
                     <Text fontSize="sm" flex="1">
-                      {i + 1}. {s.parkName ?? s.name ?? 'Stop'}
+                      {i + 1}. {stopLabel(s)}
                     </Text>
-                    <IconButton size="xs" variant="ghost" aria-label={`Remove ${s.parkName ?? s.name ?? 'stop'}`} onClick={() => removeStop(s.id)}>
+                    <IconButton size="xs" variant="ghost" aria-label={`Remove ${stopLabel(s)}`} onClick={() => removeStop(s.id)}>
                       ✕
                     </IconButton>
                   </HStack>
@@ -254,6 +304,9 @@ export function TripBuilder() {
               <HStack wrap="wrap">
                 <Button size="sm" variant="outline" onClick={checkAlerts}>
                   Check alerts
+                </Button>
+                <Button size="sm" variant="outline" onClick={checkCost}>
+                  Trip cost
                 </Button>
                 <Button size="sm" variant="outline" onClick={suggestDayPlan}>
                   Suggest day plan
@@ -294,6 +347,26 @@ export function TripBuilder() {
               </Stack>
             )
           ) : null}
+          {cost ? (
+            <Box borderWidth="1px" borderRadius="md" p={3}>
+              <HStack mb={1}>
+                <Text fontWeight="semibold" flex="1">Estimated entrance fees</Text>
+                <Text fontWeight="bold">${cost.total.toFixed(0)}</Text>
+              </HStack>
+              {cost.holdsAtb ? (
+                <Text fontSize="xs" color="green.600">
+                  Covered by your America the Beautiful annual pass. ✓
+                </Text>
+              ) : cost.atbSaves ? (
+                <Text fontSize="xs" color="fg.muted">
+                  The ${cost.atbPrice} America the Beautiful annual pass would save you ${(cost.perPark.reduce((s, p) => s + p.fee, 0) - cost.atbPrice).toFixed(0)} here.
+                </Text>
+              ) : (
+                <Text fontSize="xs" color="fg.muted">Per-vehicle entrance fees, summed across your parks.</Text>
+              )}
+            </Box>
+          ) : null}
+          {costErr ? <Text fontSize="sm" color="red.600">{costErr}</Text> : null}
         </>
       ) : (
         <Text color="fg.muted" fontSize="sm">Create or select a trip to start building an itinerary.</Text>

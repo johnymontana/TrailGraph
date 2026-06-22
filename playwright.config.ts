@@ -10,6 +10,13 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
+  // The e2e server runs `pnpm dev` (not a prod build) and compiles routes on demand. Two parallel
+  // workers hitting uncompiled routes contend on that first compile → `net::ERR_ABORTED` + navigation
+  // timeouts. Serialize in CI so each route compiles once without contention (slower wall-clock, but
+  // deterministic); locally, default parallelism.
+  workers: process.env.CI ? 1 : undefined,
+  // First-hit route compiles + Neo4j round-trips can blow past Playwright's 30s default. Headroom.
+  timeout: 60_000,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: 'http://localhost:3000',

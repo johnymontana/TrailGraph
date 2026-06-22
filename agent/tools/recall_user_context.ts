@@ -1,6 +1,7 @@
 import { defineTool } from 'eve/tools';
 import { z } from 'zod';
 import { memory } from '../../lib/memory';
+import { getTravelConstraints, getAvailability, getHeldPasses } from '../../lib/bridges';
 import { callerId, sessionId } from '../../lib/agent-ctx';
 
 /**
@@ -13,9 +14,12 @@ export default defineTool({
   async execute(_input, ctx) {
     const userId = callerId(ctx);
     const conversationId = sessionId(ctx);
-    const [context, prefs] = await Promise.all([
+    const [context, prefs, constraints, availability, passes] = await Promise.all([
       memory.getConversationContext(userId, conversationId),
       memory.searchEntities({ userId, type: 'preference' }),
+      getTravelConstraints(userId),
+      getAvailability(userId),
+      getHeldPasses(userId),
     ]);
     return {
       kind: 'map_snippet',
@@ -23,6 +27,11 @@ export default defineTool({
         reflections: context.reflections,
         observations: context.observations,
         preferences: prefs.map((p) => ({ name: p.name, type: p.type, confidence: p.confidence })),
+        // Accessibility / travel constraints — honor these in every recommendation + itinerary.
+        travelConstraints: constraints,
+        // Travel window (for event/season-aware suggestions) + entrance passes the user holds.
+        availability,
+        passes,
       },
     };
   },

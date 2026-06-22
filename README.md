@@ -19,9 +19,10 @@ Most "agent memory" is a pile of embedded text snippets. TrailGraph uses the mor
 your domain data.
 
 - **One Neo4j, two graphs.** The NPS **domain graph** (parks ↔ activities ↔ topics ↔ campgrounds ↔
-  alerts) and each user's **context graph** (preferences, considered parks, trips, and the agent's own
-  reasoning) live in the **same instance**. NAMS is pointed at that same Neo4j as its workspace store,
-  which is the decision that unlocks everything else.
+  alerts ↔ places ↔ people ↔ tours ↔ amenities ↔ passport stamps ↔ events) and each user's **context
+  graph** (preferences, considered parks, trips, accessibility constraints, passes, stamps, and the
+  agent's own reasoning) live in the **same instance**. NAMS is pointed at that same Neo4j as its
+  workspace store, which is the decision that unlocks everything else.
 - **Memory that's a graph, not a transcript.** NAMS captures three memory types — **short-term**
   (conversation), **long-term** (entities + preferences, extracted automatically), and **reasoning**
   (the agent's decision/tool-call traces, the rare one that powers honest "why did you suggest this?").
@@ -75,7 +76,11 @@ model can't spoof whose memory it touches.
 When a user states a preference, we write the raw fact to NAMS **and** a deterministic
 `(:User)-[:PREFERS]->(:Activity|:Topic)` edge into the graph — canonicalizing free text ("dark skies")
 to a real domain node (`:Activity {name:"Astronomy"}`). The edge keeps the user's original words for
-honest explanations and makes personalization show up instantly.
+honest explanations and makes personalization show up instantly. Every new domain node type becomes a
+new bridge target: the context graph now also captures **how you travel** (`TRAVELS_WITH` a
+`:Constraint`, `REQUIRES` an `:Amenity`), passes you hold (`HOLDS`→`:EntrancePass`), stamps you've
+collected (`COLLECTED`→`:PassportStamp`), and your travel window (`AVAILABLE`→`:Season`) — so a single
+traversal can satisfy *and explain* an accessibility- and pass-aware recommendation.
 
 ### 5. Memory beyond the chat box — [`lib/recommend.ts`](lib/recommend.ts) · [`lib/explain.ts`](lib/explain.ts)
 Because the context graph is just data in Neo4j, the homepage "For you," the map defaults, and the
@@ -92,18 +97,30 @@ A companion deep-dive on this integration is written up as a blog post ([lyonwj.
 
 ## What you can do
 
-- **Explore** 470+ NPS sites with full-text + faceted search (activity, topic, state, dark-sky), and a
-  personalized **"For you"** rail.
+- **Explore** 470+ NPS sites with full-text + faceted search (activity, topic, **amenity**, state,
+  dark-sky), and a personalized **"For you"** rail.
+- **Search** (`/search`) — one query box, **semantic** results across parks, **places** (17k POIs), and
+  **people** (historical figures), ranked by meaning via per-node vector embeddings.
 - **Map** every site on a clustered MapLibre map with layer toggles (campgrounds, visitor centers,
-  things-to-do, active alerts) loaded by viewport.
+  things-to-do, active alerts) loaded by viewport, plus real **park boundary** overlays on detail maps.
 - **Plan** multi-park, multi-day trips with drive segments, day-by-day pacing, graph-aware route
-  optimization, per-trip alert checks, shareable read-only links, and `.ics` export.
-- **Chat** with the **ranger**, which recalls your preferences, recommends parks with reasons, and
-  builds trips for you — remembering what you like across sessions.
-- **Your memory** (`/me`): see, tune (boost/down-rank), and delete everything the app remembers — with
-  durable deletes (tombstones) so extraction won't resurrect them.
+  optimization, per-trip alert checks, a **fees/passes cost estimate** (with America-the-Beautiful
+  break-even), shareable read-only links, and `.ics` export — or **seed a trip from an official NPS tour**.
+- **Trails** (`/trails`) — cross-park **thematic trails** connected by a historical figure or a shared
+  topic, highlighted on the graph constellation.
+- **Chat** with the **ranger**, which recalls your preferences, recommends parks with reasons, builds
+  trips, finds places/people semantically (`find_place`/`find_person`), and respects how you travel —
+  remembering what you like across sessions.
+- **Plan for how *you* travel** — tell the ranger you use a wheelchair, travel in a 30-ft RV, need a
+  specific amenity, hold an annual pass, or are going in September, and every later recommendation,
+  itinerary, and cost honors it — with provenance ("has a wheelchair-accessible campground").
+- **Collect** passport stamps and see events that land during your travel window, per park.
+- **Your memory** (`/me`): see, tune (boost/down-rank), and delete everything the app remembers —
+  preferences, considered parks, trips, travel constraints, passes, stamps, and dates — with durable
+  deletes (tombstones) so extraction won't resurrect them.
 - **Conditions** on each park: dark-sky/Bortle rating, best months + a monthly-visitation chart, trail
-  difficulty/length, current weather, and timed-entry status — graph-native data behind swappable adapters.
+  difficulty/length, current weather, timed-entry, and live **webcams + road events** — graph-native
+  or on-demand behind swappable adapters.
 - **Dark mode** (system-aware, with a toggle in the nav) across the whole app, including the map basemap.
 
 > Builds use the **webpack** bundler (`next dev/build --webpack`) — Chakra v3 + next-themes hit a
@@ -119,6 +136,7 @@ A companion deep-dive on this integration is written up as a blog post ([lyonwj.
 | **Agent** | [Eve](https://vercel.com/) (durable agent runtime) · AI Gateway |
 | **Memory** | [NAMS](https://neo4j.com/labs/) — `@neo4j-labs/agent-memory`, hosted, on an external Neo4j |
 | **Database** | Neo4j (domain graph + context graph + app data) |
+| **Search** | Neo4j full-text + faceted, and semantic vector search (parks/places/people) via AI Gateway embeddings |
 | **Auth** | Better Auth (passwordless magic link) |
 | **UI** | Chakra UI v3 · MapLibre GL + Protomaps · Neo4j NVL · Recharts |
 | **Routing** | OpenRouteService (drive segments) |
@@ -140,7 +158,11 @@ pnpm dev                          # Next + the Eve ranger together — open http
 ```
 
 Then populate the domain graph from the NPS API: `curl "http://localhost:3000/api/sync?tier=all"`
-(and `pnpm datasources:sync` for the dark-sky / crowds / trail-difficulty conditions).
+(and `pnpm datasources:sync` for the dark-sky / crowds / trail-difficulty conditions). The sync is
+**resumable and rate-limit-tolerant** — large resources page-and-checkpoint, so a `429` pauses (saving
+a cursor) and the next run continues; the response reports `{paused:[…]}`. It also embeds `:Place`/
+`:Person` for semantic search (content-hash gated); add `EMBED_ARTICLES=1` to also embed the ~19k
+articles. `pnpm sync:reset <resource>…` clears specific checkpoints to force a re-sync.
 
 > `pnpm dev` auto-starts the Eve agent behind the app via Eve's `withEve`. To run the app **without** the
 > agent (just Explore / Map / Plan UI): `DISABLE_EVE=1 pnpm dev`.

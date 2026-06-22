@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Box, Heading, Stack, HStack, Text, Badge, Button, Link as CLink, Spinner } from '@chakra-ui/react';
+import { Box, Heading, Stack, HStack, Text, Badge, Button, Link as CLink, Spinner, Input } from '@chakra-ui/react';
 import NextLink from 'next/link';
 import type { UserMemory } from '../../lib/memory-graph';
 
@@ -13,6 +13,9 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
   const [busy, setBusy] = useState(false);
   const [learning, setLearning] = useState(true);
   const [showAllConsidered, setShowAllConsidered] = useState(false);
+  const [rvDraft, setRvDraft] = useState(initial.travel.rvMaxLengthFt != null ? String(initial.travel.rvMaxLengthFt) : '');
+  const [startDraft, setStartDraft] = useState(initial.availability.start ?? '');
+  const [endDraft, setEndDraft] = useState(initial.availability.end ?? '');
 
   // On load, reconcile NAMS-extracted chat preferences into the graph so implicit prefs show up
   // here (§2.1/§5), then refresh. Eventually-consistent — this "catches up" the display.
@@ -84,6 +87,96 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
             ))}
           </Stack>
         )}
+      </Box>
+
+      <Box>
+        <HStack justify="space-between" mb={1}>
+          <Heading size="sm">How you travel</Heading>
+          {mem.travel.wheelchair || mem.travel.rvMaxLengthFt != null || mem.travel.requiredAmenities.length > 0 ? (
+            <Button size="xs" variant="ghost" colorPalette="red" disabled={busy}
+              onClick={() => { setRvDraft(''); act({ op: 'clearTravelConstraints' }); }}>Clear</Button>
+          ) : null}
+        </HStack>
+        <Text fontSize="xs" color="fg.muted" mb={3}>
+          Constraints the ranger honors in every recommendation and itinerary.
+        </Text>
+        <Stack gap={3}>
+          <HStack borderWidth="1px" borderRadius="md" p={2}>
+            <Text flex="1">Wheelchair-accessible sites</Text>
+            <Button size="xs" disabled={busy}
+              variant={mem.travel.wheelchair ? 'solid' : 'ghost'}
+              colorPalette={mem.travel.wheelchair ? 'green' : 'gray'}
+              onClick={() => act({ op: 'setTravelConstraints', wheelchair: !mem.travel.wheelchair })}>
+              {mem.travel.wheelchair ? 'Required' : 'Off'}
+            </Button>
+          </HStack>
+          <HStack borderWidth="1px" borderRadius="md" p={2}>
+            <Text flex="1">RV / trailer length (ft)</Text>
+            <Input size="xs" type="number" min={0} w="20" value={rvDraft} placeholder="e.g. 30"
+              onChange={(e) => setRvDraft(e.target.value)} />
+            <Button size="xs" variant="ghost" disabled={busy}
+              onClick={() => act({ op: 'setTravelConstraints', rvMaxLengthFt: rvDraft.trim() === '' ? null : Number(rvDraft) })}>Save</Button>
+          </HStack>
+          {mem.travel.requiredAmenities.length > 0 ? (
+            <HStack borderWidth="1px" borderRadius="md" p={2} flexWrap="wrap" gap={2}>
+              <Text>Must have:</Text>
+              {mem.travel.requiredAmenities.map((a) => (
+                <Badge key={a} colorPalette="orange">{a}</Badge>
+              ))}
+            </HStack>
+          ) : null}
+          <HStack borderWidth="1px" borderRadius="md" p={2} flexWrap="wrap">
+            <Text flex="1" minW="32">Travel dates</Text>
+            <Input size="xs" type="date" w="36" value={startDraft} onChange={(e) => setStartDraft(e.target.value)} />
+            <Text color="fg.muted">–</Text>
+            <Input size="xs" type="date" w="36" value={endDraft} onChange={(e) => setEndDraft(e.target.value)} />
+            <Button size="xs" variant="ghost" disabled={busy}
+              onClick={() =>
+                startDraft && endDraft
+                  ? act({ op: 'setAvailability', start: startDraft, end: endDraft })
+                  : act({ op: 'clearAvailability' })
+              }>
+              Save
+            </Button>
+          </HStack>
+        </Stack>
+      </Box>
+
+      <Box>
+        <Heading size="sm" mb={1}>Passes &amp; stamps</Heading>
+        <Text fontSize="xs" color="fg.muted" mb={3}>
+          A pass you hold makes covered parks free in trip costs; stamps are your collection.
+        </Text>
+        <Stack gap={3}>
+          <HStack borderWidth="1px" borderRadius="md" p={2}>
+            <Text flex="1">America the Beautiful — annual pass</Text>
+            {mem.passes.some((p) => p.id === 'atb-annual') ? (
+              <Button size="xs" colorPalette="green" disabled={busy} onClick={() => act({ op: 'clearPass', passId: 'atb-annual' })}>
+                Held ✓
+              </Button>
+            ) : (
+              <Button size="xs" variant="ghost" disabled={busy} onClick={() => act({ op: 'recordPass', passId: 'atb-annual' })}>
+                I have it
+              </Button>
+            )}
+          </HStack>
+          {mem.stamps.length > 0 ? (
+            <Box borderWidth="1px" borderRadius="md" p={2}>
+              <Text fontSize="sm" mb={2}>Collected stamps ({mem.stamps.length})</Text>
+              <Stack gap={1}>
+                {mem.stamps.map((s) => (
+                  <HStack key={s.id}>
+                    <Text flex="1" fontSize="sm">🎫 {s.label || s.id}</Text>
+                    <Button size="xs" colorPalette="red" variant="ghost" disabled={busy}
+                      onClick={() => act({ op: 'uncollectStamp', stampId: s.id })}>Remove</Button>
+                  </HStack>
+                ))}
+              </Stack>
+            </Box>
+          ) : (
+            <Text color="fg.muted" fontSize="sm">No stamps collected yet — mark them on park pages.</Text>
+          )}
+        </Stack>
       </Box>
 
       <Box>

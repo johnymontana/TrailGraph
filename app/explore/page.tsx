@@ -29,6 +29,7 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
       stateCode: sp.stateCode,
       activity: sp.activity,
       topic: sp.topic,
+      amenity: sp.amenity,
       designation: sp.designation,
       darkSky: sp.darkSky === '1',
       limit: pageSize,
@@ -89,6 +90,9 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
           </Box>
           <FacetSelect name="activity" label="Activity" value={sp.activity} options={f.activities} />
           <FacetSelect name="topic" label="Topic" value={sp.topic} options={f.topics} />
+          {f.amenities.length > 0 ? (
+            <FacetSelect name="amenity" label="Amenity" value={sp.amenity} options={f.amenities} />
+          ) : null}
           <FacetSelect name="designation" label="Designation" value={sp.designation} options={f.designations} />
           <FacetSelect
             name="stateCode"

@@ -30,7 +30,10 @@ export async function GET(req: Request) {
     const results = await runSync(tier);
     // The §5 data-source adapters (dark-sky, crowds, trail difficulty, reservations) ride the corpus run.
     const dataSources = tier === 'slow' || tier === 'all' ? await syncDataSources().catch(() => null) : undefined;
-    return Response.json({ tier, results, dataSources });
+    // A rate-limited resource pauses (saves a cursor) rather than failing the run — surface which steps
+    // still need another window so the caller knows to re-run after the NPS quota resets.
+    const paused = results.filter((r) => r.counts.paused).map((r) => r.resource);
+    return Response.json({ tier, paused, results, dataSources });
   } catch (err) {
     return Response.json({ tier, error: (err as Error).message }, { status: 500 });
   }

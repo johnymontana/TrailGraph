@@ -30,16 +30,25 @@ export async function searchParks(opts: {
   stateCode?: string;
   activity?: string;
   topic?: string;
+  amenity?: string;
   designation?: string;
   darkSky?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<{ items: ParkSummary[]; total: number }> {
-  const { q, stateCode, activity, topic, designation, darkSky, limit = 24, offset = 0 } = opts;
+  const { q, stateCode, activity, topic, amenity, designation, darkSky, limit = 24, offset = 0 } = opts;
   const where: string[] = [];
   if (stateCode) where.push('(p)-[:LOCATED_IN]->(:State {code:$stateCode})');
   if (activity) where.push('(p)-[:OFFERS]->(:Activity {name:$activity})');
   if (topic) where.push('(p)-[:HAS_TOPIC]->(:Topic {name:$topic})');
+  // An amenity lives on a park's Place/VisitorCenter/Campground (NPS-expansion P1 #5) — a park
+  // "has" it if any of its child nodes does.
+  if (amenity)
+    where.push(
+      `(EXISTS { (p)-[:HAS_PLACE]->(:Place)-[:HAS_AMENITY]->(:Amenity {name:$amenity}) }
+        OR EXISTS { (vc:VisitorCenter)-[:IN_PARK]->(p) WHERE (vc)-[:HAS_AMENITY]->(:Amenity {name:$amenity}) }
+        OR EXISTS { (cg:Campground)-[:IN_PARK]->(p) WHERE (cg)-[:HAS_AMENITY]->(:Amenity {name:$amenity}) })`,
+    );
   if (designation) where.push('p.designation = $designation');
   if (darkSky) where.push('p.darkSkyCertified = true');
   const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
@@ -53,6 +62,7 @@ export async function searchParks(opts: {
     stateCode: stateCode ?? null,
     activity: activity ?? null,
     topic: topic ?? null,
+    amenity: amenity ?? null,
     designation: designation ?? null,
     limit,
     offset,
@@ -214,16 +224,24 @@ export async function alertParksInBBox(box: BBox) {
 
 /** Facet values for the Explore sidebar (A1). */
 export async function facets() {
-  const rows = await readGraph<{ activities: string[]; topics: string[]; designations: string[]; states: { code: string; name: string }[] }>(
+  const rows = await readGraph<{
+    activities: string[];
+    topics: string[];
+    amenities: string[];
+    designations: string[];
+    states: { code: string; name: string }[];
+  }>(
     `
     CALL { MATCH (a:Activity) RETURN collect(DISTINCT a.name) AS activities }
     CALL { MATCH (t:Topic) RETURN collect(DISTINCT t.name) AS topics }
+    // Only amenities actually wired to a child node are useful as park filters.
+    CALL { MATCH (am:Amenity) WHERE EXISTS { ()-[:HAS_AMENITY]->(am) } RETURN collect(DISTINCT am.name) AS amenities }
     CALL { MATCH (p:Park) WHERE p.designation <> '' RETURN collect(DISTINCT p.designation) AS designations }
     CALL { MATCH (s:State) RETURN collect(DISTINCT {code: s.code, name: s.name}) AS states }
-    RETURN activities, topics, designations, states
+    RETURN activities, topics, amenities, designations, states
     `,
   );
-  return rows[0] ?? { activities: [], topics: [], designations: [], states: [] };
+  return rows[0] ?? { activities: [], topics: [], amenities: [], designations: [], states: [] };
 }
 
 /**
@@ -402,6 +420,209 @@ export async function parkGraph(
   }
 
   return { nodes, relationships };
+}
+
+/**
+ * Thematic cross-park trail (NPS-expansion P0 #2): the parks connected by a historical Person
+ * (`ASSOCIATED_WITH`) or a Topic (`HAS_TOPIC`) — a multi-hop traversal no single park page reveals.
+ */
+export async function thematicTrail(
+  opts: { person?: string; topic?: string },
+  limit = 12,
+): Promise<(ParkSummary & { via: string })[]> {
+  if (opts.person) {
+    return readGraph(
+      `MATCH (per:Person)-[:ASSOCIATED_WITH]->(p:Park)
+       WHERE toLower(per.title) CONTAINS toLower($person)
+       RETURN ${PARK_SUMMARY_RETURN}, per.title AS via
+       ORDER BY name ASC LIMIT toInteger($limit)`,
+      { person: opts.person, limit },
+    );
+  }
+  if (opts.topic) {
+    return readGraph(
+      `MATCH (t:Topic) WHERE toLower(t.name) = toLower($topic)
+       MATCH (p:Park)-[:HAS_TOPIC]->(t)
+       RETURN ${PARK_SUMMARY_RETURN}, t.name AS via
+       ORDER BY name ASC LIMIT toInteger($limit)`,
+      { topic: opts.topic, limit },
+    );
+  }
+  return [];
+}
+
+/**
+ * Browse-able thematic trails (NPS-expansion P0 #2, `/trails`): historical figures who span ≥2 parks
+ * and the topics shared across the most parks — each is a ready-made cross-park traversal.
+ */
+export async function trailThemes(limit = 24): Promise<{
+  people: { title: string; parks: number }[];
+  topics: { name: string; parks: number }[];
+}> {
+  const rows = await readGraph<{
+    people: { title: string; parks: number }[];
+    topics: { name: string; parks: number }[];
+  }>(
+    `
+    CALL {
+      MATCH (per:Person)-[:ASSOCIATED_WITH]->(p:Park)
+      WITH per, count(DISTINCT p) AS parks WHERE parks >= 2
+      RETURN collect({title: per.title, parks: parks})[..toInteger($limit)] AS people
+    }
+    CALL {
+      MATCH (t:Topic)<-[:HAS_TOPIC]-(p:Park)
+      WITH t, count(DISTINCT p) AS parks WHERE parks >= 3
+      RETURN collect({name: t.name, parks: parks})[..toInteger($limit)] AS topics
+    }
+    RETURN people, topics
+    `,
+    { limit },
+  );
+  const r = rows[0] ?? { people: [], topics: [] };
+  // Cypher collect() doesn't order; sort by spread (most parks first) for the most striking trails.
+  return {
+    people: [...r.people].sort((a, b) => b.parks - a.parks),
+    topics: [...r.topics].sort((a, b) => b.parks - a.parks),
+  };
+}
+
+/** Historical figures associated with a park (for the park-page "People & stories" section). */
+export async function peopleForPark(
+  parkCode: string,
+  limit = 8,
+): Promise<{ id: string; title: string; tags: string[] }[]> {
+  return readGraph(
+    `MATCH (per:Person)-[:ASSOCIATED_WITH]->(:Park {parkCode:$parkCode})
+     RETURN per.id AS id, per.title AS title, coalesce(per.tags, []) AS tags
+     ORDER BY title ASC LIMIT toInteger($limit)`,
+    { parkCode, limit },
+  );
+}
+
+/** Official NPS tours anchored in a park (P1 #3) — each is a ready-made ordered itinerary path. */
+export async function toursForPark(
+  parkCode: string,
+  limit = 8,
+): Promise<{ id: string; title: string; description: string | null; stops: number }[]> {
+  return readGraph(
+    `MATCH (tr:Tour)-[:IN_PARK]->(:Park {parkCode: $parkCode})
+     OPTIONAL MATCH (tr)-[:HAS_STOP]->(ts:TourStop)
+     WITH tr, count(ts) AS stops
+     RETURN tr.id AS id, tr.title AS title, tr.description AS description, stops
+     ORDER BY stops DESC, title ASC LIMIT toInteger($limit)`,
+    { parkCode, limit },
+  );
+}
+
+/**
+ * Active events at a park (NPS-expansion P2 #7), optionally intersected with the user's travel window
+ * (`window.start`/`window.end`, ISO dates) — `inWindow` flags those that fall inside it. Events are
+ * synced as `(:Event)-[:HELD_AT]->(:Park)` on the fast tier.
+ */
+export async function eventsForPark(
+  parkCode: string,
+  window: { start: string | null; end: string | null } = { start: null, end: null },
+  limit = 12,
+): Promise<{ id: string; title: string; dateStart: string | null; dateEnd: string | null; inWindow: boolean }[]> {
+  return readGraph(
+    `MATCH (e:Event)-[:HELD_AT]->(:Park {parkCode: $parkCode})
+     WHERE e.active = true
+     RETURN e.id AS id, e.title AS title, e.dateStart AS dateStart, e.dateEnd AS dateEnd,
+            ($start IS NOT NULL AND $end IS NOT NULL AND e.dateStart IS NOT NULL
+             AND e.dateStart <= $end AND coalesce(e.dateEnd, e.dateStart) >= $start) AS inWindow
+     ORDER BY inWindow DESC, e.dateStart ASC LIMIT toInteger($limit)`,
+    { parkCode, start: window.start, end: window.end, limit },
+  );
+}
+
+/**
+ * Passport stamps at a park + whether the current user has collected each (NPS-expansion P2 #8). When
+ * `userId` is null (anonymous), `collected` is always false. Powers the park-page collection toggle.
+ */
+export async function stampsForPark(
+  parkCode: string,
+  userId: string | null,
+): Promise<{ id: string; label: string; collected: boolean }[]> {
+  return readGraph(
+    `MATCH (st:PassportStamp)-[:IN_PARK]->(:Park {parkCode: $parkCode})
+     OPTIONAL MATCH (u:User {userId: $userId})-[c:COLLECTED]->(st)
+     RETURN st.id AS id, coalesce(st.label, 'Passport stamp') AS label, c IS NOT NULL AS collected
+     ORDER BY label ASC`,
+    { parkCode, userId: userId ?? '__anon__' },
+  );
+}
+
+/** POIs at a park (NPS-expansion P3): real place images + audio descriptions for accessibility. */
+export async function placesForPark(
+  parkCode: string,
+  limit = 12,
+): Promise<{ id: string; title: string; image: string | null; audioDescription: string | null; isStamp: boolean }[]> {
+  return readGraph(
+    `MATCH (:Park {parkCode: $parkCode})-[:HAS_PLACE]->(pl:Place)
+     RETURN pl.id AS id, pl.title AS title,
+            CASE WHEN size(coalesce(pl.images, [])) > 0 THEN pl.images[0] ELSE null END AS image,
+            pl.audioDescription AS audioDescription, coalesce(pl.isStamp, false) AS isStamp
+     ORDER BY title ASC LIMIT toInteger($limit)`,
+    { parkCode, limit },
+  );
+}
+
+/** Articles about a park (NPS-expansion P3): "learn more" content depth. */
+export async function articlesForPark(
+  parkCode: string,
+  limit = 8,
+): Promise<{ id: string; title: string; url: string | null; description: string | null }[]> {
+  return readGraph(
+    `MATCH (ar:Article)-[:ABOUT]->(:Park {parkCode: $parkCode})
+     RETURN ar.id AS id, ar.title AS title, ar.url AS url, ar.description AS description
+     ORDER BY title ASC LIMIT toInteger($limit)`,
+    { parkCode, limit },
+  );
+}
+
+/** Parking lots at a park (NPS-expansion P3): arrival logistics + accessibility. */
+export async function parkingForPark(
+  parkCode: string,
+  limit = 12,
+): Promise<{ id: string; name: string; wheelchairAccessible: boolean }[]> {
+  return readGraph(
+    `MATCH (pl:ParkingLot)-[:IN_PARK]->(:Park {parkCode: $parkCode})
+     RETURN pl.id AS id, pl.name AS name, coalesce(pl.wheelchairAccessible, false) AS wheelchairAccessible
+     ORDER BY name ASC LIMIT toInteger($limit)`,
+    { parkCode, limit },
+  );
+}
+
+export interface SemanticHit {
+  id: string;
+  title: string;
+  parks: { parkCode: string; parkName: string }[];
+  image: string | null;
+  isStamp: boolean;
+  tags: string[];
+  score: number;
+}
+
+/**
+ * Semantic search over the NPS-expansion nodes (Place/Person) via their vector index. Returns the
+ * matched node + up to 3 related parks (the navigable target — no place/person detail route exists) and
+ * card-ready fields (image/stamp flag for places, tags for both). Requires the `place_embedding`/
+ * `person_embedding` indexes (migration 004) and embeddings written by `embed-nodes.ts`.
+ */
+export async function semanticSearch(kind: 'place' | 'person', query: string, limit = 10): Promise<SemanticHit[]> {
+  const index = kind === 'place' ? 'place_embedding' : 'person_embedding';
+  const rel = kind === 'place' ? 'HAS_PLACE' : 'ASSOCIATED_WITH';
+  const [vector] = await embed([query]);
+  return readGraph(
+    `CALL db.index.vector.queryNodes($index, toInteger($k), $vector) YIELD node AS n, score
+     OPTIONAL MATCH (n)-[:${rel}]-(p:Park)
+     WITH n, score, [x IN collect(DISTINCT {parkCode: p.parkCode, parkName: p.fullName}) WHERE x.parkCode IS NOT NULL][0..3] AS parks
+     RETURN n.id AS id, n.title AS title, parks,
+            CASE WHEN size(coalesce(n.images, [])) > 0 THEN n.images[0] ELSE null END AS image,
+            coalesce(n.isStamp, false) AS isStamp, coalesce(n.tags, []) AS tags, score
+     ORDER BY score DESC LIMIT toInteger($limit)`,
+    { index, k: limit, vector, limit },
+  );
 }
 
 /** "Vibe" search (A4): vector candidates → graph re-rank (ADR-012). */

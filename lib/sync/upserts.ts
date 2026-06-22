@@ -1,4 +1,4 @@
-import { writeGraph } from '../neo4j';
+import { writeGraph, readGraph } from '../neo4j';
 import { STATE_NAMES } from '../us-states';
 import type {
   NpsAlert,
@@ -7,7 +7,33 @@ import type {
   NpsThingToDo,
   NpsActivityRef,
   NpsGeneric,
+  NpsPlace,
+  NpsPerson,
+  NpsTour,
+  NpsPassportStamp,
+  NpsParkingLot,
+  NpsArticle,
 } from '../nps';
+
+/**
+ * Normalize the free-text `campground.accessibility` blob into structured props (R-NPS §accessibility):
+ * a wheelchair boolean and an RV max-length in feet, for graph filtering. Pure (unit-tested).
+ */
+export function normalizeCampgroundAccessibility(acc: Record<string, unknown> | undefined): {
+  wheelchairAccessible: boolean;
+  rvMaxLengthFt: number | null;
+  adaInfo: string | null;
+} {
+  const a = acc ?? {};
+  const wc = `${a.wheelchairAccess ?? ''} ${(Array.isArray(a.classifications) ? a.classifications.join(' ') : '')}`;
+  const wheelchairAccessible = /accessible|wheelchair/i.test(wc) && !/not accessible|no wheelchair/i.test(wc);
+  const rv = Number(a.rvMaxLength ?? a.rvMaxLengthHostString ?? '');
+  return {
+    wheelchairAccessible,
+    rvMaxLengthFt: Number.isFinite(rv) && rv > 0 ? Math.round(rv) : null,
+    adaInfo: typeof a.adaInfo === 'string' && a.adaInfo ? (a.adaInfo as string) : null,
+  };
+}
 
 /**
  * Idempotent upserts (ADR-007). Every write is MERGE-on-natural-key + SET, so re-running a sync is
@@ -103,23 +129,31 @@ export async function upsertNamed(label: string, items: NpsActivityRef[]): Promi
 
 export async function upsertCampgrounds(cgs: NpsCampground[]): Promise<number> {
   if (!cgs.length) return 0;
-  const rows = cgs.map((c) => ({
-    id: c.id,
-    name: c.name,
-    parkCode: c.parkCode,
-    description: c.description ?? null,
-    reservationUrl: c.reservationUrl ?? null,
-    lat: num(c.latitude),
-    lng: num(c.longitude),
-    amenities: j(c.amenities ?? {}),
-    accessibility: j(c.accessibility ?? {}),
-  }));
+  const rows = cgs.map((c) => {
+    const acc = normalizeCampgroundAccessibility(c.accessibility);
+    return {
+      id: c.id,
+      name: c.name,
+      parkCode: c.parkCode,
+      description: c.description ?? null,
+      reservationUrl: c.reservationUrl ?? null,
+      lat: num(c.latitude),
+      lng: num(c.longitude),
+      amenities: j(c.amenities ?? {}),
+      accessibility: j(c.accessibility ?? {}),
+      wheelchairAccessible: acc.wheelchairAccessible,
+      rvMaxLengthFt: acc.rvMaxLengthFt,
+      adaInfo: acc.adaInfo,
+    };
+  });
   const r = await writeGraph<{ c: number }>(
     `
     UNWIND $rows AS row
     MERGE (c:Campground {id: row.id})
       SET c.name = row.name, c.description = row.description, c.reservationUrl = row.reservationUrl,
           c.amenities = row.amenities, c.accessibility = row.accessibility,
+          c.wheelchairAccessible = row.wheelchairAccessible, c.rvMaxLengthFt = row.rvMaxLengthFt,
+          c.adaInfo = row.adaInfo,
           c.location = CASE WHEN row.lat IS NOT NULL AND row.lng IS NOT NULL
                             THEN point({latitude: row.lat, longitude: row.lng}) ELSE c.location END,
           c.lastSyncedAt = datetime()
@@ -226,6 +260,333 @@ export async function upsertVisitorCenters(items: NpsGeneric[]): Promise<number>
     WITH v, row WHERE row.parkCode IS NOT NULL
     MATCH (p:Park {parkCode: row.parkCode}) MERGE (v)-[:IN_PARK]->(p)
     RETURN count(v) AS c
+    `,
+    { rows },
+  );
+  return r[0]?.c ?? 0;
+}
+
+/** Places (POIs): `(:Park)-[:HAS_PLACE]->(:Place)`; carries audio/stamp flags + images (R-NPS §places). */
+export async function upsertPlaces(places: NpsPlace[]): Promise<number> {
+  if (!places.length) return 0;
+  const rows = places.map((p) => ({
+    id: p.id,
+    title: p.title,
+    bodyText: p.bodyText ?? p.listingDescription ?? null,
+    lat: num(p.latitude),
+    lng: num(p.longitude),
+    audioDescription: p.audioDescription ?? null,
+    isStamp: p.isPassportStampLocation === true || p.isPassportStampLocation === 'true',
+    images: (p.images ?? []).map((i) => i.url),
+    imagesFull: j(p.images ?? []),
+    tags: (p.tags ?? []).filter(Boolean),
+    parkCodes: (p.relatedParks ?? []).map((rp) => rp.parkCode).filter(Boolean),
+  }));
+  const r = await writeGraph<{ c: number }>(
+    `
+    UNWIND $rows AS row
+    MERGE (pl:Place {id: row.id})
+      SET pl.title = row.title, pl.bodyText = row.bodyText, pl.audioDescription = row.audioDescription,
+          pl.isStamp = row.isStamp, pl.images = row.images, pl.imagesFull = row.imagesFull, pl.tags = row.tags,
+          pl.location = CASE WHEN row.lat IS NOT NULL AND row.lng IS NOT NULL
+                             THEN point({latitude: row.lat, longitude: row.lng}) ELSE pl.location END,
+          pl.lastSyncedAt = datetime()
+    WITH pl, row
+    CALL { WITH pl, row UNWIND row.parkCodes AS pc MATCH (p:Park {parkCode: pc}) MERGE (p)-[:HAS_PLACE]->(pl) }
+    RETURN count(pl) AS c
+    `,
+    { rows },
+  );
+  return r[0]?.c ?? 0;
+}
+
+/** People: `(:Person)-[:ASSOCIATED_WITH]->(:Park)` + `RELATES_TO_TOPIC` where a tag matches a Topic. */
+export async function upsertPeople(people: NpsPerson[]): Promise<number> {
+  if (!people.length) return 0;
+  const rows = people.map((p) => ({
+    id: p.id,
+    title: p.title,
+    bodyText: p.bodyText ?? p.listingDescription ?? null,
+    lat: num(p.latitude),
+    lng: num(p.longitude),
+    images: (p.images ?? []).map((i) => i.url),
+    tags: (p.tags ?? []).filter(Boolean),
+    parkCodes: (p.relatedParks ?? []).map((rp) => rp.parkCode).filter(Boolean),
+  }));
+  const r = await writeGraph<{ c: number }>(
+    `
+    UNWIND $rows AS row
+    MERGE (per:Person {id: row.id})
+      SET per.title = row.title, per.bodyText = row.bodyText, per.images = row.images, per.tags = row.tags,
+          per.location = CASE WHEN row.lat IS NOT NULL AND row.lng IS NOT NULL
+                              THEN point({latitude: row.lat, longitude: row.lng}) ELSE per.location END,
+          per.lastSyncedAt = datetime()
+    WITH per, row
+    CALL { WITH per, row UNWIND row.parkCodes AS pc MATCH (p:Park {parkCode: pc}) MERGE (per)-[:ASSOCIATED_WITH]->(p) }
+    CALL { WITH per, row UNWIND row.tags AS tag MATCH (t:Topic {name: tag}) MERGE (per)-[:RELATES_TO_TOPIC]->(t) }
+    RETURN count(per) AS c
+    `,
+    { rows },
+  );
+  return r[0]?.c ?? 0;
+}
+
+/** Tours: `(:Tour)-[:HAS_STOP]->(:TourStop {ordinal})-[:AT]->(:Place|:Campground|:VisitorCenter)`. */
+export async function upsertTours(tours: NpsTour[]): Promise<number> {
+  if (!tours.length) return 0;
+  const rows = tours.map((t) => ({
+    id: t.id,
+    title: t.title,
+    description: t.description ?? null,
+    parkCodes: (t.relatedParks ?? []).map((rp) => rp.parkCode).filter(Boolean),
+    stops: (t.stops ?? []).map((s, i) => ({
+      id: s.id ?? `${t.id}-${i}`,
+      ordinal: typeof s.ordinal === 'string' ? Number(s.ordinal) || i : (s.ordinal ?? i),
+      assetType: s.assetType ?? null,
+      assetId: s.assetId ?? null,
+      title: s.title ?? null,
+    })),
+  }));
+  const r = await writeGraph<{ c: number }>(
+    `
+    UNWIND $rows AS row
+    MERGE (tr:Tour {id: row.id}) SET tr.title = row.title, tr.description = row.description, tr.lastSyncedAt = datetime()
+    WITH tr, row
+    CALL { WITH tr, row UNWIND row.parkCodes AS pc MATCH (p:Park {parkCode: pc}) MERGE (tr)-[:IN_PARK]->(p) }
+    CALL {
+      WITH tr, row
+      UNWIND row.stops AS st
+      MERGE (ts:TourStop {id: st.id})
+        SET ts.ordinal = toInteger(st.ordinal), ts.title = st.title, ts.assetType = st.assetType
+      MERGE (tr)-[:HAS_STOP]->(ts)
+      WITH ts, st
+      CALL { WITH ts, st WITH ts, st WHERE st.assetType = 'Place' MATCH (pl:Place {id: st.assetId}) MERGE (ts)-[:AT]->(pl) }
+      CALL { WITH ts, st WITH ts, st WHERE st.assetType = 'Campground' MATCH (c:Campground {id: st.assetId}) MERGE (ts)-[:AT]->(c) }
+      CALL { WITH ts, st WITH ts, st WHERE st.assetType = 'VisitorCenter' MATCH (v:VisitorCenter {id: st.assetId}) MERGE (ts)-[:AT]->(v) }
+    }
+    RETURN count(tr) AS c
+    `,
+    { rows },
+  );
+  return r[0]?.c ?? 0;
+}
+
+/**
+ * Amenity bridges from `/amenities/parksplaces` or `/amenities/parksvisitorcenters`: link existing
+ * `:Place`/`:VisitorCenter` nodes to the shared `:Amenity` vocabulary. Each item is an amenity with a
+ * `parks[]`, each park holding a child array (`places` or `visitorCenters`).
+ */
+/**
+ * Parse `/amenities/parksplaces|parksvisitorcenters` items into `{amenityId, amenityName, childIds}`.
+ * Pure (unit-tested). NPS wraps each amenity object in a single-element array (`data: [[{…}], …]`), so
+ * we flatten one level first; each amenity then has `parks[].<childArrayKey>[].id` (the child key is
+ * lowercase: `places` / `visitorcenters`). Falls back to the first array-of-{id} on a park object as a
+ * guard against future key/casing changes.
+ */
+export function extractAmenityChildIds(
+  items: unknown[],
+  childArrayKey: 'places' | 'visitorcenters',
+): { amenityId: string; amenityName: string; childIds: string[] }[] {
+  const flat = items.flatMap((it) => (Array.isArray(it) ? it : [it])) as Record<string, unknown>[];
+  return flat
+    .filter((it) => it && typeof it === 'object' && it.id != null)
+    .map((it) => {
+      const childIds: string[] = [];
+      const parks = Array.isArray(it.parks) ? it.parks : [];
+      for (const park of parks) {
+        if (!park || typeof park !== 'object') continue;
+        let arr = park[childArrayKey] as { id?: string }[] | undefined;
+        if (!Array.isArray(arr) || arr.length === 0) {
+          arr = Object.values(park).find(
+            (v): v is { id?: string }[] =>
+              Array.isArray(v) && v.length > 0 && typeof v[0] === 'object' && v[0] !== null && 'id' in (v[0] as object),
+          );
+        }
+        for (const child of arr ?? []) if (child?.id) childIds.push(String(child.id));
+      }
+      return { amenityId: String(it.id), amenityName: String(it.name ?? ''), childIds };
+    });
+}
+
+export async function upsertAmenityBridges(
+  items: NpsGeneric[],
+  childLabel: 'Place' | 'VisitorCenter',
+  childArrayKey: 'places' | 'visitorcenters',
+): Promise<{ amenities: number; refs: number; edges: number }> {
+  if (!items.length) return { amenities: 0, refs: 0, edges: 0 };
+  const rows = extractAmenityChildIds(items, childArrayKey);
+  if (!rows.length) return { amenities: 0, refs: 0, edges: 0 };
+
+  // 1) MERGE the amenity vocabulary in one modest transaction (≈127 rows).
+  await writeGraph(
+    `UNWIND $amenities AS a
+     MERGE (am:Amenity {id: a.id})
+     SET am.name = CASE
+       WHEN trim(coalesce(a.name, '')) <> '' THEN a.name
+       ELSE am.name
+     END`,
+    {
+    amenities: rows.map((r) => ({ id: r.amenityId, name: r.amenityName })),
+    },
+  );
+
+  // 2) Create HAS_AMENITY edges in BATCHES. A single UNWIND over all amenities × parks × places is a
+  // huge cartesian that blows past Neo4j's per-transaction memory cap (dbms.memory.transaction.total.max),
+  // so we flatten to (amenity, child) pairs and write fixed-size chunks. `edges` counts only matched
+  // children, so refs>0 & edges=0 would still flag an id mismatch.
+  const pairs: { amenityId: string; cid: string }[] = [];
+  for (const row of rows) for (const cid of row.childIds) pairs.push({ amenityId: row.amenityId, cid });
+  const refs = pairs.length;
+  let edges = 0;
+  const BATCH = 2000;
+  for (let i = 0; i < pairs.length; i += BATCH) {
+    const res = await writeGraph<{ edges: number }>(
+      `
+      UNWIND $batch AS row
+      MATCH (am:Amenity {id: row.amenityId})
+      MATCH (child:\`${childLabel}\` {id: row.cid})
+      MERGE (child)-[:HAS_AMENITY]->(am)
+      RETURN count(*) AS edges
+      `,
+      { batch: pairs.slice(i, i + BATCH) },
+    );
+    edges += res[0]?.edges ?? 0;
+  }
+  return { amenities: new Set(rows.map((r) => r.amenityId)).size, refs, edges };
+}
+
+/** Passport stamps: `(:PassportStamp)-[:IN_PARK]->(:Park)` — the collection/gamification graph. */
+export async function upsertPassportStamps(stamps: NpsPassportStamp[]): Promise<number> {
+  if (!stamps.length) return 0;
+  const rows = stamps.map((s) => ({
+    id: s.id,
+    label: s.label ?? '',
+    parkCodes: (s.parks ?? []).map((p) => p.parkCode).filter(Boolean),
+  }));
+  const r = await writeGraph<{ c: number }>(
+    `
+    UNWIND $rows AS row
+    MERGE (st:PassportStamp {id: row.id}) SET st.label = row.label, st.lastSyncedAt = datetime()
+    WITH st, row
+    CALL { WITH st, row UNWIND row.parkCodes AS pc MATCH (p:Park {parkCode: pc}) MERGE (st)-[:IN_PARK]->(p) }
+    RETURN count(st) AS c
+    `,
+    { rows },
+  );
+  return r[0]?.c ?? 0;
+}
+
+/**
+ * Normalize a `/parkinglots` accessibility blob into a wheelchair flag. Pure (unit-tested) — mirrors
+ * the campground accessibility normalizer so the same REQUIRES/explain logic works for lots.
+ */
+export function normalizeParkingAccessibility(acc: Record<string, unknown> | undefined): {
+  wheelchairAccessible: boolean;
+} {
+  const a = acc ?? {};
+  const text = [a.wheelchairAccess, a.adaInfo, a.isLotAccessibleToDisabled, a.accessRoads]
+    .filter((x) => typeof x === 'string')
+    .join(' ');
+  const bool = a.isLotAccessibleToDisabled === true || a.isLotAccessibleToDisabled === 'true';
+  return { wheelchairAccessible: bool || (/accessible|wheelchair|ada/i.test(text) && !/not accessible/i.test(text)) };
+}
+
+/** Parking lots: `(:ParkingLot)-[:IN_PARK]->(:Park)` with a normalized accessibility flag. */
+export async function upsertParkingLots(lots: NpsParkingLot[]): Promise<number> {
+  if (!lots.length) return 0;
+  const rows = lots.map((l) => ({
+    id: l.id,
+    name: l.name ?? '',
+    lat: num(l.latitude),
+    lng: num(l.longitude),
+    wheelchairAccessible: normalizeParkingAccessibility(l.accessibility).wheelchairAccessible,
+    parkCodes: (l.relatedParks ?? []).map((rp) => rp.parkCode).filter(Boolean),
+  }));
+  const r = await writeGraph<{ c: number }>(
+    `
+    UNWIND $rows AS row
+    MERGE (pl:ParkingLot {id: row.id})
+      SET pl.name = row.name, pl.wheelchairAccessible = row.wheelchairAccessible,
+          pl.location = CASE WHEN row.lat IS NOT NULL AND row.lng IS NOT NULL
+                             THEN point({latitude: row.lat, longitude: row.lng}) ELSE pl.location END,
+          pl.lastSyncedAt = datetime()
+    WITH pl, row
+    CALL { WITH pl, row UNWIND row.parkCodes AS pc MATCH (p:Park {parkCode: pc}) MERGE (pl)-[:IN_PARK]->(p) }
+    RETURN count(pl) AS c
+    `,
+    { rows },
+  );
+  return r[0]?.c ?? 0;
+}
+
+/** Articles: `(:Article)-[:ABOUT]->(:Park)` — "learn more" content depth (P3). */
+export async function upsertArticles(articles: NpsArticle[]): Promise<number> {
+  if (!articles.length) return 0;
+  const rows = articles.map((a) => ({
+    id: a.id,
+    title: a.title ?? '',
+    url: a.url ?? null,
+    description: a.listingDescription ?? null,
+    image: (a.images ?? [])[0]?.url ?? null,
+    parkCodes: (a.relatedParks ?? []).map((rp) => rp.parkCode).filter(Boolean),
+  }));
+  const r = await writeGraph<{ c: number }>(
+    `
+    UNWIND $rows AS row
+    MERGE (ar:Article {id: row.id})
+      SET ar.title = row.title, ar.url = row.url, ar.description = row.description, ar.image = row.image,
+          ar.lastSyncedAt = datetime()
+    WITH ar, row
+    CALL { WITH ar, row UNWIND row.parkCodes AS pc MATCH (p:Park {parkCode: pc}) MERGE (ar)-[:ABOUT]->(p) }
+    RETURN count(ar) AS c
+    `,
+    { rows },
+  );
+  return r[0]?.c ?? 0;
+}
+
+/**
+ * Entrance passes (`OFFERS_PASS`) — derived from the already-synced `Park.entrancePasses` JSON (no
+ * extra rate-limited NPS fetch). Also seeds the canonical national "America the Beautiful" annual pass
+ * used by the trip cost / break-even model (P2). Idempotent.
+ */
+export async function upsertEntrancePasses(): Promise<number> {
+  await writeGraph(
+    `MERGE (e:EntrancePass {id: 'atb-annual'})
+       SET e.name = 'America the Beautiful – Annual Pass', e.cost = 80.0, e.scope = 'national'`,
+  );
+  const parks = await readGraph<{ parkCode: string; passes: string | null }>(
+    `MATCH (p:Park) WHERE p.entrancePasses IS NOT NULL AND p.entrancePasses <> '[]'
+     RETURN p.parkCode AS parkCode, p.entrancePasses AS passes`,
+  );
+  const rows: { id: string; parkCode: string; name: string; cost: number | null; description: string | null }[] = [];
+  for (const pk of parks) {
+    let arr: { cost?: string; title?: string; description?: string }[] = [];
+    try {
+      arr = pk.passes ? JSON.parse(pk.passes) : [];
+    } catch {
+      arr = [];
+    }
+    for (const pass of arr) {
+      if (!pass?.title) continue;
+      const cost = Number(pass.cost);
+      rows.push({
+        id: `${pk.parkCode}:${pass.title}`,
+        parkCode: pk.parkCode,
+        name: pass.title,
+        cost: Number.isFinite(cost) ? cost : null,
+        description: pass.description ?? null,
+      });
+    }
+  }
+  if (!rows.length) return 0;
+  const r = await writeGraph<{ c: number }>(
+    `
+    UNWIND $rows AS row
+    MERGE (e:EntrancePass {id: row.id})
+      SET e.name = row.name, e.cost = row.cost, e.description = row.description, e.scope = 'park'
+    WITH e, row MATCH (p:Park {parkCode: row.parkCode}) MERGE (p)-[:OFFERS_PASS]->(e)
+    RETURN count(e) AS c
     `,
     { rows },
   );
