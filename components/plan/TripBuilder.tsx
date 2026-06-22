@@ -155,6 +155,7 @@ export function TripBuilder() {
   async function checkCost() {
     if (!trip) return;
     try {
+      setCost(null);
       setCostErr(null);
       const res = await fetch(`/api/trips/${trip.id}`, {
         method: 'POST',
