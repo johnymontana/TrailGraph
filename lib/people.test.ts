@@ -26,4 +26,19 @@ describe('cleanTags', () => {
     expect(cleanTags('X', undefined)).toEqual([]);
     expect(cleanTags('X', [])).toEqual([]);
   });
+
+  it('cleans the exact friction-log example (#8)', () => {
+    // "Muir Woods, muir woods national monument, botany" → the title echoes drop, leaving the real tag.
+    expect(cleanTags('Muir Woods', ['Muir Woods', 'muir woods national monument', 'botany'])).toEqual([
+      'Botany',
+    ]);
+  });
+
+  it('preserves the order of the first occurrence', () => {
+    expect(cleanTags('X', ['Geology', 'botany', 'GEOLOGY', 'Wildlife'])).toEqual([
+      'Geology',
+      'Botany',
+      'Wildlife',
+    ]);
+  });
 });

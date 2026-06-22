@@ -8,7 +8,10 @@ import { test, expect } from '@playwright/test';
  * Note: dev surfaces hydration issues as console errors via React; for the truest signal run against a
  * production build (`next build && next start`). Public routes only (no auth needed).
  */
-const ROUTES = ['/', '/explore', '/plan', '/me', '/map', '/graph'];
+// `/plan` redirects anonymous users to `/signin` (ADR-038), so it also exercises the sign-in page.
+// `/trails` carries the new client ThemeChips; every route exercises the mounted-gated nav account
+// control (the highest-risk new hydration surface).
+const ROUTES = ['/', '/explore', '/plan', '/me', '/map', '/graph', '/trails', '/signin'];
 const HYDRATION_RX = /hydrat|did not match|text content does not match|tree hydrated|css-\w+/i;
 
 for (const route of ROUTES) {

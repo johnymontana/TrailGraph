@@ -65,6 +65,19 @@ describe('trailToNvl (thematic trail → mini-graph)', () => {
     expect(rels[0]).toMatchObject({ from: `${TRAIL_THEME_PREFIX}John Muir`, to: 'yose' });
     expect(rels[1].id).toBe(`${TRAIL_THEME_PREFIX}John Muir--muwo`);
   });
+
+  it('renders just the theme hub (no rels) for an empty trail', () => {
+    const { nodes, rels } = trailToNvl('Lonely Topic', []);
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].id).toBe(`${TRAIL_THEME_PREFIX}Lonely Topic`);
+    expect(rels).toHaveLength(0);
+  });
+
+  it('only the theme node carries the non-navigable prefix (park ids are plain codes)', () => {
+    const { nodes } = trailToNvl('John Muir', parks);
+    const prefixed = nodes.filter((n) => n.id.startsWith(TRAIL_THEME_PREFIX));
+    expect(prefixed).toHaveLength(1);
+  });
 });
 
 describe('parkNodeNav (per-park graph click routing)', () => {

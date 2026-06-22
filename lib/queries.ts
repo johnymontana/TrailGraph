@@ -87,7 +87,7 @@ export async function searchParks(opts: {
  * are absent, lift the plain `p.images` URL list (what cards render) into `{url}` records so the hero
  * isn't a gradient placeholder while the card shows a real photo (ADR-039).
  */
-function imagesWithFallback(full: unknown, plain: unknown): { url: string }[] {
+export function imagesWithFallback(full: unknown, plain: unknown): { url: string }[] {
   const rich = Array.isArray(full) ? full.filter((x) => x && typeof (x as { url?: unknown }).url === 'string') : [];
   if (rich.length > 0) return rich as { url: string }[];
   if (Array.isArray(plain)) {

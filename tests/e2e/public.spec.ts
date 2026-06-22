@@ -109,9 +109,12 @@ test('map page renders layer controls and a list-view equivalent (a11y)', async 
   await expect(page.getByRole('link', { name: /List view/ })).toBeVisible();
 });
 
-test('plan page renders the trip builder (sign-in gated)', async ({ page }) => {
+test('plan page redirects anonymous users to sign-in (ADR-038 gating)', async ({ page }) => {
+  // The ranger + memory writes are useless without a session, so /plan now redirects to /signin rather
+  // than rendering a builder that silently persists nothing.
   await page.goto('/plan');
-  await expect(page.getByText(/Sign in to plan trips|Trips/)).toBeVisible();
+  await expect(page).toHaveURL(/\/signin/);
+  await expect(page.getByRole('heading', { name: /Sign in to TrailGraph/i })).toBeVisible();
 });
 
 test('activity chips on a park page are traversable to Explore (graph traversal, §6)', async ({ page }) => {
@@ -148,4 +151,50 @@ test('your-memory page gates on sign-in', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Your memory' })).toBeVisible();
   // A "Sign in" link appears in both the nav and the gate prompt — assert at least one is visible.
   await expect(page.getByRole('link', { name: 'Sign in' }).first()).toBeVisible();
+});
+
+test('sign-in page explains the account model (ADR-038 P0.2)', async ({ page }) => {
+  await page.goto('/signin');
+  await expect(page.getByRole('heading', { name: /Sign in to TrailGraph/i })).toBeVisible();
+  await expect(page.getByText(/Browse freely without an account/i)).toBeVisible();
+  await expect(page.getByText(/unlock the ranger/i)).toBeVisible();
+});
+
+test('signed-out nav shows a Sign in link, not an account menu (ADR-038)', async ({ page }) => {
+  await page.goto('/');
+  // The account control resolves after mount (mounted-gated) → anonymous shows "Sign in".
+  await expect(page.getByRole('link', { name: 'Sign in' }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Account menu' })).toHaveCount(0);
+});
+
+test('explore cards surface dark-sky ⭐ and accessibility ♿ badges (ADR-039 P2.10)', async ({ page }) => {
+  await page.goto('/explore');
+  // grca/glac are dark-sky certified in fixtures; yell has a wheelchair-accessible campground.
+  await expect(page.getByTitle('Dark-sky park').first()).toBeVisible();
+  await expect(page.getByTitle('Wheelchair-accessible camping').first()).toBeVisible();
+});
+
+test('image-less park card shows the branded placeholder (ADR-039 #11)', async ({ page }) => {
+  await page.goto('/explore');
+  // grca has no dataset image → the deterministic placeholder renders "🏞️ <name>".
+  await expect(page.getByText('🏞️ Grand Canyon National Park')).toBeVisible();
+});
+
+test('trails: theme chips render and a person trail shows the NVL mini-graph + parks (ADR-039 P1.5)', async ({ page }) => {
+  await page.goto('/trails');
+  await expect(page.getByRole('heading', { name: 'Thematic trails' })).toBeVisible();
+  // Ferdinand Hayden is seeded across yell + glac (≥2 parks → a People chip).
+  const chip = page.getByRole('link', { name: /Ferdinand Hayden/ });
+  await expect(chip).toBeVisible();
+  await chip.click();
+
+  await expect(page).toHaveURL(/person=Ferdinand/);
+  // The mini-graph renders into the shared NVL container (canvas via swiftshader WebGL).
+  await expect(page.getByTestId('nvl-graph')).toBeVisible();
+  await expect(page.locator('[data-testid="nvl-graph"] canvas').first()).toBeVisible();
+  // …and the connected parks still appear as cards below.
+  await expect(page.getByText('Yellowstone National Park', { exact: true })).toBeVisible();
+  await expect(page.getByText('Glacier National Park', { exact: true })).toBeVisible();
+  // "See it on the graph →" is pulled alongside the trail.
+  await expect(page.getByRole('link', { name: /See it on the graph/ })).toBeVisible();
 });
