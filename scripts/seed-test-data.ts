@@ -115,7 +115,7 @@ export async function seedTestData(): Promise<void> {
     // Article fixture (P3): ABOUT a park for the "Learn more" section.
     MERGE (art:Article {id:'article-yell-geysers'})
       SET art.title='Geysers of Yellowstone', art.url='https://www.nps.gov/yell/geysers.htm',
-          art.description='How the Yellowstone caldera powers the world''s largest geyser field.'
+          art.description='How the Yellowstone caldera powers the largest geyser field on Earth.'
     MERGE (art)-[:ABOUT]->(yell)
     // Parking lot fixture (P3): IN_PARK + accessibility flag.
     MERGE (lot:ParkingLot {id:'lot-canyon'})
