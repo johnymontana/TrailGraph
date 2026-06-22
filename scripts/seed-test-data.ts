@@ -85,8 +85,8 @@ export async function seedTestData(): Promise<void> {
     MERGE (vc)-[:HAS_AMENITY]->(amwater)
     // Place fixture (HAS_PLACE) with an amenity + passport-stamp flag
     MERGE (pl:Place {id:'place-artist-point'})
-      SET pl.title='Artist Point', pl.listingDescription='Iconic view of the Lower Falls.',
-          pl.location=point({latitude:44.72, longitude:-110.48}), pl.isPassportStampLocation=true,
+      SET pl.title='Artist Point', pl.bodyText='Iconic view of the Lower Falls.',
+          pl.location=point({latitude:44.72, longitude:-110.48}), pl.isStamp=true,
           pl.audioDescription='An audio description of the Lower Falls overlook.'
     MERGE (yell)-[:HAS_PLACE]->(pl)
     MERGE (pl)-[:HAS_AMENITY]->(am)
