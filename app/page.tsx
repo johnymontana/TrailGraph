@@ -4,6 +4,7 @@ import { searchParks } from '../lib/queries';
 import { forYou } from '../lib/recommend';
 import { getServerUserId } from '../lib/session';
 import { ParkCard } from '../components/ParkCard';
+import { FirstRunBanner } from '../components/FirstRunBanner';
 
 /** Marketing landing (§4): value prop + primary CTAs + personalized/featured parks. */
 export const dynamic = 'force-dynamic';
@@ -33,6 +34,9 @@ export default async function Home() {
         <Button asChild variant="outline" size="lg"><NextLink href="/plan">Plan a trip with the ranger</NextLink></Button>
         <Button asChild variant="ghost" size="lg"><NextLink href="/map">Open the map</NextLink></Button>
       </HStack>
+
+      {/* Signed in but nothing learned yet → nudge toward seeding preferences (ADR-038). */}
+      {userId && !personalized ? <FirstRunBanner /> : null}
 
       {personalized ? (
         <Stack gap={4} mb={12}>

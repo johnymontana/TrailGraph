@@ -16,12 +16,17 @@ export interface ParkSummary {
   lat: number | null;
   lng: number | null;
   image: string | null;
+  // At-a-glance facets surfaced as card badges (ADR-039). Derived from already-synced §5 props.
+  darkSky: boolean;
+  accessible: boolean;
 }
 
 const PARK_SUMMARY_RETURN = `
   p.parkCode AS parkCode, p.fullName AS name, p.designation AS designation, p.states AS states,
   p.location.latitude AS lat, p.location.longitude AS lng,
-  CASE WHEN size(coalesce(p.images, [])) > 0 THEN p.images[0] ELSE null END AS image
+  CASE WHEN size(coalesce(p.images, [])) > 0 THEN p.images[0] ELSE null END AS image,
+  (coalesce(p.darkSkyCertified, false) OR coalesce(p.bortleScale, 99) <= 3) AS darkSky,
+  EXISTS { (cg:Campground)-[:IN_PARK]->(p) WHERE cg.wheelchairAccessible = true } AS accessible
 `;
 
 /** Faceted + full-text park search (A1, A3) with paging + accurate total (§2.9). */
@@ -77,6 +82,22 @@ export async function searchParks(opts: {
 }
 
 /** Full park detail (A2) — nested JSON props parsed back to objects. */
+/**
+ * Hero/gallery images for a park. Prefer the rich `imagesFull` records (`{url,caption,...}`); when those
+ * are absent, lift the plain `p.images` URL list (what cards render) into `{url}` records so the hero
+ * isn't a gradient placeholder while the card shows a real photo (ADR-039).
+ */
+function imagesWithFallback(full: unknown, plain: unknown): { url: string }[] {
+  const rich = Array.isArray(full) ? full.filter((x) => x && typeof (x as { url?: unknown }).url === 'string') : [];
+  if (rich.length > 0) return rich as { url: string }[];
+  if (Array.isArray(plain)) {
+    return plain
+      .map((x) => (typeof x === 'string' ? { url: x } : x && typeof (x as { url?: unknown }).url === 'string' ? (x as { url: string }) : null))
+      .filter((x): x is { url: string } => x != null);
+  }
+  return [];
+}
+
 export async function parkDetail(parkCode: string) {
   const rows = await readGraph<{
     p: Record<string, unknown>;
@@ -128,7 +149,10 @@ export async function parkDetail(parkCode: string) {
     weatherInfo: p.weatherInfo,
     lat: r.lat,
     lng: r.lng,
-    images: parse(p.imagesFull) ?? [],
+    // The hero reads `images[0].url`. `imagesFull` (rich JSON) is the primary source, but it's empty for
+    // some parks whose `p.images` (the URL list the cards use) is populated — fall back so the hero
+    // shows the same photo the card does instead of a gradient placeholder (ADR-039, friction #7).
+    images: imagesWithFallback(parse(p.imagesFull), p.images),
     entranceFees: parse(p.entranceFees) ?? [],
     operatingHours: parse(p.operatingHours) ?? [],
     contacts: parse(p.contacts) ?? {},

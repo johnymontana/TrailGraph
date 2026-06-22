@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { neighborhoodToNvl, parkNodeNav, labelColor, HUB_DEGREE } from './graph-nvl';
+import { neighborhoodToNvl, parkNodeNav, labelColor, HUB_DEGREE, trailToNvl, TRAIL_THEME_PREFIX } from './graph-nvl';
 
 describe('labelColor (per-park graph node palette)', () => {
   it('maps known labels to distinct colors and unknowns to a neutral gray', () => {
@@ -43,6 +43,27 @@ describe('neighborhoodToNvl (/graph → NVL)', () => {
     const { rels } = neighborhoodToNvl(data);
     expect(rels[0]).toMatchObject({ id: 'yell--glac', from: 'yell', to: 'glac', caption: 'Night Sky, Geology' });
     expect(rels[1].caption).toBe('2 shared'); // no topics → fallback
+  });
+});
+
+describe('trailToNvl (thematic trail → mini-graph)', () => {
+  const parks = [
+    { parkCode: 'yose', name: 'Yosemite National Park' },
+    { parkCode: 'muwo', name: 'Muir Woods National Monument' },
+  ];
+
+  it('emits a center theme node plus one node per park', () => {
+    const { nodes } = trailToNvl('John Muir', parks);
+    expect(nodes).toHaveLength(3);
+    expect(nodes[0]).toMatchObject({ id: `${TRAIL_THEME_PREFIX}John Muir`, caption: 'John Muir' });
+    expect(nodes.map((n) => n.id)).toContain('yose');
+  });
+
+  it('spokes the theme node to each park with a stable rel id', () => {
+    const { rels } = trailToNvl('John Muir', parks);
+    expect(rels).toHaveLength(2);
+    expect(rels[0]).toMatchObject({ from: `${TRAIL_THEME_PREFIX}John Muir`, to: 'yose' });
+    expect(rels[1].id).toBe(`${TRAIL_THEME_PREFIX}John Muir--muwo`);
   });
 });
 

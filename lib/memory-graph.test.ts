@@ -16,8 +16,8 @@ describe('getUserMemory (E3 — context subgraph read)', () => {
           { kind: 'topic', name: null, category: null, value: null, feedback: null }, // OPTIONAL no-match
         ],
         considered: [
-          { parkCode: 'yell', name: 'Yellowstone National Park' },
-          { parkCode: null, name: null },
+          { parkCode: 'yell', name: 'Yellowstone National Park', source: 'agent_recommendation' },
+          { parkCode: null, name: null, source: null },
         ],
         planned: [
           { tripId: 't1', name: 'Loop' },
@@ -29,7 +29,9 @@ describe('getUserMemory (E3 — context subgraph read)', () => {
     expect(mem.preferences).toEqual([
       { kind: 'activity', name: 'Hiking', category: 'activity', value: 'easy hikes', feedback: null },
     ]);
-    expect(mem.considered).toEqual([{ parkCode: 'yell', name: 'Yellowstone National Park' }]);
+    expect(mem.considered).toEqual([
+      { parkCode: 'yell', name: 'Yellowstone National Park', source: 'agent_recommendation' },
+    ]);
     expect(mem.planned).toEqual([{ tripId: 't1', name: 'Loop' }]);
   });
 

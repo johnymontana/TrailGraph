@@ -8,6 +8,22 @@ import type { UserMemory } from '../../lib/memory-graph';
  * "Your memory" surface (E3/E4). Users view, give feedback on, and DELETE remembered facts. Deletes
  * are durable (server tombstones them so extraction won't resurrect them — ADR-016, §13.4).
  */
+/** Human-readable "why is this park here?" from the CONSIDERED edge's stored provenance (ADR-039). */
+function consideredReason(source: string | null): string | null {
+  switch (source) {
+    case 'viewed':
+      return 'You viewed this';
+    case 'added_to_trip':
+      return 'Added to a trip';
+    case 'agent_recommendation':
+      return 'Suggested by the ranger';
+    case 'saved':
+      return 'You saved this';
+    default:
+      return null;
+  }
+}
+
 export function MemoryList({ initial }: { initial: UserMemory }) {
   const [mem, setMem] = useState<UserMemory>(initial);
   const [busy, setBusy] = useState(false);
@@ -195,7 +211,13 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
           <Stack gap={2}>
             {(showAllConsidered ? mem.considered : mem.considered.slice(0, 8)).map((c) => (
               <HStack key={c.parkCode} borderWidth="1px" borderRadius="md" p={2}>
-                <CLink asChild flex="1"><NextLink href={`/parks/${c.parkCode}`}>{c.name}</NextLink></CLink>
+                <Stack flex="1" gap={0}>
+                  <CLink asChild><NextLink href={`/parks/${c.parkCode}`}>{c.name}</NextLink></CLink>
+                  {/* Why is this here? Surface the CONSIDERED edge's provenance (ADR-039, friction #10). */}
+                  {consideredReason(c.source) ? (
+                    <Text fontSize="xs" color="fg.muted">{consideredReason(c.source)}</Text>
+                  ) : null}
+                </Stack>
                 <Button size="xs" colorPalette="red" variant="ghost" disabled={busy}
                   onClick={() => act({ op: 'deleteConsidered', parkCode: c.parkCode })}>Delete</Button>
               </HStack>

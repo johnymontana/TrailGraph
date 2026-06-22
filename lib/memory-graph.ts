@@ -6,7 +6,7 @@ import { readGraph } from './neo4j';
  */
 export interface UserMemory {
   preferences: { kind: 'activity' | 'topic'; name: string; category: string | null; value: string | null; feedback: string | null; weight: number | null }[];
-  considered: { parkCode: string; name: string }[];
+  considered: { parkCode: string; name: string; source: string | null }[];
   planned: { tripId: string; name: string }[];
   travel: { wheelchair: boolean; rvMaxLengthFt: number | null; requiredAmenities: string[] };
   passes: { id: string; name: string }[];
@@ -58,8 +58,8 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
       kind: CASE WHEN d:Activity THEN 'activity' ELSE 'topic' END,
       name: d.name, category: pr.category, value: pr.value, feedback: pr.feedback, weight: pr.weight
     }) AS preferences
-    OPTIONAL MATCH (u)-[:CONSIDERED]->(cp:Park)
-    WITH u, preferences, collect(DISTINCT {parkCode: cp.parkCode, name: cp.fullName}) AS considered
+    OPTIONAL MATCH (u)-[cr:CONSIDERED]->(cp:Park)
+    WITH u, preferences, collect(DISTINCT {parkCode: cp.parkCode, name: cp.fullName, source: cr.source}) AS considered
     OPTIONAL MATCH (u)-[:PLANNED]->(t:Trip)
     WITH u, preferences, considered, collect(DISTINCT {tripId: t.id, name: t.name}) AS planned
     OPTIONAL MATCH (u)-[:TRAVELS_WITH]->(con:Constraint)

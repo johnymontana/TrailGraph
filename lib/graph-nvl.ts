@@ -47,6 +47,32 @@ export function neighborhoodToNvl(
   return { nodes, rels };
 }
 
+/** Stable id prefix for the (non-navigable) center node of a thematic trail mini-graph. */
+export const TRAIL_THEME_PREFIX = 'theme:';
+
+/**
+ * Map a thematic trail (a Person/Topic theme + the parks it connects) to a small NVL graph: one center
+ * theme node with a spoke to each park (ADR-039). Park node ids are park codes so a click routes to the
+ * park page; the theme node id is prefixed so the renderer can treat it as non-navigable.
+ */
+export function trailToNvl(
+  themeLabel: string,
+  parks: { parkCode: string; name: string }[],
+): { nodes: NvlNode[]; rels: NvlRel[] } {
+  const themeId = `${TRAIL_THEME_PREFIX}${themeLabel}`;
+  const nodes: NvlNode[] = [
+    { id: themeId, caption: themeLabel, size: 16, color: COLOR_HIGHLIGHT },
+    ...parks.map((p) => ({ id: p.parkCode, caption: p.name, size: 10, color: COLOR_PARK })),
+  ];
+  const rels: NvlRel[] = parks.map((p) => ({
+    id: `${themeId}--${p.parkCode}`,
+    from: themeId,
+    to: p.parkCode,
+    caption: '',
+  }));
+  return { nodes, rels };
+}
+
 /** Color for a domain node label in the per-park graph. Pure. */
 const LABEL_COLOR: Record<string, string> = {
   Park: '#1864ab',
