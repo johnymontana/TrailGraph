@@ -214,9 +214,12 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
                 <Stack flex="1" gap={0}>
                   <CLink asChild><NextLink href={`/parks/${c.parkCode}`}>{c.name}</NextLink></CLink>
                   {/* Why is this here? Surface the CONSIDERED edge's provenance (ADR-039, friction #10). */}
-                  {consideredReason(c.source) ? (
-                    <Text fontSize="xs" color="fg.muted">{consideredReason(c.source)}</Text>
-                  ) : null}
+                  {(() => {
+                    const reason = consideredReason(c.source);
+                    return reason ? (
+                      <Text fontSize="xs" color="fg.muted">{reason}</Text>
+                    ) : null;
+                  })()}
                 </Stack>
                 <Button size="xs" colorPalette="red" variant="ghost" disabled={busy}
                   onClick={() => act({ op: 'deleteConsidered', parkCode: c.parkCode })}>Delete</Button>
