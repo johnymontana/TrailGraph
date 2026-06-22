@@ -149,8 +149,55 @@ brew install pmtiles   # go-pmtiles CLI
 PMTILES_SOURCE=https://build.protomaps.com/<YYYYMMDD>.pmtiles pnpm build:basemap
 ```
 
-This writes `public/basemap/us.pmtiles` (gitignored; host it on a CDN for production). Any MapLibre
-`style.json` URL works in `NEXT_PUBLIC_MAP_TILES_URL` too.
+This writes `public/basemap/us.pmtiles` (gitignored; host it on a CDN for production — see below). Any
+MapLibre `style.json` URL works in `NEXT_PUBLIC_MAP_TILES_URL` too.
+
+---
+
+## Deploy to Vercel
+
+Because the ranger is wired in with **`withEve(nextConfig)`** (`next.config.ts`), the agent and the app
+**compile and deploy together as one ordinary Vercel app** — there's no separate `eve build`/`eve deploy`
+step (those are for standalone agent projects). The build command stays `next build`.
+
+1. **Push to GitHub and import the repo in Vercel** (or `vercel --prod` from the CLI). Vercel
+   auto-detects Next.js; leave the build command as the default.
+2. **Set environment variables** (Production) — everything in `.env.example`:
+   - `NEO4J_URI`/`USERNAME`/`PASSWORD`/`DATABASE` — reachable from Vercel (e.g. **Neo4j Aura**,
+     `neo4j+s://…`).
+   - `NAMS_API_KEY` + `NAMS_WORKSPACE_ID` — the NAMS workspace must point at **that same Neo4j**
+     (the context-graph bet). Leave `NAMS_BASE_URL` blank.
+   - `NPS_API_KEY`; `BETTER_AUTH_SECRET` + `BETTER_AUTH_URL=https://<your-domain>`; `RESEND_API_KEY` +
+     `EMAIL_FROM`; `ORS_API_KEY`.
+   - `AGENT_MODEL` / `EMBEDDING_MODEL`. On Vercel, **models resolve through AI Gateway via the project's
+     OIDC token**, so `AI_GATEWAY_API_KEY` is only needed locally. The Eve channel admits Vercel
+     deployments through `vercelOidc()` (`agent/channels/eve.ts`). **Do not set `EVE_BASE_URL`.**
+   - `CRON_SECRET` — Vercel sends it as the `Authorization: Bearer` on cron calls; `/api/sync` checks it.
+   - `NEXT_PUBLIC_MAP_TILES_URL` — the Blob URL from the next section.
+3. **Deploy.** The scheduled jobs in [`vercel.json`](vercel.json) (NPS sync slow/fast + memory
+   reconcile) start running automatically; `/api/sync`'s long runtime comes from its route-segment
+   `export const maxDuration` (Fluid Compute / Pro).
+4. **One-time data setup** against the production Neo4j (run locally with prod `NEO4J_*` in
+   `.env.local`): `pnpm db:migrate` · `pnpm ontology:setup` · `pnpm nams:spike`, then seed the graph
+   (`curl -H "Authorization: Bearer $CRON_SECRET" "https://<your-domain>/api/sync?tier=slow"` and
+   `pnpm datasources:sync`).
+
+### Host the basemap on Vercel Blob (CDN)
+
+The `.pmtiles` file is too large for a deploy bundle (and is gitignored). Put it on **Vercel Blob**,
+which serves it from Vercel's CDN with the HTTP range support PMTiles needs:
+
+```bash
+# 1) Create a Blob store: Vercel dashboard → Storage → Blob, then expose its token locally:
+vercel env pull .env.local            # provides BLOB_READ_WRITE_TOKEN  (or export it manually)
+# 2) Build + upload (streamed multipart; stable URL):
+pnpm build:basemap                    # → public/basemap/us.pmtiles
+pnpm basemap:upload                   # → prints https://<store>.public.blob.vercel-storage.com/basemap/us.pmtiles
+# 3) Set NEXT_PUBLIC_MAP_TILES_URL to that URL in the Vercel project (Production) and redeploy.
+```
+
+Re-run `build:basemap` + `basemap:upload` to refresh tiles (the object name is stable, so the URL
+doesn't change). The map falls back to demo tiles automatically if the URL is unset or unreachable.
 
 ---
 

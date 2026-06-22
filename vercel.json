@@ -4,8 +4,5 @@
     { "path": "/api/sync?tier=slow", "schedule": "0 */8 * * *" },
     { "path": "/api/sync?tier=fast", "schedule": "0 */2 * * *" },
     { "path": "/api/memory/reconcile", "schedule": "30 */6 * * *" }
-  ],
-  "functions": {
-    "app/api/sync/route.ts": { "maxDuration": 800 }
-  }
+  ]
 }
