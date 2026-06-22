@@ -35,6 +35,14 @@ describe('getUserMemory (E3 — context subgraph read)', () => {
 
   it('returns empty arrays for a user with no memory', async () => {
     readGraph.mockResolvedValue([]);
-    expect(await getUserMemory('u1')).toEqual({ preferences: [], considered: [], planned: [] });
+    expect(await getUserMemory('u1')).toEqual({
+      preferences: [],
+      considered: [],
+      planned: [],
+      travel: { wheelchair: false, rvMaxLengthFt: null, requiredAmenities: [] },
+      passes: [],
+      stamps: [],
+      availability: { start: null, end: null },
+    });
   });
 });

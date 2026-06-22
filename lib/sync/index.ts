@@ -8,6 +8,12 @@ import {
   type NpsThingToDo,
   type NpsActivityRef,
   type NpsGeneric,
+  type NpsPlace,
+  type NpsPerson,
+  type NpsTour,
+  type NpsPassportStamp,
+  type NpsParkingLot,
+  type NpsArticle,
 } from '../nps';
 import {
   upsertParks,
@@ -16,6 +22,14 @@ import {
   upsertThingsToDo,
   upsertAlerts,
   upsertVisitorCenters,
+  upsertPlaces,
+  upsertPeople,
+  upsertTours,
+  upsertAmenityBridges,
+  upsertPassportStamps,
+  upsertParkingLots,
+  upsertArticles,
+  upsertEntrancePasses,
 } from './upserts';
 import { embedParks } from './embed-parks';
 
@@ -56,13 +70,40 @@ async function markFailed(resource: string, message: string) {
   ).catch(() => {});
 }
 
-/** Run one resource step with retry/backoff; record a checkpoint. */
+/**
+ * Resume window per tier (§9.2): a step that already has a fresh, successful checkpoint is skipped on
+ * re-run — so retrying a sync that died partway (e.g. NPS hourly rate-limit on the big corpus steps)
+ * resumes where it failed instead of re-burning quota from the top. The daily cron's 24h gap always
+ * exceeds the slow window, so it still does a full refresh. `SYNC_FORCE=1` forces every step to re-run.
+ */
+const RESUME_TTL_SECONDS: Record<Tier, number> = { slow: 20 * 3600, fast: 90 * 60, all: 20 * 3600 };
+
+async function recentlyOk(resource: string, tier: Tier): Promise<Record<string, number> | null> {
+  const rows = await readGraph<{ counts: string | null }>(
+    `MATCH (s:SyncState {resource: $resource})
+     WHERE s.lastStatus = 'ok' AND s.lastRunAt > datetime() - duration({seconds: toInteger($secs)})
+     RETURN s.lastCounts AS counts`,
+    { resource, secs: RESUME_TTL_SECONDS[tier] },
+  ).catch(() => []);
+  if (!rows.length) return null;
+  try {
+    return rows[0].counts ? (JSON.parse(rows[0].counts) as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Run one resource step with retry/backoff; record a checkpoint. Skips if a fresh checkpoint exists. */
 async function step(
   resource: string,
   tier: Tier,
   fn: () => Promise<Record<string, number>>,
 ): Promise<StepResult> {
   'use step';
+  if (process.env.SYNC_FORCE !== '1') {
+    const prior = await recentlyOk(resource, tier);
+    if (prior) return { resource, counts: { ...prior, skipped: 1 }, ms: 0 };
+  }
   const start = Date.now();
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -155,6 +196,54 @@ export async function runSlowSync(): Promise<StepResult[]> {
       count: await upsertThingsToDo(await fetchAll<NpsThingToDo>('thingstodo')),
     })),
   );
+  // NPS expansion (Phase 1): places, people, tours, then amenity bridges (need places/VCs to exist).
+  out.push(
+    await step('places', 'slow', async () => ({
+      count: await upsertPlaces(await fetchAll<NpsPlace>('places', { fields: ['images', 'amenities', 'tags', 'audioDescription'] })),
+    })),
+  );
+  out.push(
+    await step('people', 'slow', async () => ({
+      count: await upsertPeople(await fetchAll<NpsPerson>('people', { fields: ['images', 'tags'] })),
+    })),
+  );
+  out.push(
+    await step('tours', 'slow', async () => ({ count: await upsertTours(await fetchAll<NpsTour>('tours')) })),
+  );
+  out.push(
+    await step('amenities-places', 'slow', async () => ({
+      count: await upsertAmenityBridges(await fetchAll<NpsGeneric>('amenities/parksplaces'), 'Place', 'places'),
+    })),
+  );
+  out.push(
+    await step('amenities-vcs', 'slow', async () => ({
+      count: await upsertAmenityBridges(
+        await fetchAll<NpsGeneric>('amenities/parksvisitorcenters'),
+        'VisitorCenter',
+        'visitorCenters',
+      ),
+    })),
+  );
+
+  // Content endpoints (Phase 1 cont.): passport stamps, parking lots, articles. Entrance passes are
+  // derived from already-synced Park JSON (no extra NPS fetch) so they don't add rate-limit pressure.
+  out.push(
+    await step('passportstamplocations', 'slow', async () => ({
+      count: await upsertPassportStamps(await fetchAll<NpsPassportStamp>('passportstamplocations')),
+    })),
+  );
+  out.push(
+    await step('parkinglots', 'slow', async () => ({
+      count: await upsertParkingLots(await fetchAll<NpsParkingLot>('parkinglots')),
+    })),
+  );
+  out.push(
+    await step('articles', 'slow', async () => ({
+      count: await upsertArticles(await fetchAll<NpsArticle>('articles', { fields: ['images'] })),
+    })),
+  );
+  out.push(await step('entrancepasses', 'slow', async () => ({ count: await upsertEntrancePasses() })));
+
   out.push(await step('embeddings', 'slow', async () => embedParks()));
 
   return out;

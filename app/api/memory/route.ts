@@ -1,6 +1,6 @@
 import { getUserId } from '../../../lib/session';
 import { getUserMemory } from '../../../lib/memory-graph';
-import { deletePreference, deleteConsidered, deleteAllConsidered, setPreferenceFeedback, setPreferenceWeight, recordPreference } from '../../../lib/bridges';
+import { deletePreference, deleteConsidered, deleteAllConsidered, setPreferenceFeedback, setPreferenceWeight, recordPreference, setTravelConstraints, clearTravelConstraints, recordPass, clearPass, collectStamp, uncollectStamp, setAvailability, clearAvailability } from '../../../lib/bridges';
 
 /** "Your memory" API (E3/E4). All actions userId-scoped from the session (R4). */
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,21 @@ export async function POST(req: Request) {
   const userId = await getUserId(req);
   if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
   const body = (await req.json()) as {
-    op: 'deletePreference' | 'deleteConsidered' | 'clearConsidered' | 'feedback' | 'addPreference' | 'setWeight';
+    op:
+      | 'deletePreference'
+      | 'deleteConsidered'
+      | 'clearConsidered'
+      | 'feedback'
+      | 'addPreference'
+      | 'setWeight'
+      | 'setTravelConstraints'
+      | 'clearTravelConstraints'
+      | 'recordPass'
+      | 'clearPass'
+      | 'collectStamp'
+      | 'uncollectStamp'
+      | 'setAvailability'
+      | 'clearAvailability';
     kind?: 'activity' | 'topic';
     name?: string;
     parkCode?: string;
@@ -23,9 +37,46 @@ export async function POST(req: Request) {
     category?: string;
     value?: string;
     weight?: number;
+    wheelchair?: boolean;
+    rvMaxLengthFt?: number | null;
+    requiredAmenities?: string[];
+    passId?: string;
+    stampId?: string;
+    start?: string | null;
+    end?: string | null;
   };
 
   switch (body.op) {
+    case 'setTravelConstraints':
+      await setTravelConstraints(userId, {
+        wheelchair: body.wheelchair,
+        rvMaxLengthFt: body.rvMaxLengthFt,
+        requiredAmenities: body.requiredAmenities,
+      });
+      break;
+    case 'clearTravelConstraints':
+      await clearTravelConstraints(userId);
+      break;
+    case 'recordPass':
+      await recordPass(userId, body.passId);
+      break;
+    case 'clearPass':
+      await clearPass(userId, body.passId);
+      break;
+    case 'collectStamp':
+      if (!body.stampId) return Response.json({ error: 'stampId required' }, { status: 400 });
+      await collectStamp(userId, body.stampId);
+      break;
+    case 'uncollectStamp':
+      if (!body.stampId) return Response.json({ error: 'stampId required' }, { status: 400 });
+      await uncollectStamp(userId, body.stampId);
+      break;
+    case 'setAvailability':
+      await setAvailability(userId, body.start ?? null, body.end ?? null);
+      break;
+    case 'clearAvailability':
+      await clearAvailability(userId);
+      break;
     case 'setWeight':
       if (!body.kind || !body.name || body.weight == null)
         return Response.json({ error: 'kind/name/weight required' }, { status: 400 });

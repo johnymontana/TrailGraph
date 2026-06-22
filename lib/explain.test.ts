@@ -26,6 +26,7 @@ describe('explainRecommendation (D4 — graph-grounded "why this")', () => {
         { name: 'Hiking', yourWords: 'easy hikes' },
         { name: 'Astronomy', yourWords: 'dark skies' },
       ],
+      accessibility: [], // no constraints set in this mock → no accessibility clauses
     });
   });
 
@@ -38,6 +39,6 @@ describe('explainRecommendation (D4 — graph-grounded "why this")', () => {
   it('handles a park with no row at all (null park, empty matches)', async () => {
     readGraph.mockResolvedValue([]);
     const out = await explainRecommendation('u1', 'nope');
-    expect(out).toEqual({ parkCode: 'nope', park: null, matches: [] });
+    expect(out).toEqual({ parkCode: 'nope', park: null, matches: [], accessibility: [] });
   });
 });

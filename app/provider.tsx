@@ -2,6 +2,7 @@
 import { ChakraProvider, defaultSystem } from '@chakra-ui/react';
 import type { ReactNode } from 'react';
 import { ColorModeProvider } from '../components/ui/color-mode';
+import { EmotionRegistry } from '../components/ui/emotion-registry';
 
 /**
  * Chakra UI v3 — the official Next.js App Router provider.
@@ -15,8 +16,10 @@ import { ColorModeProvider } from '../components/ui/color-mode';
  */
 export function Provider({ children }: { children: ReactNode }) {
   return (
-    <ChakraProvider value={defaultSystem}>
-      <ColorModeProvider>{children}</ColorModeProvider>
-    </ChakraProvider>
+    <EmotionRegistry>
+      <ChakraProvider value={defaultSystem}>
+        <ColorModeProvider>{children}</ColorModeProvider>
+      </ChakraProvider>
+    </EmotionRegistry>
   );
 }

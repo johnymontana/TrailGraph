@@ -11,8 +11,9 @@ import {
   Separator,
 } from '@chakra-ui/react';
 import NextImage from 'next/image';
-import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph } from '../../../lib/queries';
-import { darkSkyRating, monthNames, difficultyDot, getWeather, type Difficulty } from '../../../lib/datasources';
+import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph, peopleForPark, toursForPark, stampsForPark, eventsForPark, placesForPark, articlesForPark, parkingForPark } from '../../../lib/queries';
+import { getAvailability } from '../../../lib/bridges';
+import { darkSkyRating, monthNames, difficultyDot, getWeather, getConditions, type Difficulty } from '../../../lib/datasources';
 import { explainForParks } from '../../../lib/explain';
 import { getServerUserId } from '../../../lib/session';
 import { MiniMap } from '../../../components/MiniMap';
@@ -22,6 +23,8 @@ import { ParkActions } from '../../../components/ParkActions';
 import { ParkCard } from '../../../components/ParkCard';
 import { VisitationChart } from '../../../components/parks/VisitationChart';
 import { ParkGraph } from '../../../components/parks/ParkGraph';
+import { TourList } from '../../../components/parks/TourList';
+import { StampList } from '../../../components/parks/StampList';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +40,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
   const park = await parkDetail(parkCode);
   if (!park) notFound();
 
-  const [similar, nearby, together, graph, weather] = await Promise.all([
+  const [similar, nearby, together, graph, weather, people, tours, conditions, places, articles, parking] = await Promise.all([
     similarParks(parkCode).catch(() => []),
     nearbyParks(parkCode).catch(() => []),
     oftenPlannedTogether(parkCode).catch(() => []),
@@ -45,10 +48,27 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
     park.lat != null && park.lng != null
       ? getWeather(park.lat as number, park.lng as number).catch(() => null)
       : Promise.resolve(null),
+    peopleForPark(parkCode).catch(() => [] as { id: string; title: string; tags: string[] }[]),
+    toursForPark(parkCode).catch(() => [] as { id: string; title: string; description: string | null; stops: number }[]),
+    getConditions(parkCode).catch(() => ({ webcams: [], roadEvents: [] })),
+    placesForPark(parkCode).catch(() => [] as { id: string; title: string; image: string | null; audioDescription: string | null; isStamp: boolean }[]),
+    articlesForPark(parkCode).catch(() => [] as { id: string; title: string; url: string | null; description: string | null }[]),
+    parkingForPark(parkCode).catch(() => [] as { id: string; name: string; wheelchairAccessible: boolean }[]),
   ]);
 
   // Personalized rationale (§5f): "because you liked …" on related cards, for signed-in users.
   const userId = await getServerUserId();
+  // Passport stamps at this park + the user's collection state (NPS-expansion P2 #8).
+  const stamps = await stampsForPark(parkCode, userId).catch(
+    () => [] as { id: string; label: string; collected: boolean }[],
+  );
+  // Events, intersected with the user's saved travel window (NPS-expansion P2 #7).
+  const availability = userId
+    ? await getAvailability(userId).catch(() => ({ start: null, end: null }))
+    : { start: null, end: null };
+  const events = await eventsForPark(parkCode, availability).catch(
+    () => [] as { id: string; title: string; dateStart: string | null; dateEnd: string | null; inWindow: boolean }[],
+  );
   const rationale: Record<string, string[]> = userId
     ? await explainForParks(userId, [...similar, ...nearby, ...together].map((p) => p.parkCode)).catch(
         () => ({}) as Record<string, string[]>,
@@ -201,7 +221,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
 
         <Stack gap={4}>
           {park.lat != null && park.lng != null ? (
-            <MiniMap lat={park.lat as number} lng={park.lng as number} label={park.name as string} />
+            <MiniMap lat={park.lat as number} lng={park.lng as number} label={park.name as string} parkCode={parkCode} />
           ) : null}
           <HStack>
             {park.url ? <CLink href={park.url as string} color="blue.600">Official site →</CLink> : null}
@@ -260,6 +280,37 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
             </Box>
           ) : null}
 
+          {/* Live conditions (NPS-expansion P2 #6): on-demand webcams + road events, beside alerts. */}
+          {conditions.webcams.length > 0 || conditions.roadEvents.length > 0 ? (
+            <Box>
+              <Heading size="sm" mb={2}>Live conditions</Heading>
+              {conditions.roadEvents.length > 0 ? (
+                <Stack gap={1} mb={conditions.webcams.length > 0 ? 3 : 0}>
+                  {conditions.roadEvents.slice(0, 5).map((r) => (
+                    <Text key={r.id} fontSize="sm">
+                      <Badge mr={2} colorPalette={r.severityRank >= 3 ? 'red' : r.severityRank === 2 ? 'orange' : 'gray'}>
+                        {r.severity}
+                      </Badge>
+                      {r.title}
+                    </Text>
+                  ))}
+                </Stack>
+              ) : null}
+              {conditions.webcams.length > 0 ? (
+                <Stack gap={1}>
+                  {conditions.webcams.slice(0, 6).map((c) => (
+                    <Text key={c.id} fontSize="sm">
+                      {c.url ? <CLink href={c.url} color="blue.600">{c.title} ↗</CLink> : c.title}
+                      <Badge ml={2} colorPalette={c.isStreaming ? 'green' : c.status === 'Active' ? 'blue' : 'gray'}>
+                        {c.isStreaming ? 'live' : c.status.toLowerCase()}
+                      </Badge>
+                    </Text>
+                  ))}
+                </Stack>
+              ) : null}
+            </Box>
+          ) : null}
+
           {/* Park-local data, previously only on the map (§7) */}
           {thingsToDo.length > 0 ? (
             <Box>
@@ -301,6 +352,19 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
               </Stack>
             </Box>
           ) : null}
+          {parking.length > 0 ? (
+            <Box>
+              <Heading size="sm" mb={2}>Parking</Heading>
+              <Stack gap={1}>
+                {parking.map((p) => (
+                  <Text key={p.id} fontSize="sm">
+                    {p.name}
+                    {p.wheelchairAccessible ? <Badge ml={2} colorPalette="green">accessible</Badge> : null}
+                  </Text>
+                ))}
+              </Stack>
+            </Box>
+          ) : null}
 
           <Separator />
           <Text fontSize="xs" color="fg.muted">
@@ -308,6 +372,95 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
           </Text>
         </Stack>
       </SimpleGrid>
+
+      {/* People & stories — historical figures associated with this park (NPS-expansion P0 #2). */}
+      {people.length > 0 ? (
+        <Box mt={12}>
+          <Heading size="md" mb={1}>People &amp; stories</Heading>
+          <Text fontSize="sm" color="fg.muted" mb={3}>Figures tied to {park.name as string} — each spans a cross-park trail.</Text>
+          <Stack gap={2}>
+            {people.map((per) => (
+              <Box key={per.id}>
+                <Text fontWeight="medium" display="inline">{per.title}</Text>
+                {per.tags?.length ? (
+                  <Text as="span" fontSize="sm" color="fg.muted"> — {per.tags.slice(0, 3).join(', ')}</Text>
+                ) : null}
+              </Box>
+            ))}
+          </Stack>
+        </Box>
+      ) : null}
+
+      {/* Official NPS tours → trip builder (NPS-expansion P1 #3). */}
+      <TourList parkName={park.name as string} tours={tours} />
+
+      {/* Passport stamp collection (NPS-expansion P2 #8). */}
+      <StampList stamps={stamps} />
+
+      {/* Events, season-aware (NPS-expansion P2 #7): those inside the user's travel window come first. */}
+      {events.length > 0 ? (
+        <Box mt={12}>
+          <Heading size="md" mb={1}>Events</Heading>
+          <Text fontSize="sm" color="fg.muted" mb={3}>
+            {availability.start && availability.end
+              ? `Events at ${park.name as string} — those during your ${availability.start}–${availability.end} window are flagged.`
+              : `Upcoming events at ${park.name as string}. Set your travel dates on “Your memory” to see what lands during your visit.`}
+          </Text>
+          <Stack gap={1}>
+            {events.map((e) => (
+              <Text key={e.id} fontSize="sm">
+                {e.inWindow ? <Badge mr={2} colorPalette="green">during your visit</Badge> : null}
+                {e.title}
+                {e.dateStart ? <Text as="span" color="fg.muted"> · {e.dateStart}{e.dateEnd && e.dateEnd !== e.dateStart ? `–${e.dateEnd}` : ''}</Text> : null}
+              </Text>
+            ))}
+          </Stack>
+        </Box>
+      ) : null}
+
+      {/* Places of interest with real images + audio descriptions (NPS-expansion P3, accessibility). */}
+      {places.length > 0 ? (
+        <Box mt={12}>
+          <Heading size="md" mb={3}>Places to see</Heading>
+          <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={4}>
+            {places.map((pl) => (
+              <Box key={pl.id} borderWidth="1px" borderRadius="lg" overflow="hidden" bg="bg.panel">
+                <Box h="120px" position="relative" bgGradient="to-br" gradientFrom="green.600" gradientTo="blue.700">
+                  {pl.image ? (
+                    <NextImage src={pl.image} alt={pl.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
+                  ) : null}
+                </Box>
+                <Stack p={3} gap={1}>
+                  <HStack>
+                    <Text fontWeight="medium" lineClamp={1} flex="1">{pl.title}</Text>
+                    {pl.isStamp ? <Badge colorPalette="purple">stamp</Badge> : null}
+                    {pl.audioDescription ? <Badge colorPalette="teal" title={pl.audioDescription}>🔊 audio</Badge> : null}
+                  </HStack>
+                </Stack>
+              </Box>
+            ))}
+          </SimpleGrid>
+        </Box>
+      ) : null}
+
+      {/* "Learn more" — articles about this park (NPS-expansion P3). */}
+      {articles.length > 0 ? (
+        <Box mt={12}>
+          <Heading size="md" mb={3}>Learn more</Heading>
+          <Stack gap={2}>
+            {articles.map((a) => (
+              <Box key={a.id}>
+                {a.url ? (
+                  <CLink href={a.url} color="blue.600" fontWeight="medium">{a.title} ↗</CLink>
+                ) : (
+                  <Text fontWeight="medium">{a.title}</Text>
+                )}
+                {a.description ? <Text fontSize="sm" color="fg.muted" lineClamp={2}>{a.description}</Text> : null}
+              </Box>
+            ))}
+          </Stack>
+        </Box>
+      ) : null}
 
       {/* Interactive one-hop graph (NVL) — the park's immediate connections, traversable. */}
       <ParkGraph data={graph} parkName={park.name as string} />

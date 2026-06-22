@@ -1,5 +1,6 @@
 import { readGraph } from './neo4j';
 import type { ParkSummary } from './queries';
+import { getTravelConstraints } from './bridges';
 
 /**
  * "For you" (E2, ADR-015): direct cached cross-graph query, no agent hop. Joins the user's canonical
@@ -20,6 +21,10 @@ export async function forYou(
   const { limit = 12, homeLat, homeLng } = opts;
   const hasHome = homeLat != null && homeLng != null;
 
+  // Accessibility/travel constraints filter every recommendation (NPS-expansion P0 #1): keep only parks
+  // with an RV-fitting / wheelchair-accessible campground and all required amenities (on a place or VC).
+  const cons = await getTravelConstraints(userId);
+
   const personalized = await readGraph<Recommendation>(
     `
     MATCH (u:User {userId: $userId})-[pr:PREFERS]->(d)
@@ -27,6 +32,11 @@ export async function forYou(
     MATCH (p:Park)-[:OFFERS|HAS_TOPIC]->(d)
     WHERE NOT (u)-[:CONSIDERED]->(p)
       AND NOT EXISTS { (u)-[:PLANNED]->(:Trip)-[:HAS_STOP]->(:Stop)-[:OF_PARK]->(p) }
+      AND ($rv IS NULL OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.rvMaxLengthFt >= $rv })
+      AND (NOT $wheelchair OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.wheelchairAccessible = true })
+      AND ALL(req IN $required WHERE
+            EXISTS { (p)-[:HAS_PLACE]->(:Place)-[:HAS_AMENITY]->(:Amenity {name: req}) }
+            OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) })
     WITH p, sum(coalesce(pr.weight, 1.0)) AS score, count(DISTINCT d) AS matches, collect(DISTINCT d.name) AS matched
     RETURN p.parkCode AS parkCode, p.fullName AS name, p.designation AS designation, p.states AS states,
            p.location.latitude AS lat, p.location.longitude AS lng,
@@ -38,7 +48,16 @@ export async function forYou(
     ORDER BY score DESC, ${hasHome ? 'miles ASC,' : ''} name ASC
     LIMIT toInteger($limit)
     `,
-    { userId, limit, hasHome, homeLat: homeLat ?? null, homeLng: homeLng ?? null },
+    {
+      userId,
+      limit,
+      hasHome,
+      homeLat: homeLat ?? null,
+      homeLng: homeLng ?? null,
+      rv: cons.rvMaxLengthFt,
+      wheelchair: cons.wheelchair,
+      required: cons.requiredAmenities,
+    },
   );
 
   if (personalized.length > 0) return { source: 'personalized', parks: personalized };

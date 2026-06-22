@@ -4,6 +4,7 @@ import { deriveBestMonths, crowdLevel, monthNames } from './visitation';
 import { classifyDifficulty, difficultyDot } from './trails';
 import { recreationUrl, parseRidbId } from './recreation';
 import { weatherCodeLabel } from './weather';
+import { roadEventSeverity } from './conditions';
 
 describe('darkSkyRating (§5a)', () => {
   it('maps Bortle to a 1–5 star rating (darker = more stars)', () => {
@@ -80,5 +81,16 @@ describe('weatherCodeLabel (§4)', () => {
     expect(weatherCodeLabel(75).label).toBe('Snow');
     expect(weatherCodeLabel(95).label).toBe('Thunderstorm');
     expect(weatherCodeLabel(null).label).toBe('—');
+  });
+});
+
+describe('roadEventSeverity (P2 conditions)', () => {
+  it('ranks severities for sorting (major worst)', () => {
+    expect(roadEventSeverity('Major delays')).toEqual({ label: 'Major', rank: 3 });
+    expect(roadEventSeverity('road closed')).toEqual({ label: 'Major', rank: 3 });
+    expect(roadEventSeverity('Moderate')).toEqual({ label: 'Moderate', rank: 2 });
+    expect(roadEventSeverity('Minor')).toEqual({ label: 'Minor', rank: 1 });
+    expect(roadEventSeverity('')).toEqual({ label: 'Info', rank: 0 });
+    expect(roadEventSeverity(null)).toEqual({ label: 'Info', rank: 0 });
   });
 });

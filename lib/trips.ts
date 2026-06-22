@@ -9,7 +9,7 @@ import { considerPark } from './bridges';
  * RoutingGateway (ADR-004) and are cached on :DRIVE_TO edges.
  */
 
-export type StopKind = 'park' | 'campground' | 'poi' | 'custom';
+export type StopKind = 'park' | 'campground' | 'poi' | 'place' | 'custom';
 
 export interface NewTrip {
   name: string;
@@ -95,17 +95,18 @@ export async function getTrip(userId: string, tripId: string) {
     OPTIONAL MATCH (s)-[:OF_PARK]->(p:Park)
     OPTIONAL MATCH (s)-[:OF_CAMPGROUND]->(c:Campground)
     OPTIONAL MATCH (s)-[:OF_POI]->(poi:ThingToDo)
+    OPTIONAL MATCH (s)-[:OF_PLACE]->(pl:Place)
     OPTIONAL MATCH (s)-[d:DRIVE_TO]->(:Stop)
-    WITH t, s, p, c, poi, d
+    WITH t, s, p, c, poi, pl, d
     ORDER BY s.order ASC
     RETURN t.id AS id, t.name AS name, t.startDate AS startDate, t.endDate AS endDate,
       collect(CASE WHEN s IS NULL THEN null ELSE {
         id: s.id, order: s.order, day: s.day, nights: s.nights, name: s.name,
         kind: s.kind,
-        lat: coalesce(s.location.latitude, p.location.latitude, c.location.latitude, poi.location.latitude),
-        lng: coalesce(s.location.longitude, p.location.longitude, c.location.longitude, poi.location.longitude),
+        lat: coalesce(s.location.latitude, p.location.latitude, c.location.latitude, poi.location.latitude, pl.location.latitude),
+        lng: coalesce(s.location.longitude, p.location.longitude, c.location.longitude, poi.location.longitude, pl.location.longitude),
         parkCode: p.parkCode, parkName: p.fullName,
-        campgroundName: c.name, poiTitle: poi.title,
+        campgroundName: c.name, poiTitle: poi.title, placeTitle: pl.title,
         driveTo: CASE WHEN d IS NULL THEN null ELSE {miles: d.miles, minutes: d.minutes, source: d.source} END
       } END) AS stops
     `,
@@ -116,7 +117,7 @@ export async function getTrip(userId: string, tripId: string) {
   // Drop orphan stops with nothing to show — no resolved park/campground/POI and no custom label
   // (legacy data from before addStop validation; §2.4). A custom stop keeps its own name/coords.
   trip.stops = (trip.stops ?? []).filter(
-    (s) => s && (s.parkName || s.campgroundName || s.poiTitle || s.name || (s.lat != null && s.lng != null)),
+    (s) => s && (s.parkName || s.campgroundName || s.poiTitle || s.placeTitle || s.name || (s.lat != null && s.lng != null)),
   );
   return trip;
 }
@@ -130,6 +131,7 @@ interface StopRow {
   parkName: string | null;
   campgroundName: string | null;
   poiTitle: string | null;
+  placeTitle: string | null;
 }
 
 export async function addStop(userId: string, tripId: string, stop: NewStop): Promise<string | null> {
@@ -142,7 +144,7 @@ export async function addStop(userId: string, tripId: string, stop: NewStop): Pr
   // Validate the referenced domain entity EXISTS before creating a stop (§2.5): a bad/hallucinated
   // parkCode must not produce a nameless "1. Stop". Custom stops (no refId) carry their own lat/lng.
   if (stop.refId) {
-    const label = stop.kind === 'park' ? 'Park' : stop.kind === 'campground' ? 'Campground' : stop.kind === 'poi' ? 'ThingToDo' : null;
+    const label = stop.kind === 'park' ? 'Park' : stop.kind === 'campground' ? 'Campground' : stop.kind === 'poi' ? 'ThingToDo' : stop.kind === 'place' ? 'Place' : null;
     const keyField = stop.kind === 'park' ? 'parkCode' : 'id';
     if (label) {
       const exists = await readGraph<{ ok: boolean }>(
@@ -177,6 +179,10 @@ export async function addStop(userId: string, tripId: string, stop: NewStop): Pr
     CALL {
       WITH s
       MATCH (poi:ThingToDo {id: $refId}) WHERE $kind = 'poi' MERGE (s)-[:OF_POI]->(poi)
+    }
+    CALL {
+      WITH s
+      MATCH (pl:Place {id: $refId}) WHERE $kind = 'place' MERGE (s)-[:OF_PLACE]->(pl)
     }
     RETURN s.id AS id
     `,
@@ -267,6 +273,105 @@ export async function recomputeSegments(userId: string, tripId: string): Promise
       { from: from.id, to: to.id, miles: seg.miles, minutes: seg.minutes, source: seg.source },
     );
   }
+}
+
+/**
+ * Seed a new trip from an official NPS tour (NPS-expansion P1 #3): a tour is a graph path
+ * `(:Tour)-[:HAS_STOP]->(:TourStop {ordinal})-[:AT]->(:Place|:Campground|:VisitorCenter)`. We
+ * materialize each stop in order — Place→`place` stop, Campground→`campground`, VisitorCenter→a
+ * custom stop carrying the VC name/coords (no VC stop kind). Returns null if the tour has no usable
+ * stops. The user can then remix it with the ranger (reorder, drop strenuous stops, add stamps).
+ */
+export async function createTripFromTour(
+  userId: string,
+  tourId: string,
+): Promise<{ tripId: string; name: string; stops: number } | null> {
+  const rows = await readGraph<{
+    title: string | null;
+    stops: {
+      ordinal: number;
+      placeId: string | null;
+      cgId: string | null;
+      vcName: string | null;
+      vcLat: number | null;
+      vcLng: number | null;
+    }[];
+  }>(
+    `
+    MATCH (tr:Tour {id: $tourId})
+    OPTIONAL MATCH (tr)-[:HAS_STOP]->(ts:TourStop)
+    OPTIONAL MATCH (ts)-[:AT]->(target)
+    WITH tr, ts, target ORDER BY ts.ordinal ASC
+    RETURN tr.title AS title, collect(CASE WHEN ts IS NULL THEN null ELSE {
+      ordinal: coalesce(ts.ordinal, 0),
+      placeId: CASE WHEN target:Place THEN target.id ELSE null END,
+      cgId: CASE WHEN target:Campground THEN target.id ELSE null END,
+      vcName: CASE WHEN target:VisitorCenter THEN target.name ELSE null END,
+      vcLat: CASE WHEN target:VisitorCenter THEN target.location.latitude ELSE null END,
+      vcLng: CASE WHEN target:VisitorCenter THEN target.location.longitude ELSE null END
+    } END) AS stops
+    `,
+    { tourId },
+  );
+  if (!rows.length || !rows[0].title) return null;
+  const tour = rows[0];
+  const name = `${tour.title} (tour)`;
+  const tripId = await createTrip(userId, { name });
+  let count = 0;
+  for (const st of (tour.stops ?? []).filter(Boolean)) {
+    if (st.placeId) {
+      if (await addStop(userId, tripId, { kind: 'place', refId: st.placeId })) count++;
+    } else if (st.cgId) {
+      if (await addStop(userId, tripId, { kind: 'campground', refId: st.cgId })) count++;
+    } else if (st.vcName) {
+      if (await addStop(userId, tripId, { kind: 'custom', name: st.vcName, lat: st.vcLat ?? undefined, lng: st.vcLng ?? undefined })) count++;
+    }
+  }
+  if (count === 0) {
+    await deleteTrip(userId, tripId);
+    return null;
+  }
+  return { tripId, name, stops: count };
+}
+
+export interface TripCost {
+  perPark: { parkCode: string; parkName: string; fee: number }[];
+  total: number;
+  atbPrice: number;
+  holdsAtb: boolean;
+  atbSaves: boolean;
+}
+
+/**
+ * Trip entrance-fee cost model (NPS-expansion P2 #9). Sums the per-park vehicle entrance fee across the
+ * trip's distinct parks (from the synced `Park.entranceFees` JSON — we take the max line, ≈ the private
+ * vehicle fee), then compares to the $80 America the Beautiful annual pass for break-even. If the user
+ * already `HOLDS` the annual pass, those parks are covered (total shown as 0). userId-scoped (R4).
+ */
+export async function tripCost(userId: string, tripId: string): Promise<TripCost> {
+  const rows = await readGraph<{ parkCode: string; parkName: string; fees: string | null }>(
+    `MATCH (t:Trip {id:$tripId, userId:$userId})-[:HAS_STOP]->(:Stop)-[:OF_PARK]->(p:Park)
+     RETURN DISTINCT p.parkCode AS parkCode, p.fullName AS parkName, p.entranceFees AS fees`,
+    { userId, tripId },
+  );
+  const held = await readGraph<{ ok: boolean }>(
+    `MATCH (:User {userId:$userId})-[:HOLDS]->(:EntrancePass {id:'atb-annual'}) RETURN true AS ok`,
+    { userId },
+  );
+  const holdsAtb = held.length > 0;
+  const atbPrice = 80;
+  const perPark = rows.map((r) => {
+    let fee = 0;
+    try {
+      const arr = (r.fees ? JSON.parse(r.fees) : []) as { cost?: string }[];
+      fee = arr.reduce((max, f) => Math.max(max, Number(f.cost) || 0), 0);
+    } catch {
+      fee = 0;
+    }
+    return { parkCode: r.parkCode, parkName: r.parkName, fee };
+  });
+  const gross = perPark.reduce((s, p) => s + p.fee, 0);
+  return { perPark, total: holdsAtb ? 0 : gross, atbPrice, holdsAtb, atbSaves: gross > atbPrice };
 }
 
 export async function deleteTrip(userId: string, tripId: string): Promise<void> {

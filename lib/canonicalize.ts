@@ -10,14 +10,15 @@ import { readGraph } from './neo4j';
  * as the alert decision).
  */
 
+export type CanonKind = 'activity' | 'topic' | 'amenity';
 export interface CanonTarget {
-  kind: 'activity' | 'topic';
+  kind: CanonKind;
   name: string;
   method: 'exact' | 'synonym';
 }
 
 // Curated synonyms: user phrasing → canonical NPS name. Extend as we see real transcripts.
-const SYNONYMS: Record<string, { kind: 'activity' | 'topic'; name: string }> = {
+const SYNONYMS: Record<string, { kind: CanonKind; name: string }> = {
   stargazing: { kind: 'activity', name: 'Astronomy' },
   'dark skies': { kind: 'activity', name: 'Astronomy' },
   'dark sky': { kind: 'activity', name: 'Astronomy' },
@@ -55,16 +56,21 @@ let cache: Map<string, CanonTarget> | null = null;
 async function aliasMap(): Promise<Map<string, CanonTarget>> {
   if (cache) return cache;
   const m = new Map<string, CanonTarget>();
-  const rows = await readGraph<{ activities: string[]; topics: string[] }>(
+  const rows = await readGraph<{ activities: string[]; topics: string[]; amenities: string[] }>(
     `CALL { MATCH (a:Activity) RETURN collect(a.name) AS activities }
      CALL { MATCH (t:Topic) RETURN collect(t.name) AS topics }
-     RETURN activities, topics`,
+     CALL { MATCH (am:Amenity) RETURN collect(am.name) AS amenities }
+     RETURN activities, topics, amenities`,
   );
   for (const name of rows[0]?.activities ?? []) {
     if (name) m.set(name.toLowerCase(), { kind: 'activity', name, method: 'exact' });
   }
   for (const name of rows[0]?.topics ?? []) {
-    if (name) m.set(name.toLowerCase(), { kind: 'topic', name, method: 'exact' });
+    if (name && !m.has(name.toLowerCase())) m.set(name.toLowerCase(), { kind: 'topic', name, method: 'exact' });
+  }
+  // Amenities are the §accessibility/comfort vocabulary (REQUIRES/PREFERS targets). Activities/topics win ties.
+  for (const name of rows[0]?.amenities ?? []) {
+    if (name && !m.has(name.toLowerCase())) m.set(name.toLowerCase(), { kind: 'amenity', name, method: 'exact' });
   }
   for (const [phrase, target] of Object.entries(SYNONYMS)) {
     if (!m.has(phrase)) m.set(phrase, { ...target, method: 'synonym' });

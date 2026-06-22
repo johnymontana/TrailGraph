@@ -80,6 +80,91 @@ export interface NpsThingToDo {
   activities?: NpsActivityRef[];
 }
 
+export interface NpsRelatedPark {
+  parkCode: string;
+  states?: string;
+  fullName?: string;
+}
+
+/** POIs (`/places`) — first-class nodes linking parks ↔ amenities ↔ tags ↔ stamps ↔ audio. */
+export interface NpsPlace {
+  id: string;
+  title: string;
+  listingDescription?: string;
+  bodyText?: string;
+  latitude?: string;
+  longitude?: string;
+  relatedParks?: NpsRelatedPark[];
+  amenities?: (string | NpsActivityRef)[];
+  tags?: string[];
+  images?: NpsImage[];
+  audioDescription?: string;
+  isPassportStampLocation?: string | boolean;
+}
+
+/** Historical figures (`/people`) — span multiple parks → thematic multi-park trails. */
+export interface NpsPerson {
+  id: string;
+  title: string;
+  firstName?: string;
+  lastName?: string;
+  listingDescription?: string;
+  bodyText?: string;
+  latitude?: string;
+  longitude?: string;
+  relatedParks?: NpsRelatedPark[];
+  tags?: string[];
+  images?: NpsImage[];
+}
+
+/** Ordered tours (`/tours`) — stops reference places/campgrounds/visitor-centers (a graph path). */
+export interface NpsTourStop {
+  id?: string;
+  ordinal?: string | number;
+  assetType?: string; // Place | Campground | VisitorCenter
+  assetId?: string;
+  title?: string;
+}
+export interface NpsTour {
+  id: string;
+  title: string;
+  description?: string;
+  durationMin?: string;
+  durationMax?: string;
+  relatedParks?: NpsRelatedPark[];
+  activities?: NpsActivityRef[];
+  topics?: NpsActivityRef[];
+  stops?: NpsTourStop[];
+}
+
+/** Passport stamp locations (`/passportstamplocations`) — collection/gamification graph. */
+export interface NpsPassportStamp {
+  id: string;
+  label?: string;
+  type?: string;
+  parks?: NpsRelatedPark[];
+}
+
+/** Parking lots (`/parkinglots`) — arrival/logistics + accessibility. */
+export interface NpsParkingLot {
+  id: string;
+  name?: string;
+  latitude?: string;
+  longitude?: string;
+  relatedParks?: NpsRelatedPark[];
+  accessibility?: Record<string, unknown>;
+}
+
+/** Articles (`/articles`) — "learn more" content; `(:Article)-[:ABOUT]->(:Park)`. */
+export interface NpsArticle {
+  id: string;
+  title?: string;
+  url?: string;
+  listingDescription?: string;
+  relatedParks?: NpsRelatedPark[];
+  images?: NpsImage[];
+}
+
 export interface NpsGeneric {
   id: string;
   [key: string]: unknown;
