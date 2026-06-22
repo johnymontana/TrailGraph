@@ -35,6 +35,7 @@ import {
   upsertEntrancePasses,
 } from './upserts';
 import { embedParks } from './embed-parks';
+import { embedPlaces, embedPeople, embedArticles } from './embed-nodes';
 
 /**
  * NPS sync orchestrator (ADR-007).
@@ -301,6 +302,14 @@ export async function runSlowSync(): Promise<StepResult[]> {
   out.push(await step('entrancepasses', 'slow', async () => ({ count: await upsertEntrancePasses() })));
 
   out.push(await step('embeddings', 'slow', async () => embedParks()));
+  // Semantic vectors for the new nodes (content-hash gated; first run is a large one-time backfill).
+  // Places + people are the high-value semantic targets and embed by default. Articles are bulky P3
+  // content (~19k) — opt in with EMBED_ARTICLES=1 to avoid an unexpected embedding bill.
+  out.push(await step('embed-places', 'slow', async () => embedPlaces()));
+  out.push(await step('embed-people', 'slow', async () => embedPeople()));
+  if (process.env.EMBED_ARTICLES === '1') {
+    out.push(await step('embed-articles', 'slow', async () => embedArticles()));
+  }
 
   return out;
 }

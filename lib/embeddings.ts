@@ -36,6 +36,21 @@ export function composeParkText(p: {
     .join('\n');
 }
 
+/** Embedding document for a Place (POI) — title + body + tags (NPS-expansion vector search). */
+export function composePlaceText(p: { title?: string; bodyText?: string; tags?: string[] }): string {
+  return [p.title, p.bodyText, (p.tags ?? []).join(', ')].filter(Boolean).join('\n');
+}
+
+/** Embedding document for a Person (historical figure) — title + body + tags. */
+export function composePersonText(p: { title?: string; bodyText?: string; tags?: string[] }): string {
+  return [p.title, p.bodyText, (p.tags ?? []).join(', ')].filter(Boolean).join('\n');
+}
+
+/** Embedding document for an Article — title + listing description. */
+export function composeArticleText(a: { title?: string; description?: string }): string {
+  return [a.title, a.description].filter(Boolean).join('\n');
+}
+
 export async function embed(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
   const res = await fetch(`${GATEWAY_URL}/embeddings`, {

@@ -593,6 +593,29 @@ export async function parkingForPark(
   );
 }
 
+/**
+ * Semantic search over the NPS-expansion nodes (Place/Person) via their vector index. Returns the
+ * matched node + up to 3 related park codes for navigation. Requires the `place_embedding`/
+ * `person_embedding` indexes (migration 004) and embeddings written by `embed-nodes.ts`.
+ */
+export async function semanticSearch(
+  kind: 'place' | 'person',
+  query: string,
+  limit = 10,
+): Promise<{ id: string; title: string; parks: string[]; score: number }[]> {
+  const index = kind === 'place' ? 'place_embedding' : 'person_embedding';
+  const rel = kind === 'place' ? 'HAS_PLACE' : 'ASSOCIATED_WITH';
+  const [vector] = await embed([query]);
+  return readGraph(
+    `CALL db.index.vector.queryNodes($index, toInteger($k), $vector) YIELD node AS n, score
+     OPTIONAL MATCH (n)-[:${rel}]-(p:Park)
+     WITH n, score, [x IN collect(DISTINCT p.parkCode) WHERE x IS NOT NULL][0..3] AS parks
+     RETURN n.id AS id, n.title AS title, parks, score
+     ORDER BY score DESC LIMIT toInteger($limit)`,
+    { index, k: limit, vector, limit },
+  );
+}
+
 /** "Vibe" search (A4): vector candidates → graph re-rank (ADR-012). */
 export async function vibeSearch(
   query: string,
