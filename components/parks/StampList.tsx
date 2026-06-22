@@ -23,13 +23,18 @@ export function StampList({
     setBusy(true);
     setErr(null);
     setState((s) => ({ ...s, [id]: next }));
-    const res = await fetch('/api/memory', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ op: next ? 'collectStamp' : 'uncollectStamp', stampId: id }),
-    });
-    if (res.status === 401) {
-      setErr('Sign in to collect stamps.');
+    try {
+      const res = await fetch('/api/memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: next ? 'collectStamp' : 'uncollectStamp', stampId: id }),
+      });
+      if (!res.ok) {
+        setErr(res.status === 401 ? 'Sign in to collect stamps.' : 'Failed to update stamp. Please try again.');
+        setState((s) => ({ ...s, [id]: !next })); // revert
+      }
+    } catch {
+      setErr('Network error. Please try again.');
       setState((s) => ({ ...s, [id]: !next })); // revert
     }
     setBusy(false);
