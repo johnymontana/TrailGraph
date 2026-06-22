@@ -376,28 +376,44 @@ export async function upsertTours(tours: NpsTour[]): Promise<number> {
  * `:Place`/`:VisitorCenter` nodes to the shared `:Amenity` vocabulary. Each item is an amenity with a
  * `parks[]`, each park holding a child array (`places` or `visitorCenters`).
  */
+/**
+ * Parse `/amenities/parksplaces|parksvisitorcenters` items into `{amenityId, amenityName, childIds}`.
+ * Pure (unit-tested). NPS wraps each amenity object in a single-element array (`data: [[{…}], …]`), so
+ * we flatten one level first; each amenity then has `parks[].<childArrayKey>[].id` (the child key is
+ * lowercase: `places` / `visitorcenters`). Falls back to the first array-of-{id} on a park object as a
+ * guard against future key/casing changes.
+ */
+export function extractAmenityChildIds(
+  items: unknown[],
+  childArrayKey: 'places' | 'visitorcenters',
+): { amenityId: string; amenityName: string; childIds: string[] }[] {
+  const flat = items.flatMap((it) => (Array.isArray(it) ? it : [it])) as Record<string, unknown>[];
+  return flat
+    .filter((it) => it && typeof it === 'object' && it.id != null)
+    .map((it) => {
+      const childIds: string[] = [];
+      for (const park of (it.parks as Record<string, unknown>[]) ?? []) {
+        let arr = park[childArrayKey] as { id?: string }[] | undefined;
+        if (!Array.isArray(arr) || arr.length === 0) {
+          arr = Object.values(park).find(
+            (v): v is { id?: string }[] =>
+              Array.isArray(v) && v.length > 0 && typeof v[0] === 'object' && v[0] !== null && 'id' in (v[0] as object),
+          );
+        }
+        for (const child of arr ?? []) if (child?.id) childIds.push(String(child.id));
+      }
+      return { amenityId: String(it.id), amenityName: String(it.name ?? ''), childIds };
+    });
+}
+
 export async function upsertAmenityBridges(
   items: NpsGeneric[],
   childLabel: 'Place' | 'VisitorCenter',
-  childArrayKey: 'places' | 'visitorCenters',
+  childArrayKey: 'places' | 'visitorcenters',
 ): Promise<{ amenities: number; refs: number; edges: number }> {
   if (!items.length) return { amenities: 0, refs: 0, edges: 0 };
-  const rows = items.map((it) => {
-    const childIds: string[] = [];
-    for (const park of (it.parks as Record<string, unknown>[]) ?? []) {
-      // Preferred key, then fall back to the first array-of-{id} on the park object — guards against
-      // an unexpected key name/casing in the NPS payload (which would otherwise silently yield 0 edges).
-      let arr = park[childArrayKey] as { id?: string }[] | undefined;
-      if (!Array.isArray(arr) || arr.length === 0) {
-        arr = Object.values(park).find(
-          (v): v is { id?: string }[] =>
-            Array.isArray(v) && v.length > 0 && typeof v[0] === 'object' && v[0] !== null && 'id' in (v[0] as object),
-        );
-      }
-      for (const child of arr ?? []) if (child?.id) childIds.push(String(child.id));
-    }
-    return { amenityId: String(it.id), amenityName: String(it.name ?? ''), childIds };
-  });
+  const rows = extractAmenityChildIds(items, childArrayKey);
+  if (!rows.length) return { amenities: 0, refs: 0, edges: 0 };
   const refs = rows.reduce((n, row) => n + row.childIds.length, 0);
   // OPTIONAL MATCH + FOREACH so amenities are still counted when a child id doesn't resolve, and
   // `edges` reflects only the links actually created — distinguishing a parse miss (refs=0) from an

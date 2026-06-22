@@ -289,7 +289,7 @@ export async function runSlowSync(): Promise<StepResult[]> {
   );
   out.push(
     await step('amenities-vcs', 'slow', async () =>
-      upsertAmenityBridges(await fetchAll<NpsGeneric>('amenities/parksvisitorcenters'), 'VisitorCenter', 'visitorCenters'),
+      upsertAmenityBridges(await fetchAll<NpsGeneric>('amenities/parksvisitorcenters'), 'VisitorCenter', 'visitorcenters'),
     ),
   );
 
