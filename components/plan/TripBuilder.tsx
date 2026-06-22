@@ -148,13 +148,21 @@ export function TripBuilder() {
   }
   async function checkCost() {
     if (!trip) return;
-    const res = await fetch(`/api/trips/${trip.id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ op: 'cost' }),
-    });
-    const { cost } = await res.json();
-    setCost(cost ?? null);
+    try {
+      const res = await fetch(`/api/trips/${trip.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: 'cost' }),
+      });
+      if (!res.ok) {
+        setErr('Failed to estimate trip cost. Please try again.');
+        return;
+      }
+      const { cost } = await res.json();
+      setCost(cost ?? null);
+    } catch {
+      setErr('Network error. Please try again.');
+    }
   }
   async function share() {
     if (!trip) return;
