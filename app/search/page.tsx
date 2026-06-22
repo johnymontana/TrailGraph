@@ -123,7 +123,8 @@ function NodeCard({ hit, type }: { hit: SemanticHit; type: 'place' | 'person' })
           {hit.image ? (
             <NextImage src={hit.image} alt={hit.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
           ) : (
-            <Placeholder name={hit.id} label={hit.title} />
+            // Icon-only: the place title renders right below the thumbnail, so don't duplicate it.
+            <Placeholder name={hit.id} iconOnly />
           )}
         </Box>
       ) : null}

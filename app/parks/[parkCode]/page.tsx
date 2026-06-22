@@ -429,7 +429,8 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                   {pl.image ? (
                     <NextImage src={pl.image} alt={pl.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
                   ) : (
-                    <Placeholder name={pl.id} label={pl.title} />
+                    // Icon-only: the place title renders right below the thumbnail, so don't duplicate it.
+                    <Placeholder name={pl.id} iconOnly />
                   )}
                 </Box>
                 <Stack p={3} gap={1}>
