@@ -170,14 +170,30 @@ export interface NpsGeneric {
   [key: string]: unknown;
 }
 
-const PAGE_LIMIT = 50;
+export const NPS_PAGE_LIMIT = 50;
+
+/**
+ * Thrown when a page can't be fetched because the NPS key is rate-limited (429) or NPS is 5xx-ing
+ * after our retries are exhausted. The sync orchestrator treats this as a *pause* (save progress,
+ * resume next window), NOT a failure — distinct from a real error (bad request, parse failure).
+ */
+export class NpsRateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NpsRateLimitError';
+  }
+}
 
 async function sleep(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-/** One page fetch with retry/backoff on 429/5xx. */
-async function fetchPage<T>(
+/**
+ * One page fetch with retry/backoff on 429/5xx. Exhausting the retries throws `NpsRateLimitError`
+ * (transient/quota) so callers can resume later; a 4xx other than 429 throws a plain Error (real bug).
+ * Exported so the orchestrator can page-and-checkpoint large resources (e.g. /places, 17k+ records).
+ */
+export async function fetchPage<T>(
   resource: string,
   start: number,
   params: Record<string, string>,
@@ -185,7 +201,7 @@ async function fetchPage<T>(
   const qs = new URLSearchParams({
     ...params,
     start: String(start),
-    limit: String(PAGE_LIMIT),
+    limit: String(NPS_PAGE_LIMIT),
   });
   const url = `${env.nps.baseUrl}/${resource}?${qs}`;
 
@@ -198,7 +214,7 @@ async function fetchPage<T>(
     }
     throw new Error(`NPS ${resource} ${res.status}: ${await res.text()}`);
   }
-  throw new Error(`NPS ${resource} failed after retries`);
+  throw new NpsRateLimitError(`NPS ${resource} rate-limited (429/5xx) after retries`);
 }
 
 /**
@@ -220,7 +236,7 @@ export async function fetchAll<T = NpsGeneric>(
     const page = await fetchPage<T>(resource, start, params);
     out.push(...page.data);
     total = Number(page.total) || out.length;
-    start += PAGE_LIMIT;
+    start += NPS_PAGE_LIMIT;
     if (page.data.length === 0) break; // safety
     await sleep(120); // be polite between pages
   }

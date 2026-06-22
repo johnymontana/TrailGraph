@@ -4,7 +4,7 @@ beforeAll(() => {
   process.env.NPS_API_KEY = 'test-key';
 });
 
-import { fetchAll } from './nps';
+import { fetchAll, NpsRateLimitError } from './nps';
 
 function page(data: unknown[], total: number, start: number) {
   return {
@@ -44,5 +44,19 @@ describe('fetchAll', () => {
     const all = await fetchAll('alerts');
     expect(all).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces a typed NpsRateLimitError when 429s persist (so the sync pauses, not fails)', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 429, text: async () => 'rl' })));
+    const settled = fetchAll('places').then(
+      () => ({ ok: true }),
+      (e) => ({ ok: false, err: e }),
+    );
+    await vi.runAllTimersAsync(); // skip the exponential backoff sleeps
+    const out = (await settled) as { ok: boolean; err?: unknown };
+    expect(out.ok).toBe(false);
+    expect(out.err).toBeInstanceOf(NpsRateLimitError);
+    vi.useRealTimers();
   });
 });

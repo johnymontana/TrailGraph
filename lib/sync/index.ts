@@ -2,6 +2,9 @@ import { RetryableError } from 'workflow';
 import { readGraph, writeGraph } from '../neo4j';
 import {
   fetchAll,
+  fetchPage,
+  NPS_PAGE_LIMIT,
+  NpsRateLimitError,
   type NpsPark,
   type NpsAlert,
   type NpsCampground,
@@ -113,6 +116,12 @@ async function step(
       await checkpoint(resource, tier, counts, ms);
       return { resource, counts, ms };
     } catch (err) {
+      // A rate-limit/quota pause is not a failure — stop now, leave the step un-checkpointed so the
+      // next run retries it. Retrying within this run won't help (the hourly window hasn't reset).
+      if (err instanceof NpsRateLimitError) {
+        await markPaused(resource, err.message);
+        return { resource, counts: { paused: 1 }, ms: Date.now() - start };
+      }
       lastErr = err;
       await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
     }
@@ -120,6 +129,77 @@ async function step(
   await markFailed(resource, (lastErr as Error)?.message ?? 'unknown');
   // On Vercel this signals the workflow to retry the step later without losing prior steps.
   throw new RetryableError(`sync step '${resource}' failed: ${(lastErr as Error)?.message}`);
+}
+
+async function markPaused(resource: string, message: string) {
+  await writeGraph(
+    `MERGE (s:SyncState {resource: $resource})
+     SET s.lastStatus = 'paused', s.lastError = $message, s.lastErrorAt = datetime()`,
+    { resource, message },
+  ).catch(() => {});
+}
+
+/**
+ * Page-and-checkpoint a large NPS resource (NPS-expansion fix): fetch one page, upsert it immediately,
+ * and persist a page cursor on `:SyncState` — so a rate-limit (429) mid-resource saves all prior pages
+ * and *pauses* instead of discarding everything (the old `fetchAll`-then-upsert was all-or-nothing, and
+ * /places alone is 17k+ records = far more than one hourly window's 1000-request budget). On the next
+ * run the step resumes from the saved cursor; when the last page lands it's marked `ok`. Idempotent
+ * MERGE upserts make replaying a partially-applied page safe.
+ */
+async function pagedStep<T>(
+  resource: string,
+  npsResource: string,
+  fields: string[] | undefined,
+  upsertBatch: (batch: T[]) => Promise<number>,
+): Promise<StepResult> {
+  'use step';
+  if (process.env.SYNC_FORCE !== '1') {
+    const prior = await recentlyOk(resource, 'slow');
+    if (prior) return { resource, counts: { ...prior, skipped: 1 }, ms: 0 };
+  }
+  const start = Date.now();
+  const params: Record<string, string> = fields?.length ? { fields: fields.join(',') } : {};
+
+  // Resume from a saved cursor when the prior run paused; otherwise start fresh.
+  const saved = await readGraph<{ page: number; count: number; status: string | null }>(
+    `MATCH (s:SyncState {resource: $resource})
+     RETURN coalesce(s.partialPage, 0) AS page, coalesce(s.partialCount, 0) AS count, s.lastStatus AS status`,
+    { resource },
+  ).catch(() => []);
+  let page = saved[0]?.status === 'paused' ? (saved[0]?.page ?? 0) : 0;
+  let count = saved[0]?.status === 'paused' ? (saved[0]?.count ?? 0) : 0;
+
+  try {
+    for (;;) {
+      const pageData = await fetchPage<T>(npsResource, page * NPS_PAGE_LIMIT, params);
+      if (pageData.data.length > 0) count += await upsertBatch(pageData.data);
+      page += 1;
+      const total = Number(pageData.total) || 0;
+      const done = pageData.data.length === 0 || page * NPS_PAGE_LIMIT >= total;
+      await writeGraph(
+        `MERGE (s:SyncState {resource: $resource})
+         SET s.tier = 'slow', s.partialPage = $page, s.partialCount = $count,
+             s.lastStatus = $status, s.lastRunAt = datetime()`,
+        { resource, page, count, status: done ? 'ok' : 'paused' },
+      );
+      if (done) break;
+      await new Promise((r) => setTimeout(r, 120)); // polite between pages
+    }
+  } catch (err) {
+    if (err instanceof NpsRateLimitError) {
+      await markPaused(resource, err.message); // cursor already persisted on the last successful page
+      return { resource, counts: { count, page, paused: 1 }, ms: Date.now() - start };
+    }
+    await markFailed(resource, (err as Error)?.message ?? 'unknown');
+    throw new RetryableError(`sync step '${resource}' failed: ${(err as Error)?.message}`);
+  }
+  const ms = Date.now() - start;
+  await writeGraph(
+    `MERGE (s:SyncState {resource: $resource}) SET s.lastCounts = $counts, s.lastMs = $ms, s.partialPage = 0`,
+    { resource, counts: JSON.stringify({ count }), ms },
+  );
+  return { resource, counts: { count }, ms };
 }
 
 // ─── Generic upserts for the long-tail resources ───────────────────────────────
@@ -197,19 +277,11 @@ export async function runSlowSync(): Promise<StepResult[]> {
     })),
   );
   // NPS expansion (Phase 1): places, people, tours, then amenity bridges (need places/VCs to exist).
-  out.push(
-    await step('places', 'slow', async () => ({
-      count: await upsertPlaces(await fetchAll<NpsPlace>('places', { fields: ['images', 'amenities', 'tags', 'audioDescription'] })),
-    })),
-  );
-  out.push(
-    await step('people', 'slow', async () => ({
-      count: await upsertPeople(await fetchAll<NpsPerson>('people', { fields: ['images', 'tags'] })),
-    })),
-  );
-  out.push(
-    await step('tours', 'slow', async () => ({ count: await upsertTours(await fetchAll<NpsTour>('tours')) })),
-  );
+  // These are paged-and-checkpointed (/places alone is 17k+ records) so a rate-limit pauses + resumes
+  // mid-resource instead of discarding the whole step.
+  out.push(await pagedStep<NpsPlace>('places', 'places', ['images', 'amenities', 'tags', 'audioDescription'], upsertPlaces));
+  out.push(await pagedStep<NpsPerson>('people', 'people', ['images', 'tags'], upsertPeople));
+  out.push(await pagedStep<NpsTour>('tours', 'tours', undefined, upsertTours));
   out.push(
     await step('amenities-places', 'slow', async () => ({
       count: await upsertAmenityBridges(await fetchAll<NpsGeneric>('amenities/parksplaces'), 'Place', 'places'),
@@ -227,21 +299,9 @@ export async function runSlowSync(): Promise<StepResult[]> {
 
   // Content endpoints (Phase 1 cont.): passport stamps, parking lots, articles. Entrance passes are
   // derived from already-synced Park JSON (no extra NPS fetch) so they don't add rate-limit pressure.
-  out.push(
-    await step('passportstamplocations', 'slow', async () => ({
-      count: await upsertPassportStamps(await fetchAll<NpsPassportStamp>('passportstamplocations')),
-    })),
-  );
-  out.push(
-    await step('parkinglots', 'slow', async () => ({
-      count: await upsertParkingLots(await fetchAll<NpsParkingLot>('parkinglots')),
-    })),
-  );
-  out.push(
-    await step('articles', 'slow', async () => ({
-      count: await upsertArticles(await fetchAll<NpsArticle>('articles', { fields: ['images'] })),
-    })),
-  );
+  out.push(await pagedStep<NpsPassportStamp>('passportstamplocations', 'passportstamplocations', undefined, upsertPassportStamps));
+  out.push(await pagedStep<NpsParkingLot>('parkinglots', 'parkinglots', undefined, upsertParkingLots));
+  out.push(await pagedStep<NpsArticle>('articles', 'articles', ['images'], upsertArticles));
   out.push(await step('entrancepasses', 'slow', async () => ({ count: await upsertEntrancePasses() })));
 
   out.push(await step('embeddings', 'slow', async () => embedParks()));
