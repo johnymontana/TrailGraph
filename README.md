@@ -202,6 +202,14 @@ pnpm basemap:upload                   # → prints https://<store>.public.blob.v
 # 3) Set NEXT_PUBLIC_MAP_TILES_URL to that URL in the Vercel project (Production) and redeploy.
 ```
 
+`basemap:upload` verifies the uploaded URL answers a `Range` request with `206` before you wire it up.
+
+> **Use the public URL printed above, exactly — `*.public.blob.vercel-storage.com/…` with no query
+> string.** Do **not** paste a `*.private.blob…` host or a signed `?vercel-blob-delegation=…` download
+> URL (e.g. from the Blob dashboard): those are served through Blob's auth proxy, which **ignores HTTP
+> range requests** — so every client downloads the *entire* hundreds-of-MB `.pmtiles` file — and the
+> signed token **expires ~12h** after each deploy, dropping all users to demo tiles.
+
 Re-run `build:basemap` + `basemap:upload` to refresh tiles (the object name is stable, so the URL
 doesn't change). The map falls back to demo tiles automatically if the URL is unset or unreachable.
 

@@ -43,11 +43,40 @@ async function main() {
     token,
   });
 
+  console.log(`\n✓ Uploaded: ${blob.url}`);
+
+  // Verify the URL serves HTTP range requests — what the pmtiles reader needs. A private/signed Blob
+  // URL (or any host without range support) answers 200 with the full body, which makes the browser
+  // download the ENTIRE .pmtiles file. Surface that here so a non-range URL never gets shipped.
+  await verifyRangeSupport(blob.url);
+
   console.log(
-    `\n✓ Uploaded: ${blob.url}\n` +
-      `  Set NEXT_PUBLIC_MAP_TILES_URL=${blob.url}\n` +
+    `  Set NEXT_PUBLIC_MAP_TILES_URL=${blob.url}\n` +
       '  in the Vercel project (Production) env, then redeploy. Re-run this script to refresh tiles.\n',
   );
+}
+
+async function verifyRangeSupport(url: string): Promise<void> {
+  try {
+    const res = await fetch(url, { headers: { Range: 'bytes=0-99' } });
+    await res.body?.cancel(); // discard the body; we only need the status + headers
+    const contentRange = res.headers.get('content-range');
+    if (res.status === 206 && contentRange) {
+      console.log(`  ✓ Range requests OK — HTTP 206, content-range: ${contentRange}.`);
+      return;
+    }
+    const accept = res.headers.get('accept-ranges');
+    const len = res.headers.get('content-length');
+    console.warn(
+      `  ✗ Range requests NOT honored — HTTP ${res.status}` +
+        `${accept ? `, accept-ranges: ${accept}` : ''}${len ? `, content-length: ${len}` : ''}.\n` +
+        '    The browser would download the ENTIRE .pmtiles file. Make sure this is the public\n' +
+        '    *.public.blob.vercel-storage.com URL with NO query string before pointing prod at it.',
+    );
+  } catch (err) {
+    console.warn(`  ! Could not verify range support (${(err as Error).message}). Check it manually with:\n` +
+      `    curl -sI -H 'Range: bytes=0-99' '${url}'  # want HTTP 206 + Content-Range`);
+  }
 }
 
 main().catch((err) => {

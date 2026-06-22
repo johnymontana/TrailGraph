@@ -21,11 +21,39 @@ export function registerMapProtocols() {
 
 const GLYPHS = 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf';
 
+/** A URL's path with any `?query`/`#hash` stripped, so extension checks survive CDN/signed params. */
+function urlPathname(url: string): string {
+  return url.split(/[?#]/)[0];
+}
+/** Detect a `.pmtiles` basemap even when the URL carries a query string (e.g. a signed Blob URL). */
+function isPmtilesUrl(url: string): boolean {
+  return urlPathname(url).endsWith('.pmtiles');
+}
+
+/**
+ * A `.private.blob.vercel-storage.com` host or a signed (`?vercel-blob-delegation=…`) URL is served
+ * through Vercel Blob's auth proxy: it answers Range requests with the full object (200, not 206) —
+ * so the pmtiles reader downloads the *entire* file — and the signed token expires (~12h), 403ing
+ * for users after a deploy. The fix is the public `*.public.blob.vercel-storage.com` URL. Warn so a
+ * misconfigured NEXT_PUBLIC_MAP_TILES_URL is obvious in the console.
+ */
+function warnIfNonRangeBlobUrl(url: string): void {
+  if (/\.private\.blob\.vercel-storage\.com/.test(url) || /[?&](vercel-blob-delegation|vercel-blob-signature)=/.test(url)) {
+    console.warn(
+      '[basemap] NEXT_PUBLIC_MAP_TILES_URL is a private/signed Vercel Blob URL — it does not support ' +
+        'HTTP range requests (the whole .pmtiles downloads) and the signed token expires. Use the public ' +
+        'URL instead: https://<store>.public.blob.vercel-storage.com/<path>.pmtiles (no query string).',
+    );
+  }
+}
+
 export function mapStyle(theme: 'light' | 'dark' = 'light'): string | StyleSpecification {
   const url = process.env.NEXT_PUBLIC_MAP_TILES_URL;
   if (!url) return 'https://demotiles.maplibre.org/style.json';
-  if (url.endsWith('.json')) return url;
-  if (url.endsWith('.pmtiles')) {
+  const path = urlPathname(url);
+  if (path.endsWith('.json')) return url;
+  if (path.endsWith('.pmtiles')) {
+    warnIfNonRangeBlobUrl(url);
     try {
       return {
         version: 8,
@@ -53,7 +81,7 @@ const DEMO_STYLE = 'https://demotiles.maplibre.org/style.json';
  */
 export function attachBasemapFallback(map: maplibregl.Map): void {
   const url = process.env.NEXT_PUBLIC_MAP_TILES_URL;
-  if (!url || !url.endsWith('.pmtiles')) return;
+  if (!url || !isPmtilesUrl(url)) return;
   let swapped = false;
   map.on('error', (e: { sourceId?: string; error?: { message?: string } }) => {
     if (swapped) return;
