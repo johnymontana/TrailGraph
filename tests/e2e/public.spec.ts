@@ -30,7 +30,9 @@ test('park detail shows description, alert, related parks, and actions', async (
   await page.goto('/parks/yell');
   // `exact` so the h1 matches but not the "How Yellowstone National Park connects" graph h2.
   await expect(page.getByRole('heading', { name: 'Yellowstone National Park', exact: true })).toBeVisible();
-  await expect(page.getByText('Closure')).toBeVisible(); // seeded active Closure alert
+  // `exact` so it matches the "Closure" category badge, not the alert title ("Road closure near …"),
+  // which `getByText` would otherwise match case-insensitively as a substring.
+  await expect(page.getByText('Closure', { exact: true })).toBeVisible(); // seeded active Closure alert
   await expect(page.getByRole('button', { name: /Save/ })).toBeVisible(); // §4 actions
   // The campground is a reservation link; scope to the link so it doesn't collide with the seeded
   // alert text ("Road closure near Canyon Campground"), which is plain text.
