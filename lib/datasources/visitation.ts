@@ -1,0 +1,72 @@
+import { writeGraph } from '../neo4j';
+
+/**
+ * Visitation / crowd data source (§5b). Models NPS Visitor Use Statistics (monthly recreation visits,
+ * a public download) behind the AD-3 adapter. Stores the monthly array on `:Park` and derives
+ * `bestMonths` (lowest-crowd) + a `crowdLevel` bucket. Pure derivations are unit-tested; swap
+ * `VISITATION` for the real CSV import later.
+ */
+export interface VisitationRecord {
+  parkCode: string;
+  /** 12 monthly recreation-visit counts, Jan…Dec. */
+  monthly: number[];
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Curated, representative monthly shapes (peak-summer parks vs shoulder-season parks).
+export const VISITATION: VisitationRecord[] = [
+  { parkCode: 'yell', monthly: [30, 35, 50, 110, 380, 760, 980, 920, 600, 250, 45, 30].map((k) => k * 1000) },
+  { parkCode: 'glac', monthly: [12, 14, 22, 60, 210, 520, 720, 690, 380, 120, 25, 14].map((k) => k * 1000) },
+  { parkCode: 'grca', monthly: [220, 250, 380, 520, 600, 640, 660, 600, 520, 470, 320, 240].map((k) => k * 1000) },
+  { parkCode: 'grte', monthly: [40, 45, 70, 120, 320, 560, 720, 700, 470, 200, 60, 45].map((k) => k * 1000) },
+  { parkCode: 'zion', monthly: [180, 210, 360, 430, 480, 520, 540, 520, 470, 460, 300, 200].map((k) => k * 1000) },
+];
+
+/** Lowest-crowd months (1-indexed) — those at or below `factor`× the monthly average. Pure. */
+export function deriveBestMonths(monthly: number[], factor = 0.7, max = 4): number[] {
+  if (monthly.length !== 12) return [];
+  const avg = monthly.reduce((a, b) => a + b, 0) / 12;
+  return monthly
+    .map((v, i) => ({ month: i + 1, v }))
+    .filter((m) => m.v <= avg * factor)
+    .sort((a, b) => a.v - b.v)
+    .slice(0, max)
+    .map((m) => m.month)
+    .sort((a, b) => a - b);
+}
+
+/** Crowd level from annual recreation visits. Pure. */
+export function crowdLevel(annual: number): 'low' | 'moderate' | 'high' | 'very high' {
+  if (annual >= 4_000_000) return 'very high';
+  if (annual >= 2_000_000) return 'high';
+  if (annual >= 750_000) return 'moderate';
+  return 'low';
+}
+
+/** Format month numbers (1-indexed) as short names: [1,4,11] → "Jan, Apr, Nov". Pure. */
+export function monthNames(months: number[]): string {
+  return months.map((m) => MONTHS[m - 1]).filter(Boolean).join(', ');
+}
+
+export async function applyVisitation(records: VisitationRecord[] = VISITATION): Promise<number> {
+  let applied = 0;
+  for (const r of records) {
+    const annual = r.monthly.reduce((a, b) => a + b, 0);
+    const res = await writeGraph<{ code: string }>(
+      `MATCH (p:Park {parkCode:$parkCode})
+       SET p.monthlyVisits = $monthly, p.annualVisits = toInteger($annual),
+           p.bestMonths = $bestMonths, p.crowdLevel = $crowd
+       RETURN p.parkCode AS code`,
+      {
+        parkCode: r.parkCode,
+        monthly: r.monthly.map((v) => Math.round(v)),
+        annual,
+        bestMonths: deriveBestMonths(r.monthly),
+        crowd: crowdLevel(annual),
+      },
+    );
+    if (res.length) applied++;
+  }
+  return applied;
+}

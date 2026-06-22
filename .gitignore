@@ -1,0 +1,48 @@
+# dependencies
+/node_modules
+.pnp
+.pnp.*
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+/docs
+
+# env
+.env
+.env.local
+.env*.local
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# os / editor
+.DS_Store
+*.pem
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# misc
+/coverage
+*.tsbuildinfo
+
+# self-hosted basemap extract (large; build with `pnpm build:basemap`, host on a CDN for prod)
+/public/basemap/*.pmtiles
+
+# dot directories
+.*/
+
+# blog
+/blog/
+
+# root markdown (keep README.md)
+/*.md
+!/README.md
