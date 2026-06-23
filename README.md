@@ -138,7 +138,7 @@ A companion deep-dive on this integration is written up as a blog post ([lyonwj.
 | **Database** | Neo4j (domain graph + context graph + app data) |
 | **Search** | Neo4j full-text + faceted, and semantic vector search (parks/places/people) via AI Gateway embeddings |
 | **Auth** | Better Auth (passwordless magic link) |
-| **UI** | Chakra UI v3 · MapLibre GL + Protomaps · Neo4j NVL · Recharts |
+| **UI** | Chakra UI v3 — custom *"Topographic Adventure"* theme (`theme/`: pine/trail/sand tokens, light-first dark mode, recipes) · Bricolage Grotesque + Inter (`next/font`) · `react-icons` · MapLibre GL + Protomaps · Neo4j NVL · Recharts |
 | **Routing** | OpenRouteService (drive segments) |
 
 ---
@@ -243,7 +243,8 @@ doesn't change). The map falls back to demo tiles automatically if the URL is un
 app/         Next.js App Router — pages + Route Handlers (/api/auth, /api/sync, /api/trips, …)
 agent/       Eve agent — instructions.md, agent.ts, tools/, channels/eve.ts, hooks/persist-turn.ts
 lib/         adapters + domain logic — memory (NAMS), neo4j, bridges, recommend, queries, datasources/
-components/  UI — chat, plan, graph (NVL), map, park, memory
+theme/       Chakra design system — tokens, semantic tokens, recipes, textures (brand: pine/trail/sand)
+components/  UI — chat, plan, graph (NVL), map, park, memory, ui/ (primitives)
 db/          Cypher migrations + migrate/verify runners
 scripts/     seed, ontology setup, basemap build, data-source sync, the NAMS spike
 evals/       Eve eval suite
@@ -258,13 +259,15 @@ tests/       integration (real Neo4j, gated) + e2e (Playwright)
 pnpm typecheck
 pnpm test:unit                          # pure logic, mocked I/O — runs anywhere
 RUN_INTEGRATION=1 pnpm test:integration # real Neo4j (CI uses an ephemeral container) — never prod
-pnpm test:e2e                           # Playwright (needs a seeded Neo4j: pnpm seed:test)
+pnpm test:e2e                           # Playwright — builds + serves a prod build; needs a seeded Neo4j: pnpm seed:test
 ```
 
 Unit tests cover the pure logic (recommendation ranking, canonicalization, route ordering, ICS, the
-data-source derivations, NVL data mapping, server-bound identity). Integration tests exercise the real
-graph (domain queries, the trip service, cross-graph recommendations, the Better Auth adapter, memory
-delete + tombstones, sharing). E2E covers the public surface and an authenticated trip-building flow.
+data-source derivations, NVL data mapping, brand-color resolution, server-bound identity). Integration
+tests exercise the real graph (domain queries, the trip service, cross-graph recommendations, the Better
+Auth adapter, memory delete + tombstones, sharing). E2E covers the public surface and an authenticated
+trip-building flow — run against a **production build** (`pnpm build && pnpm start`), because Chakra's
+Emotion SSR only yields a trustworthy hydration signal in prod (dev emits class-hash false positives).
 
 ---
 
