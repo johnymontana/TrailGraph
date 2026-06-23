@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Bricolage_Grotesque, Inter } from 'next/font/google';
 import { Provider } from './provider';
 import { SiteNav } from '../components/SiteNav';
-import { FooterGate } from '../components/FooterGate';
+import { SiteFooter } from '../components/SiteFooter';
 import { Toaster } from '../components/ui/toaster';
 
 // Display font (headings, wordmark) + body/UI font, exposed as CSS variables that the Chakra `fonts`
@@ -36,7 +36,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <Provider>
           <SiteNav />
           {children}
-          <FooterGate />
+          {/* Server-rendered footer; hidden on full-screen routes via the `:has([data-fullscreen])`
+              global rule (theme/index.ts) — no client gate, so no SSR/CSR hydration drift. */}
+          <SiteFooter />
           <Toaster />
         </Provider>
       </body>

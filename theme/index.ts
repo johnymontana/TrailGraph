@@ -25,6 +25,11 @@ const config = defineConfig({
     '*:focus-visible': {
       outlineColor: 'brand.solid',
     },
+    // Full-screen routes (/map, /graph, /plan) mark their fixed container with `data-fullscreen`; hide
+    // the global footer there purely via CSS so it never adds a stray scroll region behind the overlay.
+    'body:has([data-fullscreen]) footer': {
+      display: 'none',
+    },
   },
   theme: {
     tokens,

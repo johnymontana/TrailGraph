@@ -9,7 +9,8 @@ import { test, expect } from '@playwright/test';
 
 test('thematic trails page lists people and traces a cross-park trail', async ({ page }) => {
   await page.goto('/trails');
-  await expect(page.getByRole('heading', { name: 'Thematic trails' })).toBeVisible();
+  // PageHeader h1 after the redesign ("Thematic trails" is now the eyebrow).
+  await expect(page.getByRole('heading', { name: 'Follow a story across the parks' })).toBeVisible();
 
   // Pick a multi-park figure → see the trail.
   await page.getByRole('link', { name: /Ferdinand Hayden/ }).click();
@@ -23,7 +24,8 @@ test('thematic trails page lists people and traces a cross-park trail', async ({
 
 test('trails nav link is present in the header', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('link', { name: 'Trails' })).toBeVisible();
+  // `exact` so the nav "Trails" link doesn't also match the footer's "Thematic trails" link.
+  await expect(page.getByRole('link', { name: 'Trails', exact: true })).toBeVisible();
 });
 
 test('park page surfaces People & stories', async ({ page }) => {
@@ -60,10 +62,12 @@ test('park page surfaces passport stamps, events, places, articles, and parking'
 
 test('unified search page renders its query form and is in the nav', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('link', { name: 'Search' })).toBeVisible();
+  // `exact` so the nav "Search" link doesn't also match the footer's "Vibe search" link.
+  await expect(page.getByRole('link', { name: 'Search', exact: true })).toBeVisible();
 
   await page.goto('/search');
-  await expect(page.getByRole('heading', { name: 'Search', level: 1 })).toBeVisible();
+  // PageHeader h1 after the redesign ("Vibe search" is now the eyebrow; the bare "Search" h1 is gone).
+  await expect(page.getByRole('heading', { name: 'Search by meaning, not keywords', level: 1 })).toBeVisible();
   await expect(page.getByPlaceholder(/quiet alpine overlook/i)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Search' })).toBeVisible();
   // No query yet → prompt, not results. (Semantic results need populated embeddings + the AI Gateway,

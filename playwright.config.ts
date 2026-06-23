@@ -10,12 +10,11 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  // The e2e server runs `pnpm dev` (not a prod build) and compiles routes on demand. Two parallel
-  // workers hitting uncompiled routes contend on that first compile → `net::ERR_ABORTED` + navigation
-  // timeouts. Serialize in CI so each route compiles once without contention (slower wall-clock, but
-  // deterministic); locally, default parallelism.
+  // e2e runs against a production build (see `webServer` below), so routes are precompiled and parallel
+  // workers don't contend on first-hit compiles. Keep CI at a single worker only to avoid Neo4j write
+  // contention between the authed sign-up flows; locally, default parallelism.
   workers: process.env.CI ? 1 : undefined,
-  // First-hit route compiles + Neo4j round-trips can blow past Playwright's 30s default. Headroom.
+  // Neo4j round-trips can blow past Playwright's 30s default. Headroom.
   timeout: 60_000,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
@@ -26,12 +25,17 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: 'pnpm dev',
+    // Run e2e against a PRODUCTION build, not `pnpm dev`. Dev mode emits Emotion class-hash hydration
+    // *false positives* (React dev double-renders + on-demand style insertion) that the hydration gate
+    // would otherwise flag even though production hydrates cleanly — see hydration.spec.ts. A prebuilt
+    // server is the truest signal and removes first-hit route-compile latency.
+    command: 'pnpm build && pnpm start',
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    // e2e needs no agent/AI Gateway — run Next without auto-starting the eve service. E2E_TEST_MODE
-    // enables email+password auth so tests can sign in deterministically.
+    // build + start headroom (build compiles the whole app before the server is ready).
+    timeout: 300_000,
+    // e2e needs no agent/AI Gateway — build/run Next without the eve service. E2E_TEST_MODE enables
+    // email+password auth (read at runtime) so tests can sign in deterministically.
     env: { DISABLE_EVE: '1', E2E_TEST_MODE: '1' },
   },
 });

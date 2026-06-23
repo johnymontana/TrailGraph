@@ -3,6 +3,8 @@
 .pnp
 .pnp.*
 
+playwright-report/
+
 # next.js
 /.next/
 /out/
