@@ -27,6 +27,7 @@ export function RankPanel({ defaults }: { defaults: RankDefaults }) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => setMounted(true), []);
 
@@ -34,11 +35,15 @@ export function RankPanel({ defaults }: { defaults: RankDefaults }) {
     if (!mounted) return;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
       setLoading(true);
       try {
         const res = await fetch('/api/parks/rank', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
           body: JSON.stringify({
             maxBortle: maxBortle < 9 ? maxBortle : undefined,
             crowdTolerance: crowd / 100,
@@ -53,6 +58,8 @@ export function RankPanel({ defaults }: { defaults: RankDefaults }) {
           setItems(data.items);
           setTotal(data.total);
         }
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') throw err;
       } finally {
         setLoading(false);
       }
