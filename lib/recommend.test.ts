@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('./neo4j', () => ({ readGraph: vi.fn() }));
 vi.mock('./bridges', () => ({ getTravelConstraints: vi.fn() }));
 
-import { rankParks } from './recommend';
+import { rankParks, resolveRankParams, clampNum } from './recommend';
 import { readGraph } from './neo4j';
 
 const mockRead = vi.mocked(readGraph);
@@ -68,5 +68,58 @@ describe('rankParks (live constraint re-ranking, ADR-046)', () => {
     expect(items).toHaveLength(2);
     expect(total).toBe(42);
     expect(mockRead).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('clampNum', () => {
+  it('clamps to range and rejects non-numbers', () => {
+    expect(clampNum(5, 1, 9)).toBe(5);
+    expect(clampNum(0, 1, 9)).toBe(1);
+    expect(clampNum(99, 1, 9)).toBe(9);
+    expect(clampNum('x', 1, 9)).toBeUndefined();
+    expect(clampNum(Number.NaN, 1, 9)).toBeUndefined();
+    expect(clampNum(undefined, 1, 9)).toBeUndefined();
+  });
+});
+
+describe('resolveRankParams (rank API merge + clamps)', () => {
+  const cons = { wheelchair: true, rvMaxLengthFt: 22, requiredAmenities: ['Restrooms'] };
+
+  it('falls back to the saved travel constraints when the body omits them', () => {
+    const p = resolveRankParams({}, cons, 'u1');
+    expect(p).toMatchObject({
+      userId: 'u1',
+      rvMaxLengthFt: 22,
+      wheelchairAccessible: true,
+      requiredAmenities: ['Restrooms'],
+      maxBortle: null,
+      crowdTolerance: null,
+      limit: 24,
+      offset: 0,
+    });
+  });
+
+  it('body overrides saved constraints; rvMaxLengthFt <= 0 means "off" (null)', () => {
+    const p = resolveRankParams({ rvMaxLengthFt: 0, wheelchairAccessible: false, requiredAmenities: [] }, cons, 'u1');
+    expect(p.rvMaxLengthFt).toBeNull();
+    expect(p.wheelchairAccessible).toBe(false);
+    expect(p.requiredAmenities).toEqual([]);
+  });
+
+  it('minBortle aliases maxBortle (darker = lower) and clamps to 1..9; maxBortle wins when both sent', () => {
+    expect(resolveRankParams({ minBortle: 2 }, cons, null).maxBortle).toBe(2);
+    expect(resolveRankParams({ maxBortle: 99 }, cons, null).maxBortle).toBe(9);
+    expect(resolveRankParams({ maxBortle: 5, minBortle: 2 }, cons, null).maxBortle).toBe(5);
+  });
+
+  it('clamps crowdTolerance 0..1, limit 1..48, offset >= 0', () => {
+    const p = resolveRankParams({ crowdTolerance: 5, limit: 1000, offset: -3 }, cons, null);
+    expect(p.crowdTolerance).toBe(1);
+    expect(p.limit).toBe(48);
+    expect(p.offset).toBe(0);
+  });
+
+  it('carries an anonymous (null) userId through', () => {
+    expect(resolveRankParams({}, cons, null).userId).toBeNull();
   });
 });

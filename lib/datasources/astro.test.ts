@@ -67,4 +67,21 @@ describe('getAstro golden values', () => {
     expect(a.darkHours.hours).toBeNull();
     expect(a.twilight.astronomicalDusk).toBeNull();
   });
+
+  it('works in the southern hemisphere — the galactic core (dec −29°) rides high', () => {
+    // Sydney (lat −33.8): core transit altitude ≈ 90 − |lat − dec| ≈ 85°, vs ~25° at the Grand Canyon.
+    const a = getAstro(-33.8, 151.2, '2024-06-21'); // austral winter → long, dark nights
+    expect(a.moon.illuminationPct).toBeGreaterThanOrEqual(0);
+    expect(a.moon.illuminationPct).toBeLessThanOrEqual(100);
+    expect(a.galacticCore.visible).toBe(true);
+    expect(a.galacticCore.maxAltitudeDeg!).toBeGreaterThan(40);
+    expect(a.darkHours.hours).not.toBeNull();
+  });
+
+  it('handles the equator (sunrise/sunset + a real dark window at equinox)', () => {
+    const a = getAstro(0, 0, '2024-03-20');
+    expect(a.sun.rise).not.toBeNull();
+    expect(a.sun.set).not.toBeNull();
+    expect(a.darkHours.hours).not.toBeNull();
+  });
 });

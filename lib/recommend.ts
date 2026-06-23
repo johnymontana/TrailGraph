@@ -177,6 +177,53 @@ export async function rankParks(params: RankParams): Promise<{ items: RankedPark
   return { items, total: totalRows[0]?.total ?? items.length };
 }
 
+/** Clamp a numeric input to [lo, hi]; non-numbers/NaN → undefined. Pure (unit-tested). */
+export function clampNum(n: unknown, lo: number, hi: number): number | undefined {
+  if (typeof n !== 'number' || Number.isNaN(n)) return undefined;
+  return Math.min(hi, Math.max(lo, n));
+}
+
+export interface RankRequestBody {
+  maxBortle?: number;
+  minBortle?: number; // alias — lower Bortle = darker; mapped to maxBortle
+  crowdTolerance?: number;
+  requiredAmenities?: string[];
+  rvMaxLengthFt?: number | null;
+  wheelchairAccessible?: boolean;
+  stateCode?: string;
+  activity?: string;
+  topic?: string;
+  limit?: number;
+  offset?: number;
+}
+export interface SavedConstraints {
+  wheelchair: boolean;
+  rvMaxLengthFt: number | null;
+  requiredAmenities: string[];
+}
+
+/**
+ * Resolve the live-rerank request body against the user's saved travel constraints into `RankParams`
+ * (pure — unit-tested for the merge precedence + clamps that the /api/parks/rank route relies on).
+ * Body values OVERRIDE saved constraints when present; `rvMaxLengthFt <= 0` means "off" (null).
+ */
+export function resolveRankParams(body: RankRequestBody, cons: SavedConstraints, userId: string | null): RankParams {
+  const rvRaw = body.rvMaxLengthFt !== undefined ? body.rvMaxLengthFt : cons.rvMaxLengthFt;
+  return {
+    userId,
+    stateCode: body.stateCode,
+    activity: body.activity,
+    topic: body.topic,
+    rvMaxLengthFt: rvRaw && rvRaw > 0 ? rvRaw : null,
+    wheelchairAccessible: body.wheelchairAccessible ?? cons.wheelchair,
+    requiredAmenities: body.requiredAmenities ?? cons.requiredAmenities,
+    maxBortle: clampNum(body.maxBortle ?? body.minBortle, 1, 9) ?? null,
+    crowdTolerance: clampNum(body.crowdTolerance, 0, 1) ?? null,
+    limit: clampNum(body.limit, 1, 48) ?? 24,
+    offset: clampNum(body.offset, 0, 100_000) ?? 0,
+  };
+}
+
 /** Map default filters (E2): the user's top preference targets, split by kind. */
 export async function mapDefaultFilters(userId: string) {
   const rows = await readGraph<{ activities: string[]; topics: string[] }>(

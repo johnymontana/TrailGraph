@@ -61,22 +61,8 @@ export function ToolCard({ kind, data: raw }: { kind: string; data: unknown }) {
   }
 }
 
-/** True when a tool output renders nothing visible (used by ChatPanel's empty-message guard). */
-export function isRenderableToolOutput(kind: string, data: unknown): boolean {
-  const d = (data ?? {}) as Record<string, unknown>;
-  if (typeof d.error === 'string') return true;
-  if (kind === 'park_card') return ((d.parks as unknown[])?.length ?? (d.park ? 1 : 0)) > 0;
-  if (kind === 'node_results') return ((d.results as unknown[])?.length ?? 0) > 0;
-  if (kind === 'itinerary_preview') return !!d.trip;
-  if (kind === 'alert_list') return ((d.parks as unknown[])?.length ?? 0) > 0;
-  if (kind === 'dark_sky_card') return d.bortleScale != null || !!d.bestMonths || !!d.crowdLevel || !!d.astro;
-  if (kind === 'weather_card') return !!d.condition || ((d.daily as unknown[])?.length ?? 0) > 0;
-  if (kind === 'astro_card') return !!d.moon || !!d.date;
-  if (kind === 'conditions_card') return !!d.parkCode;
-  if (kind === 'trip_dashboard') return ((d.stops as unknown[])?.length ?? 0) > 0;
-  if (kind === 'why_this') return ((d.prefPaths as unknown[])?.length ?? 0) > 0 || ((d.constraints as unknown[])?.length ?? 0) > 0 || !!d.park;
-  return false;
-}
+// Renderability guard lives in lib/tool-output.ts (pure + unit-tested); re-export to keep the import path.
+export { isRenderableToolOutput } from '../../lib/tool-output';
 
 function ParkCards({ data }: { data: Record<string, unknown> }) {
   const raw = (data.parks ?? (data.park ? [data.park] : [])) as {

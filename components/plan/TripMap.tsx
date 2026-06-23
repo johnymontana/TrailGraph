@@ -7,6 +7,7 @@ import { mapStyle, US_CENTER, registerMapProtocols, attachBasemapFallback } from
 import { useColorMode } from '../ui/color-mode';
 import { brandColors, type BrandColors } from '../../lib/brandColors';
 import { durations, easings, stagger } from '../../theme/motion';
+import { lineSlice, type Coord } from '../../lib/route-geometry';
 
 /** Itinerary overlay (B4): numbered stop markers + a route line for the selected trip. */
 export interface TripMapStop {
@@ -14,35 +15,6 @@ export interface TripMapStop {
   lng: number | null;
   label: string;
   order: number;
-}
-
-type Coord = [number, number];
-
-/** Coordinates of the polyline clipped to `frac` (0..1) of its total length — for the draw animation. */
-function lineSlice(coords: Coord[], frac: number): Coord[] {
-  if (coords.length < 2 || frac >= 1) return coords;
-  if (frac <= 0) return [coords[0]];
-  const seg: number[] = [];
-  let total = 0;
-  for (let i = 1; i < coords.length; i++) {
-    const d = Math.hypot(coords[i][0] - coords[i - 1][0], coords[i][1] - coords[i - 1][1]);
-    seg.push(d);
-    total += d;
-  }
-  const target = total * frac;
-  const out: Coord[] = [coords[0]];
-  let acc = 0;
-  for (let i = 1; i < coords.length; i++) {
-    const d = seg[i - 1];
-    if (acc + d >= target) {
-      const t = d === 0 ? 0 : (target - acc) / d;
-      out.push([coords[i - 1][0] + (coords[i][0] - coords[i - 1][0]) * t, coords[i - 1][1] + (coords[i][1] - coords[i - 1][1]) * t]);
-      break;
-    }
-    acc += d;
-    out.push(coords[i]);
-  }
-  return out;
 }
 
 function prefersReducedMotion(): boolean {

@@ -214,3 +214,19 @@ test('trails: theme chips render and a person trail shows the NVL mini-graph + p
   // "See it on the graph →" is pulled alongside the trail.
   await expect(page.getByRole('link', { name: /See it on the graph/ })).toBeVisible();
 });
+
+test('explore "Refine live" panel re-ranks via /api/parks/rank on a slider change (ADR-046)', async ({ page }) => {
+  await page.goto('/explore');
+  // RankPanel is progressive enhancement (client, mounted-gated) below the no-JS GET form.
+  await expect(page.getByText('Refine live')).toBeVisible();
+  // Dragging a slider must fire a live structured re-rank and return {items,total}.
+  const slider = page.getByRole('slider').first();
+  await slider.focus();
+  const ranked = page.waitForResponse((r) => r.url().includes('/api/parks/rank') && r.request().method() === 'POST');
+  await page.keyboard.press('ArrowDown'); // change the dark-sky/Bortle slider → debounced fetch
+  const res = await ranked;
+  expect(res.status()).toBe(200);
+  const json = (await res.json()) as { items: unknown[]; total: number };
+  expect(Array.isArray(json.items)).toBe(true);
+  expect(typeof json.total).toBe('number');
+});
