@@ -17,8 +17,10 @@ export interface TripMapStop {
 export function TripMap({ stops }: { stops: TripMapStop[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
+  const stopsRef = useRef(stops);
   const { colorMode } = useColorMode();
   const c = brandColors(colorMode);
+  stopsRef.current = stops;
 
   useEffect(() => {
     if (!ref.current) return;
@@ -32,7 +34,7 @@ export function TripMap({ stops }: { stops: TripMapStop[] }) {
       return;
     }
     mapRef.current = map;
-    map.on('load', () => render(map, stops, c));
+    map.on('load', () => render(map, stopsRef.current, c));
     return () => map.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [colorMode]);

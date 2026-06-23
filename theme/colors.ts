@@ -61,6 +61,7 @@ export const ink = {
   panel: '#1C1A15',
   subtle: '#252219',
   muted: '#2F2B20',
+  emphasized: '#3A3528',
   border: '#343024',
   borderSubtle: '#2A2720',
 } as const;

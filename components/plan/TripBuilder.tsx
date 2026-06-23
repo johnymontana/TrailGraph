@@ -188,8 +188,15 @@ export function TripBuilder() {
       const { url } = (await res.json()) as { url: string };
       const full = `${window.location.origin}${url}`;
       setShareUrl(full);
-      await navigator.clipboard?.writeText(full).catch(() => {});
-      toast.success('Share link copied', 'A read-only link to this trip is on your clipboard.');
+      let copied = false;
+      if (navigator.clipboard?.writeText) {
+        copied = await navigator.clipboard.writeText(full).then(() => true).catch(() => false);
+      }
+      if (copied) {
+        toast.success('Share link copied', 'A read-only link to this trip is on your clipboard.');
+      } else {
+        toast.success('Share link ready', 'Copy the read-only link shown below.');
+      }
     } else {
       toast.error("Couldn't create share link", 'Please try again in a moment.');
     }

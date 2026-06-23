@@ -19,7 +19,8 @@ export function ParkActions({ parkCode }: { parkCode: string }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ parkCode, source: 'saved' }),
     }).catch(() => null);
-    if (res && res.ok) {
+    const payload = res ? await res.json().catch(() => null) : null;
+    if (res?.ok && payload?.ok !== false) {
       toast.success('Saved to your parks', 'The ranger will factor this into your recommendations.');
     } else {
       setSaved(false);

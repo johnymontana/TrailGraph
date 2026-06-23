@@ -6,8 +6,9 @@ import { ThemeProvider, useTheme, type ThemeProviderProps } from 'next-themes';
  * `next-themes` writing a `class` on <html> (matches Chakra's `.dark &` token condition); the root
  * layout sets `suppressHydrationWarning` because that class is written before React hydrates.
  *
- * Fresh visitors follow their OS preference (`defaultTheme="system"` + `enableSystem`); the nav toggle
- * (`ColorModeButton`) stores an explicit, persistent choice. Any component that renders theme-dependent
+ * Fresh visitors default to light mode (`defaultTheme="light"`), but can still switch via OS preference
+ * (`enableSystem`) or the nav toggle (`ColorModeButton`), which stores an explicit persistent choice.
+ * Any component that renders theme-dependent
  * markup must gate on a mounted flag (see `color-mode-button.tsx`) so SSR === first CSR (R4 §2.2).
  */
 export type ColorModeProviderProps = ThemeProviderProps;

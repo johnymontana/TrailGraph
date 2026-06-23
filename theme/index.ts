@@ -16,7 +16,7 @@ const config = defineConfig({
   globalCss: {
     'html, body': {
       bg: 'bg.canvas',
-      color: 'fg.default',
+      color: 'fg',
       fontFamily: 'body',
     },
     '*::selection': {
