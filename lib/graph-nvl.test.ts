@@ -3,10 +3,10 @@ import { neighborhoodToNvl, parkNodeNav, labelColor, HUB_DEGREE, trailToNvl, TRA
 
 describe('labelColor (per-park graph node palette)', () => {
   it('maps known labels to distinct colors and unknowns to a neutral gray', () => {
-    expect(labelColor('Park')).toBe('#1864ab');
-    expect(labelColor('Activity')).toBe('#2f9e44');
-    expect(labelColor('Topic')).toBe('#f08c00');
-    expect(labelColor('Whatever')).toBe('#868e96');
+    expect(labelColor('Park')).toBe('#1B5E3F');
+    expect(labelColor('Activity')).toBe('#2E7D52');
+    expect(labelColor('Topic')).toBe('#E8702A');
+    expect(labelColor('Whatever')).toBe('#AB9B77');
   });
 });
 
@@ -34,9 +34,9 @@ describe('neighborhoodToNvl (/graph → NVL)', () => {
   it('colors highlight > hub > plain', () => {
     const { nodes } = neighborhoodToNvl(data, ['grca']);
     const color = (id: string) => nodes.find((n) => n.id === id)!.color;
-    expect(color('grca')).toBe('#e8590c'); // highlighted (overrides plain)
-    expect(color('yell')).toBe('#1864ab'); // hub
-    expect(color('glac')).toBe('#4dabf7'); // plain
+    expect(color('grca')).toBe('#E8702A'); // highlighted (overrides plain)
+    expect(color('yell')).toBe('#1B5E3F'); // hub
+    expect(color('glac')).toBe('#459268'); // plain
   });
 
   it('synthesizes a stable rel id and captions edges with topics or a shared count', () => {

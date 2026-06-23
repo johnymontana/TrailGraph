@@ -1,9 +1,12 @@
-import { Box, Heading, SimpleGrid, Stack, Text, Input, Button, Flex, Badge, HStack, Link as CLink } from '@chakra-ui/react';
+import { Box, Card, Container, Heading, Icon, SimpleGrid, Stack, Text, Input, Button, Flex, Badge, HStack, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
 import NextImage from 'next/image';
+import { LuSearch, LuSparkles } from 'react-icons/lu';
 import { vibeSearch, semanticSearch, type SemanticHit } from '../../lib/queries';
 import { ParkCard } from '../../components/ParkCard';
 import { Placeholder } from '../../components/Placeholder';
+import { PageHeader } from '../../components/ui/page-header';
+import { SectionHeading } from '../../components/ui/section-heading';
 import { cleanTags } from '../../lib/people';
 
 /**
@@ -13,6 +16,13 @@ import { cleanTags } from '../../lib/people';
  * (no detail route exists). Results need populated embeddings + the AI Gateway (see embed-nodes.ts).
  */
 export const dynamic = 'force-dynamic';
+
+const EXAMPLES = [
+  'quiet alpine overlook with dark skies',
+  'desert slot canyons and arches',
+  'kid-friendly waterfalls and easy loops',
+  'wildlife and birding near the coast',
+];
 
 type SP = Record<string, string | undefined>;
 
@@ -30,65 +40,87 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     : [[], [], []];
 
   return (
-    <Box maxW="6xl" mx="auto" px={{ base: 4, md: 8 }} py={6}>
-      <Heading as="h1" size="lg" mb={2}>
-        Search
-      </Heading>
-      <Text color="fg.muted" mb={6}>
-        Describe what you&apos;re after — a vibe, a feature, a theme. We rank parks, places, and people by
-        meaning, not just keywords.
-      </Text>
+    <Box>
+      <PageHeader
+        eyebrow="Vibe search"
+        title="Search by meaning, not keywords"
+        subtitle="Describe a vibe, a feature, a theme — we rank parks, places, and people by what they're actually like."
+        contour
+      >
+        <Box mt={4} maxW="2xl">
+          <form method="get">
+            <Flex gap={3} direction={{ base: 'column', sm: 'row' }}>
+              <Box position="relative" flex="1">
+                <Box position="absolute" left={3} top="50%" transform="translateY(-50%)" color="fg.subtle" pointerEvents="none" zIndex={1}>
+                  <Icon boxSize={4}><LuSearch /></Icon>
+                </Box>
+                <Input name="q" defaultValue={q} placeholder="e.g. quiet alpine overlook with dark skies" ps={9} size="lg" bg="bg.panel" />
+              </Box>
+              <Button type="submit" colorPalette="pine" size="lg">
+                <Icon><LuSparkles /></Icon> Search
+              </Button>
+            </Flex>
+          </form>
+          {!q ? (
+            <HStack gap={2} mt={3} wrap="wrap">
+              <Text fontSize="xs" color="fg.muted">Try:</Text>
+              {EXAMPLES.map((ex) => (
+                <CLink key={ex} asChild _hover={{ textDecoration: 'none' }}>
+                  <NextLink href={`/search?q=${encodeURIComponent(ex)}`}>
+                    <Badge colorPalette="sand" variant="subtle" cursor="pointer" _hover={{ bg: 'sand.muted' }}>
+                      {ex}
+                    </Badge>
+                  </NextLink>
+                </CLink>
+              ))}
+            </HStack>
+          ) : null}
+        </Box>
+      </PageHeader>
 
-      <form method="get">
-        <Flex gap={3} mb={8} maxW="2xl">
-          <Input name="q" defaultValue={q} placeholder="e.g. quiet alpine overlook with dark skies" flex="1" />
-          <Button type="submit" colorPalette="blue">
-            Search
-          </Button>
-        </Flex>
-      </form>
+      <Container maxW="6xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 10 }}>
+        {!q ? (
+          <Text color="fg.muted">Enter a description above to search across parks, places, and people.</Text>
+        ) : (
+          <Stack gap={12}>
+            <Section title="Parks" count={parks.length}>
+              {parks.length === 0 ? (
+                <Empty />
+              ) : (
+                <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={5}>
+                  {parks.map((p) => (
+                    <ParkCard key={p.parkCode} park={p} />
+                  ))}
+                </SimpleGrid>
+              )}
+            </Section>
 
-      {!q ? (
-        <Text color="fg.muted">Enter a description above to search across parks, places, and people.</Text>
-      ) : (
-        <Stack gap={10}>
-          <Section title="Parks" count={parks.length}>
-            {parks.length === 0 ? (
-              <Empty />
-            ) : (
-              <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={4}>
-                {parks.map((p) => (
-                  <ParkCard key={p.parkCode} park={p} />
-                ))}
-              </SimpleGrid>
-            )}
-          </Section>
+            <Section title="Places" count={places.length}>
+              {places.length === 0 ? (
+                <Empty />
+              ) : (
+                <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={5}>
+                  {places.map((pl) => (
+                    <NodeCard key={pl.id} hit={pl} type="place" />
+                  ))}
+                </SimpleGrid>
+              )}
+            </Section>
 
-          <Section title="Places" count={places.length}>
-            {places.length === 0 ? (
-              <Empty />
-            ) : (
-              <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={4}>
-                {places.map((pl) => (
-                  <NodeCard key={pl.id} hit={pl} type="place" />
-                ))}
-              </SimpleGrid>
-            )}
-          </Section>
-
-          <Section title="People" count={people.length}>
-            {people.length === 0 ? (
-              <Empty />
-            ) : (
-              <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={4}>
-                {people.map((per) => (
-                  <NodeCard key={per.id} hit={per} type="person" />
-                ))}
-              </SimpleGrid>
-            )}
-          </Section>
-        </Stack>
-      )}
+            <Section title="People" count={people.length}>
+              {people.length === 0 ? (
+                <Empty />
+              ) : (
+                <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={5}>
+                  {people.map((per) => (
+                    <NodeCard key={per.id} hit={per} type="person" />
+                  ))}
+                </SimpleGrid>
+              )}
+            </Section>
+          </Stack>
+        )}
+      </Container>
     </Box>
   );
 }
@@ -96,10 +128,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   return (
     <Box>
-      <Flex align="center" gap={2} mb={3}>
-        <Heading size="md">{title}</Heading>
-        <Badge colorPalette="gray">{count}</Badge>
-      </Flex>
+      <SectionHeading title={title} badge={String(count)} badgeTone="neutral" />
       {children}
     </Box>
   );
@@ -117,9 +146,9 @@ function Empty() {
 function NodeCard({ hit, type }: { hit: SemanticHit; type: 'place' | 'person' }) {
   const park = hit.parks[0];
   const card = (
-    <Box minW={0} borderWidth="1px" borderRadius="lg" overflow="hidden" bg="bg.panel" _hover={park ? { shadow: 'md' } : undefined} h="100%">
+    <Card.Root variant={park ? 'interactive' : 'outline'} overflow="hidden" h="100%">
       {type === 'place' ? (
-        <Box h="120px" position="relative" overflow="hidden">
+        <Box h="140px" position="relative" overflow="hidden">
           {hit.image ? (
             <NextImage src={hit.image} alt={hit.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
           ) : (
@@ -128,12 +157,13 @@ function NodeCard({ hit, type }: { hit: SemanticHit; type: 'place' | 'person' })
           )}
         </Box>
       ) : null}
-      <Stack p={3} gap={1}>
+      <Card.Body p={3} gap={1}>
         <HStack wrap="wrap" gap={2}>
-          <Text fontWeight="semibold" lineClamp={1} flex="1">
+          <Badge colorPalette={type === 'place' ? 'trail' : 'pine'}>{type}</Badge>
+          <Text fontWeight="semibold" fontFamily="heading" lineClamp={1} flex="1">
             {hit.title}
           </Text>
-          {type === 'place' && hit.isStamp ? <Badge colorPalette="orange">stamp</Badge> : null}
+          {type === 'place' && hit.isStamp ? <Badge colorPalette="trail" variant="solid">stamp</Badge> : null}
         </HStack>
         {type === 'person' ? (() => {
           const tags = cleanTags(hit.title, hit.tags);
@@ -146,8 +176,8 @@ function NodeCard({ hit, type }: { hit: SemanticHit; type: 'place' | 'person' })
         <Text fontSize="xs" color="fg.muted" lineClamp={1}>
           {park ? `at ${park.parkName}` : 'no linked park'}
         </Text>
-      </Stack>
-    </Box>
+      </Card.Body>
+    </Card.Root>
   );
   // Navigable target is the related park page; non-linked results render as a static card.
   return park ? (

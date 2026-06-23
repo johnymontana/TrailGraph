@@ -40,6 +40,7 @@ export function ThemeChips({
         <Input
           size="sm"
           maxW="xs"
+          aria-label={`Search ${items.length} themes`}
           placeholder={`Search ${items.length} themes…`}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -50,10 +51,22 @@ export function ThemeChips({
       ) : (
         <Flex wrap="wrap" gap={2}>
           {shown.map((i) => (
-            <CLink key={i.key} asChild>
+            <CLink key={i.key} asChild _hover={{ textDecoration: 'none' }}>
               <NextLink href={i.href}>
-                <Badge size="lg" colorPalette={i.active ? activeColor : 'gray'} px={3} py={1} cursor="pointer">
-                  {i.label} <Text as="span" color="fg.muted">· {i.parks}</Text>
+                <Badge
+                  size="lg"
+                  variant={i.active ? 'solid' : 'subtle'}
+                  colorPalette={i.active ? activeColor : 'sand'}
+                  px={3}
+                  py={1}
+                  cursor="pointer"
+                  transition="background 0.15s, transform 0.1s"
+                  _hover={{ transform: 'translateY(-1px)' }}
+                >
+                  {i.label}{' '}
+                  <Text as="span" color={i.active ? 'whiteAlpha.800' : 'fg.muted'}>
+                    · {i.parks}
+                  </Text>
                 </Badge>
               </NextLink>
             </CLink>

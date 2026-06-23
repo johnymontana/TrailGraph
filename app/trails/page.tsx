@@ -1,9 +1,10 @@
-import { Box, Heading, SimpleGrid, Stack, Text, Badge, Flex, Link as CLink } from '@chakra-ui/react';
-import NextLink from 'next/link';
+import { Box, Container, Heading, SimpleGrid, Stack, Text } from '@chakra-ui/react';
 import { thematicTrail, trailThemes } from '../../lib/queries';
 import { ParkCard } from '../../components/ParkCard';
 import { ThemeChips, type ThemeChipItem } from '../../components/trails/ThemeChips';
 import { TrailMiniGraph } from '../../components/graph/TrailMiniGraph';
+import { PageHeader } from '../../components/ui/page-header';
+import { SectionHeading } from '../../components/ui/section-heading';
 
 /**
  * Thematic trails (NPS-expansion P0 #2) — RSC. A "trail" is the set of parks connected by a
@@ -45,67 +46,67 @@ export default async function TrailsPage({ searchParams }: { searchParams: Promi
   }));
 
   return (
-    <Box maxW="6xl" mx="auto" px={{ base: 4, md: 8 }} py={6}>
-      <Heading as="h1" size="lg" mb={2}>
-        Thematic trails
-      </Heading>
-      <Text color="fg.muted" mb={6}>
-        Cross-park journeys connected by the people who shaped them or a theme they share — each one a
-        single graph traversal across the parks.
-      </Text>
+    <Box>
+      <PageHeader
+        eyebrow="Thematic trails"
+        title="Follow a story across the parks"
+        subtitle="Cross-park journeys connected by the people who shaped them or a theme they share — each one a single graph traversal."
+        contour
+      />
 
-      {/* Theme pickers */}
-      <Stack gap={5} mb={8}>
-        <Box>
-          <Heading size="sm" mb={2}>People &amp; stories</Heading>
-          {peopleChips.length === 0 ? (
-            <Text color="fg.muted" fontSize="sm">No multi-park figures yet — run the data sync to populate them.</Text>
-          ) : (
-            <ThemeChips items={peopleChips} activeColor="purple" />
-          )}
-        </Box>
-        <Box>
-          <Heading size="sm" mb={2}>Topics</Heading>
-          {topicChips.length === 0 ? (
-            <Text color="fg.muted" fontSize="sm">No topics span enough parks yet.</Text>
-          ) : (
-            <ThemeChips items={topicChips} activeColor="green" />
-          )}
-        </Box>
-      </Stack>
+      <Container maxW="6xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 10 }}>
+        {/* Theme pickers */}
+        <Stack gap={6} mb={10}>
+          <Box>
+            <Heading as="h2" size="md" mb={3}>People &amp; stories</Heading>
+            {peopleChips.length === 0 ? (
+              <Text color="fg.muted" fontSize="sm">No multi-park figures yet — run the data sync to populate them.</Text>
+            ) : (
+              <ThemeChips items={peopleChips} activeColor="pine" />
+            )}
+          </Box>
+          <Box>
+            <Heading as="h2" size="md" mb={3}>Topics</Heading>
+            {topicChips.length === 0 ? (
+              <Text color="fg.muted" fontSize="sm">No topics span enough parks yet.</Text>
+            ) : (
+              <ThemeChips items={topicChips} activeColor="trail" />
+            )}
+          </Box>
+        </Stack>
 
-      {/* Selected trail */}
-      {selected ? (
-        <Box>
-          <Flex align="center" gap={3} mb={3} wrap="wrap">
-            <Heading size="md">
-              {person ? `Parks tied to ${person}` : `${topic} trail`}
-            </Heading>
-            <Badge colorPalette="blue">{trail.length} park{trail.length === 1 ? '' : 's'}</Badge>
-            <CLink asChild color="blue.600" fontSize="sm">
-              <NextLink href={graphHref}>See it on the graph →</NextLink>
-            </CLink>
-          </Flex>
-          {trail.length === 0 ? (
-            <Text color="fg.muted">No parks found for this theme.</Text>
-          ) : (
-            <>
-              {/* See the trail as a connected graph before the card grid (ADR-039, friction #5). */}
-              <TrailMiniGraph
-                themeLabel={selected}
-                parks={trail.map((p) => ({ parkCode: p.parkCode, name: p.name }))}
-              />
-              <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={4}>
-                {trail.map((p) => (
-                  <ParkCard key={p.parkCode} park={p} />
-                ))}
-              </SimpleGrid>
-            </>
-          )}
-        </Box>
-      ) : (
-        <Text color="fg.muted">Pick a person or topic above to trace its trail across the parks.</Text>
-      )}
+        {/* Selected trail */}
+        {selected ? (
+          <Box>
+            <SectionHeading
+              title={person ? `Parks tied to ${person}` : `${topic} trail`}
+              badge={`${trail.length} park${trail.length === 1 ? '' : 's'}`}
+              badgeTone="brand"
+              action={{ href: graphHref, label: 'See it on the graph' }}
+            />
+            {trail.length === 0 ? (
+              <Text color="fg.muted">No parks found for this theme.</Text>
+            ) : (
+              <>
+                {/* See the trail as a connected graph before the card grid (ADR-039, friction #5). */}
+                <Box mb={6}>
+                  <TrailMiniGraph
+                    themeLabel={selected}
+                    parks={trail.map((p) => ({ parkCode: p.parkCode, name: p.name }))}
+                  />
+                </Box>
+                <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={5}>
+                  {trail.map((p) => (
+                    <ParkCard key={p.parkCode} park={p} />
+                  ))}
+                </SimpleGrid>
+              </>
+            )}
+          </Box>
+        ) : (
+          <Text color="fg.muted">Pick a person or topic above to trace its trail across the parks.</Text>
+        )}
+      </Container>
     </Box>
   );
 }

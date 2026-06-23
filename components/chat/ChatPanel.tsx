@@ -1,9 +1,16 @@
 'use client';
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import { Box, Stack, Text, Input, Button, Flex, Spinner } from '@chakra-ui/react';
+import { Box, Stack, Text, Input, IconButton, Flex, HStack, Icon, Badge, Link as CLink } from '@chakra-ui/react';
 import { useEveAgent } from 'eve/react';
+import { LuSend, LuSparkles } from 'react-icons/lu';
 import { ToolCard, isRenderableToolOutput } from './Cards';
 import { Markdown } from './Markdown';
+
+const SUGGESTIONS = [
+  '4 days, mountains and easy hikes near Montana',
+  'A dark-sky road trip in Utah',
+  'Fewer crowds, waterfalls, kid-friendly',
+];
 
 /**
  * Ranger chat (D1, D5) via Eve's native client, same-origin so the Better Auth cookie flows (R4).
@@ -41,11 +48,11 @@ export function ChatPanel() {
     }
   }, [messages]);
 
-  async function send() {
-    const text = input.trim();
-    if (!text || busy) return;
+  async function send(text?: string) {
+    const msg = (text ?? input).trim();
+    if (!msg || busy) return;
     setInput('');
-    await agent.send({ message: text });
+    await agent.send({ message: msg });
   }
 
   function renderAssistant(parts: { type: string; text?: string; state?: string; output?: unknown }[], streaming: boolean): ReactNode {
@@ -89,46 +96,112 @@ export function ChatPanel() {
     return nodes;
   }
 
+  const lastIsUser = messages.length > 0 && messages[messages.length - 1].role === 'user';
+
   return (
-    <Flex direction="column" h="100%">
-      <Stack flex="1" overflowY="auto" gap={4} p={4} minW={0}>
+    <Flex direction="column" h="100%" bg="bg.canvas">
+      {/* Ranger identity header */}
+      <HStack px={4} py={3} borderBottomWidth="1px" borderColor="border" bg="bg.panel" gap={2} flexShrink={0}>
+        <Box boxSize={7} borderRadius="full" bg="brand.solid" color="brand.contrast" display="flex" alignItems="center" justifyContent="center">
+          <Icon as={LuSparkles} boxSize={4} />
+        </Box>
+        <Box>
+          <Text fontSize="sm" fontWeight="semibold" fontFamily="heading" lineHeight="1.1">The Ranger</Text>
+          <Text fontSize="xs" color="fg.muted" lineHeight="1.1">Plans around what you love</Text>
+        </Box>
+      </HStack>
+
+      <Stack flex="1" overflowY="auto" gap={5} p={4} minW={0}>
         {messages.length === 0 ? (
-          <Text color="fg.muted">
-            Ask the ranger to plan a trip — e.g. “4 days, mountains and easy hikes near Montana.”
-          </Text>
+          <Stack gap={3} color="fg.muted" pt={4}>
+            <Text>Ask the ranger to plan a trip, find parks, or check conditions.</Text>
+            <Stack gap={2} align="start">
+              {SUGGESTIONS.map((s) => (
+                <Badge
+                  key={s}
+                  as="button"
+                  colorPalette="pine"
+                  variant="subtle"
+                  cursor="pointer"
+                  px={3}
+                  py={1.5}
+                  textAlign="start"
+                  whiteSpace="normal"
+                  _hover={{ bg: 'brand.muted' }}
+                  onClick={() => send(s)}
+                >
+                  {s}
+                </Badge>
+              ))}
+            </Stack>
+          </Stack>
         ) : null}
 
         {messages.map((m, i) => {
           const streaming = busy && i === messages.length - 1 && m.role === 'assistant';
-          return (
-            <Box key={i} alignSelf={m.role === 'user' ? 'flex-end' : 'flex-start'} maxW="90%" minW={0}>
-              <Text fontSize="xs" color="fg.muted" mb={1}>{m.role === 'user' ? 'You' : 'Ranger'}</Text>
-              {m.role === 'user' ? (
-                <Box bg="bg.subtle" borderRadius="md" px={3} py={2}>
+          if (m.role === 'user') {
+            return (
+              <Box key={i} alignSelf="flex-end" maxW="85%" minW={0}>
+                <Text fontSize="xs" color="fg.muted" mb={1} textAlign="end">You</Text>
+                <Box bg="brand.solid" color="brand.contrast" borderRadius="l2" borderBottomRightRadius="xs" px={3.5} py={2.5}>
                   <Text whiteSpace="pre-wrap" overflowWrap="anywhere">
                     {m.parts.map((p) => (p.type === 'text' ? p.text : '')).join('')}
                   </Text>
                 </Box>
-              ) : (
-                renderAssistant(m.parts as never[], streaming)
-              )}
-            </Box>
+              </Box>
+            );
+          }
+          return (
+            <HStack key={i} align="start" gap={2.5} maxW="92%" minW={0}>
+              <Box boxSize={7} borderRadius="full" bg="brand.muted" color="brand.fg" display="flex" alignItems="center" justifyContent="center" flexShrink={0} mt={5}>
+                <Icon as={LuSparkles} boxSize={3.5} />
+              </Box>
+              <Box minW={0} flex="1">
+                <Text fontSize="xs" color="fg.muted" mb={1}>Ranger</Text>
+                <Box bg="bg.panel" borderWidth="1px" borderColor="border" borderRadius="l2" borderTopLeftRadius="xs" px={4} py={3}>
+                  {renderAssistant(m.parts as never[], streaming)}
+                </Box>
+              </Box>
+            </HStack>
           );
         })}
-        {busy ? <Spinner size="sm" /> : null}
-        {agent.error ? <Text color="red.500" fontSize="sm">The ranger hit an error. Try again.</Text> : null}
+
+        {/* "Ranger is thinking…" — only before the assistant turn starts streaming. */}
+        {agent.status === 'submitted' || (busy && lastIsUser) ? (
+          <HStack align="center" gap={2.5}>
+            <Box boxSize={7} borderRadius="full" bg="brand.muted" color="brand.fg" display="flex" alignItems="center" justifyContent="center">
+              <Icon as={LuSparkles} boxSize={3.5} />
+            </Box>
+            <HStack gap={1.5} bg="bg.panel" borderWidth="1px" borderColor="border" borderRadius="l2" px={3} py={2.5}>
+              <Text fontSize="sm" color="fg.muted">Ranger is thinking</Text>
+              <HStack gap={0.5} color="brand.fg" fontWeight="bold">
+                <Box css={{ animation: 'tgPulse 1.2s infinite' }}>·</Box>
+                <Box css={{ animation: 'tgPulse 1.2s infinite 0.2s' }}>·</Box>
+                <Box css={{ animation: 'tgPulse 1.2s infinite 0.4s' }}>·</Box>
+              </HStack>
+            </HStack>
+          </HStack>
+        ) : null}
+
+        {agent.error ? (
+          <Text color="red.fg" fontSize="sm">The ranger hit an error. Try again.</Text>
+        ) : null}
         <div ref={bottomRef} />
       </Stack>
 
-      <Flex p={3} borderTopWidth="1px" gap={2}>
+      <Flex p={3} borderTopWidth="1px" borderColor="border" bg="bg.panel" gap={2} flexShrink={0}>
         <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
           placeholder="Plan a trip with the ranger…"
           disabled={busy}
+          borderRadius="full"
+          bg="bg.canvas"
         />
-        <Button colorPalette="blue" onClick={send} loading={busy}>Send</Button>
+        <IconButton aria-label="Send message" colorPalette="pine" borderRadius="full" onClick={() => send()} loading={busy} disabled={!input.trim()}>
+          <LuSend />
+        </IconButton>
       </Flex>
     </Flex>
   );

@@ -46,13 +46,13 @@ export function StampList({
     <Box mt={12}>
       <Heading size="md" mb={1}>Passport stamps</Heading>
       <Text fontSize="sm" color="fg.muted" mb={3}>Mark the stamps you&apos;ve collected — they show in your memory and along your routes.</Text>
-      {err ? <Text fontSize="sm" color="red.500" mb={2}>{err}</Text> : null}
+      {err ? <Text fontSize="sm" color="red.fg" mb={2}>{err}</Text> : null}
       <Stack gap={2}>
         {stamps.map((s) => (
-          <HStack key={s.id} borderWidth="1px" borderRadius="md" p={2}>
+          <HStack key={s.id} borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2}>
             <Text flex="1">🎫 {s.label}</Text>
             <Button size="xs" disabled={busy}
-              colorPalette={state[s.id] ? 'green' : 'gray'}
+              colorPalette={state[s.id] ? 'pine' : 'sand'}
               variant={state[s.id] ? 'solid' : 'outline'}
               onClick={() => toggle(s.id)}>
               {state[s.id] ? 'Collected ✓' : 'Collect'}

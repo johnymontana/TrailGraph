@@ -23,7 +23,7 @@ export function VisitationChart({
   const best = new Set(bestMonths);
   const chart = useChart({
     data: monthly.map((v, i) => ({ month: MONTHS[i], visits: v, best: best.has(i + 1) })),
-    series: [{ name: 'visits', color: 'blue.solid' }],
+    series: [{ name: 'visits', color: 'pine.solid' }],
   });
 
   if (monthly.length !== 12) return null;
@@ -31,7 +31,7 @@ export function VisitationChart({
   return (
     <Box>
       <Text fontSize="xs" color="fg.muted" mb={2}>
-        Monthly recreation visits — <Text as="span" color="green.fg" fontWeight="medium">green</Text>{' '}
+        Monthly recreation visits — <Text as="span" color="accent.fg" fontWeight="medium">orange</Text>{' '}
         months are the lowest-crowd times to visit.
       </Text>
       <Chart.Root maxH="44" chart={chart} aria-label={`Monthly visitation for ${parkName}`}>
@@ -56,7 +56,7 @@ export function VisitationChart({
           />
           <Bar dataKey={chart.key('visits')} radius={4}>
             {chart.data.map((d, i) => (
-              <Cell key={i} fill={chart.color(d.best ? 'green.solid' : 'blue.muted')} />
+              <Cell key={i} fill={chart.color(d.best ? 'trail.solid' : 'pine.muted')} />
             ))}
           </Bar>
         </BarChart>

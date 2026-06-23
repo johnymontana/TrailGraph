@@ -21,7 +21,7 @@ export function ParkGraph({ data, parkName }: { data: ParkGraphData; parkName: s
   if (data.nodes.length <= 1) return null; // nothing to show beyond the park itself
 
   const legend = (
-    <Box position="absolute" bottom={3} left={3} bg="bg.panel" borderWidth="1px" borderRadius="md" px={3} py={2} shadow="md" maxW="90%">
+    <Box position="absolute" bottom={3} left={3} bg="bg.panel/90" backdropFilter="blur(8px)" borderWidth="1px" borderColor="border" borderRadius="l2" px={3} py={2} shadow="md" maxW="90%">
       <Wrap gap={3}>
         {labels.map((l) => (
           <HStack key={l} gap={1.5}>
@@ -40,7 +40,7 @@ export function ParkGraph({ data, parkName }: { data: ParkGraphData; parkName: s
         This park&apos;s activities, topics, location, and on-the-ground places — one hop in the graph.
         Drag to explore; click an activity, topic, or related park to follow it.
       </Text>
-      <Box borderWidth="1px" borderRadius="lg" overflow="hidden" bg="bg.subtle">
+      <Box borderWidth="1px" borderColor="border" borderRadius="l2" overflow="hidden" bg="bg.subtle">
         <NvlGraph
           nodes={data.nodes}
           rels={data.relationships}

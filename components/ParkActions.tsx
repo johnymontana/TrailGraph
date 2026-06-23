@@ -1,7 +1,9 @@
 'use client';
 import { useState } from 'react';
-import { Button, HStack, Link as CLink } from '@chakra-ui/react';
+import { Button, HStack, Icon } from '@chakra-ui/react';
 import NextLink from 'next/link';
+import { LuHeart, LuRoute } from 'react-icons/lu';
+import { toast } from '../lib/toast';
 
 /**
  * Park-page actions (§4): let users express preference. "Save" records a memory signal (considered,
@@ -12,19 +14,29 @@ export function ParkActions({ parkCode }: { parkCode: string }) {
 
   async function save() {
     setSaved(true);
-    await fetch('/api/considered', {
+    const res = await fetch('/api/considered', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ parkCode, source: 'saved' }),
-    }).catch(() => setSaved(false));
+    }).catch(() => null);
+    if (res && res.ok) {
+      toast.success('Saved to your parks', 'The ranger will factor this into your recommendations.');
+    } else {
+      setSaved(false);
+      toast.error("Couldn't save", 'Sign in to save parks to your memory.');
+    }
   }
 
   return (
     <HStack gap={3}>
-      <Button colorPalette="blue" variant={saved ? 'solid' : 'outline'} onClick={save} disabled={saved}>
-        {saved ? '♥ Saved' : '♥ Save'}
+      <Button colorPalette="trail" variant={saved ? 'solid' : 'outline'} onClick={save} disabled={saved}>
+        <Icon as={LuHeart} fill={saved ? 'currentColor' : 'none'} /> {saved ? 'Saved' : 'Save'}
       </Button>
-      <Button asChild variant="outline"><NextLink href="/plan">Plan a trip →</NextLink></Button>
+      <Button asChild colorPalette="pine">
+        <NextLink href="/plan">
+          <Icon as={LuRoute} /> Plan a trip
+        </NextLink>
+      </Button>
     </HStack>
   );
 }

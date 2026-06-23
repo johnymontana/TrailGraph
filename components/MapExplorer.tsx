@@ -6,25 +6,31 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { Box, Stack, Checkbox, Text, Spinner, HStack } from '@chakra-ui/react';
 import { mapStyle, US_CENTER, US_BOUNDS, registerMapProtocols, attachBasemapFallback } from '../lib/mapStyle';
 import { useColorMode } from './ui/color-mode';
+import { brandColors, type BrandColors } from '../lib/brandColors';
+import { pine } from '../theme/colors';
 import type { ParkSummary } from '../lib/queries';
 
 /**
  * Global park map (B1-B2) + layer toggles (B3): campgrounds, visitor centers, things-to-do, and
  * active-alert parks, each lazily loaded per viewport (point.withinBBox, §12.4). Click a point → popup.
+ * Marker/cluster colors come from the brand palette (lib/brandColors) so they match the themed UI.
  */
 const POI_LAYERS = [
-  { key: 'campgrounds', label: 'Campgrounds', color: '#2f9e44' },
-  { key: 'visitorcenters', label: 'Visitor centers', color: '#9c36b5' },
-  { key: 'thingstodo', label: 'Things to do', color: '#e8590c' },
-  { key: 'alerts', label: 'Active alerts', color: '#e03131' },
+  { key: 'campgrounds', label: 'Campgrounds', tone: 'pine' },
+  { key: 'visitorcenters', label: 'Visitor centers', tone: 'trail' },
+  { key: 'thingstodo', label: 'Things to do', tone: 'trailLight' },
+  { key: 'alerts', label: 'Active alerts', tone: 'danger' },
 ] as const;
 
 type LayerKey = (typeof POI_LAYERS)[number]['key'];
+type PoiTone = (typeof POI_LAYERS)[number]['tone'];
 
 export function MapExplorer({ initialBounds }: { initialBounds?: [[number, number], [number, number]] | null }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
   const { colorMode } = useColorMode();
+  const c: BrandColors = brandColors(colorMode);
+  const poiColor = (tone: PoiTone) => c[tone];
   // Default the Campgrounds layer on (§2.11) so the map isn't empty on first load.
   const enabledRef = useRef<Record<string, boolean>>({ campgrounds: true });
   const [enabled, setEnabled] = useState<Record<string, boolean>>({ campgrounds: true });
@@ -134,24 +140,24 @@ export function MapExplorer({ initialBounds }: { initialBounds?: [[number, numbe
     map.on('load', () => {
       map.addSource('parks', { type: 'geojson', data: emptyFC(), cluster: true, clusterMaxZoom: 8, clusterRadius: 50 });
       map.addLayer({ id: 'clusters', type: 'circle', source: 'parks', filter: ['has', 'point_count'],
-        paint: { 'circle-color': '#1971c2', 'circle-opacity': 0.8, 'circle-radius': ['step', ['get', 'point_count'], 16, 10, 22, 30, 30] } });
+        paint: { 'circle-color': c.pine, 'circle-opacity': 0.85, 'circle-radius': ['step', ['get', 'point_count'], 16, 10, 22, 30, 30] } });
       map.addLayer({ id: 'cluster-count', type: 'symbol', source: 'parks', filter: ['has', 'point_count'],
         layout: { 'text-field': '{point_count_abbreviated}', 'text-size': 12 }, paint: { 'text-color': '#fff' } });
       map.addLayer({ id: 'park-point', type: 'circle', source: 'parks', filter: ['!', ['has', 'point_count']],
-        paint: { 'circle-color': '#1971c2', 'circle-radius': 6, 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff' } });
+        paint: { 'circle-color': c.pine, 'circle-radius': 6, 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff' } });
 
       // One empty source+layer per POI layer (hidden until toggled).
-      for (const { key, color } of POI_LAYERS) {
+      for (const { key, tone } of POI_LAYERS) {
         map.addSource(`poi-${key}`, { type: 'geojson', data: emptyFC() });
         map.addLayer({ id: `poi-${key}`, type: 'circle', source: `poi-${key}`,
           layout: { visibility: 'none' },
-          paint: { 'circle-color': color, 'circle-radius': 5, 'circle-stroke-width': 1, 'circle-stroke-color': '#fff' } });
+          paint: { 'circle-color': poiColor(tone), 'circle-radius': 5, 'circle-stroke-width': 1, 'circle-stroke-color': '#fff' } });
         map.on('click', `poi-${key}`, (e) => {
           const f = e.features?.[0];
           if (!f) return;
           const props = f.properties as { name: string; parkCode: string };
           const [lng, lat] = (f.geometry as Point).coordinates;
-          const link = props.parkCode ? `<br/><a href="/parks/${props.parkCode}" style="color:#1971c2">View park →</a>` : '';
+          const link = props.parkCode ? `<br/><a href="/parks/${props.parkCode}" style="color:${pine[700]}">View park →</a>` : '';
           new maplibregl.Popup().setLngLat([lng, lat]).setHTML(`<strong>${props.name}</strong>${link}`).addTo(map);
         });
       }
@@ -168,7 +174,7 @@ export function MapExplorer({ initialBounds }: { initialBounds?: [[number, numbe
         const p = f.properties as { parkCode: string; name: string; designation: string };
         const [lng, lat] = (f.geometry as Point).coordinates;
         new maplibregl.Popup().setLngLat([lng, lat]).setHTML(
-          `<strong>${p.name}</strong><br/><span style="color:#666">${p.designation ?? ''}</span><br/><a href="/parks/${p.parkCode}" style="color:#1971c2">View park →</a>`,
+          `<strong>${p.name}</strong><br/><span style="color:#777">${p.designation ?? ''}</span><br/><a href="/parks/${p.parkCode}" style="color:${pine[700]}">View park →</a>`,
         ).addTo(map);
       });
 
@@ -199,6 +205,7 @@ export function MapExplorer({ initialBounds }: { initialBounds?: [[number, numbe
           transform="translateX(-50%)"
           bg="bg.panel"
           borderWidth="1px"
+          borderColor="border"
           borderRadius="full"
           px={3}
           py={1.5}
@@ -206,19 +213,19 @@ export function MapExplorer({ initialBounds }: { initialBounds?: [[number, numbe
           gap={2}
           aria-live="polite"
         >
-          <Spinner size="sm" color="blue.500" />
+          <Spinner size="sm" color="brand.solid" />
           <Text fontSize="xs" color="fg.muted">Loading map data…</Text>
         </HStack>
       ) : null}
-      <Box position="absolute" top={3} left={3} bg="bg.panel" borderWidth="1px" borderRadius="md" p={3} shadow="md">
-        <Text fontSize="xs" fontWeight="semibold" mb={2}>Layers</Text>
-        <Stack gap={1}>
-          {POI_LAYERS.map(({ key, label, color }) => (
-            <Checkbox.Root key={key} size="sm" checked={!!enabled[key]} onCheckedChange={(d) => toggleLayer(key, !!d.checked)}>
+      <Box position="absolute" top={3} left={3} bg="bg.panel/90" backdropFilter="blur(8px)" borderWidth="1px" borderColor="border" borderRadius="l2" p={3} shadow="md">
+        <Text fontSize="xs" fontWeight="semibold" mb={2} textTransform="uppercase" letterSpacing="0.05em" color="fg.subtle">Layers</Text>
+        <Stack gap={1.5}>
+          {POI_LAYERS.map(({ key, label, tone }) => (
+            <Checkbox.Root key={key} size="sm" colorPalette="pine" checked={!!enabled[key]} onCheckedChange={(d) => toggleLayer(key, !!d.checked)}>
               <Checkbox.HiddenInput />
               <Checkbox.Control />
               <Checkbox.Label>
-                <Box as="span" display="inline-block" w="8px" h="8px" borderRadius="full" bg={color} mr={2} />
+                <Box as="span" display="inline-block" w="8px" h="8px" borderRadius="full" bg={poiColor(tone)} mr={2} />
                 {label}
               </Checkbox.Label>
             </Checkbox.Root>
