@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readGraph, writeGraph } from './neo4j';
 import { routing, type LatLng } from './routing';
 import { considerPark } from './bridges';
+import { buildParkConditions, type ConditionsCardData, type TripDashboard } from './conditions';
 
 /**
  * Trip service (ADR-002/003). Canonical trips are bolt-written graph nodes owned by the app and
@@ -125,13 +126,18 @@ export async function getTrip(userId: string, tripId: string) {
 interface StopRow {
   id: string;
   order: number;
+  day: number | null;
+  nights: number | null;
   name: string | null;
+  kind: StopKind | null;
+  parkCode: string | null;
   lat: number | null;
   lng: number | null;
   parkName: string | null;
   campgroundName: string | null;
   poiTitle: string | null;
   placeTitle: string | null;
+  driveTo: { miles: number; minutes: number; source: string } | null;
 }
 
 export async function addStop(userId: string, tripId: string, stop: NewStop): Promise<string | null> {
@@ -406,4 +412,18 @@ export async function checkTripAlerts(userId: string, tripId: string) {
     `,
     { userId, tripId },
   );
+}
+
+/**
+ * Aggregate per-stop conditions for a built trip into the Trip Dashboard (ADR-042). Reads the trip's
+ * park stops and builds each one's structured conditions from the single fact source. Returns null if
+ * the trip doesn't exist / isn't the caller's.
+ */
+export async function tripConditions(userId: string, tripId: string): Promise<TripDashboard | null> {
+  const trip = await getTrip(userId, tripId);
+  if (!trip) return null;
+  const parkStops = trip.stops.filter((s) => s.kind === 'park' && s.parkCode);
+  const built = await Promise.all(parkStops.map((s) => buildParkConditions(s.parkCode as string, s.order)));
+  const stops = built.filter((s): s is ConditionsCardData => s != null);
+  return { tripId: trip.id, tripName: trip.name, startDate: trip.startDate, endDate: trip.endDate, stops };
 }

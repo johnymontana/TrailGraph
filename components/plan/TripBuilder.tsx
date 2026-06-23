@@ -5,6 +5,8 @@ import { LuX } from 'react-icons/lu';
 import { TripMap } from './TripMap';
 import { ParkSearchInput } from './ParkSearchInput';
 import { toast } from '../../lib/toast';
+import { TripDashboardCard } from '../conditions/ConditionCards';
+import type { TripDashboard } from '../../lib/conditions';
 
 /** Itinerary builder (C1-C4) — drives the Trip service via /api/trips. Fully functional without the agent. */
 interface Stop {
@@ -42,6 +44,7 @@ export function TripBuilder() {
     atbSaves: boolean;
   } | null>(null);
   const [costErr, setCostErr] = useState<string | null>(null);
+  const [dashboard, setDashboard] = useState<TripDashboard | null>(null);
   const [dayMap, setDayMap] = useState<Record<string, number>>({});
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -83,6 +86,7 @@ export function TripBuilder() {
     setAlerts(null);
     setCost(null);
     setCostErr(null);
+    setDashboard(null);
     setDayMap({});
     setEditingName(false);
   }
@@ -176,6 +180,21 @@ export function TripBuilder() {
       setCost(null);
       setCostErr('Network error. Please try again.');
     }
+  }
+  async function checkConditions() {
+    if (!trip) return;
+    setDashboard(null);
+    const res = await fetch(`/api/trips/${trip.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op: 'conditions' }),
+    });
+    if (!res.ok) {
+      toast.error('Could not load trip conditions.');
+      return;
+    }
+    const { dashboard } = (await res.json()) as { dashboard: TripDashboard | null };
+    setDashboard(dashboard);
   }
   async function share() {
     if (!trip) return;
@@ -322,6 +341,9 @@ export function TripBuilder() {
                 <Button size="sm" variant="outline" onClick={checkCost}>
                   Trip cost
                 </Button>
+                <Button size="sm" variant="outline" onClick={checkConditions}>
+                  Trip conditions
+                </Button>
                 <Button size="sm" variant="outline" onClick={suggestDayPlan}>
                   Suggest day plan
                 </Button>
@@ -333,6 +355,9 @@ export function TripBuilder() {
                 </Button>
                 <Button size="sm" variant="outline" asChild>
                   <a href={`/api/trips/${trip.id}/ics`}>Export .ics</a>
+                </Button>
+                <Button size="sm" variant="outline" asChild>
+                  <a href={`/api/trips/${trip.id}/gpx`}>Export .gpx</a>
                 </Button>
               </HStack>
               {shareUrl ? (
@@ -381,6 +406,13 @@ export function TripBuilder() {
             </Box>
           ) : null}
           {costErr ? <Text fontSize="sm" color="red.fg">{costErr}</Text> : null}
+          {dashboard ? (
+            dashboard.stops.length === 0 ? (
+              <Text fontSize="sm" color="fg.muted">Add a park stop to see its conditions.</Text>
+            ) : (
+              <TripDashboardCard data={dashboard as unknown as Record<string, unknown>} />
+            )
+          ) : null}
         </>
       ) : (
         <Text color="fg.muted" fontSize="sm">Create or select a trip to start building an itinerary.</Text>

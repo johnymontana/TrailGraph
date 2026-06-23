@@ -1,5 +1,6 @@
 import type { Node as NvlNode, Relationship as NvlRel } from '@neo4j-nvl/base';
 import { pine, sand, trail } from '../theme/colors';
+import type { UserMemory } from './memory-graph';
 
 /**
  * Pure data → Neo4j-NVL mappers (no DOM, unit-tested). Two shapes:
@@ -76,6 +77,85 @@ export function trailToNvl(
     caption: '',
   }));
   return { nodes, rels };
+}
+
+// Context-graph (the user's memory) palette — trail accent, distinct from the pine domain graph
+// (ADR-047). The "You" anchor is a deeper accent.
+export const CONTEXT_PREFIX = 'ctx:';
+export const CONTEXT_YOU_ID = 'ctx:You';
+const CONTEXT_COLOR = trail[500];
+const CONTEXT_YOU = trail[600];
+
+/**
+ * Reshape a user's memory (the context graph) into NVL nodes/rels (ADR-047). Pure + unit-tested.
+ * Node-id convention (critical for the two-graph overlay merge): CONSIDERED parks reuse the BARE
+ * `parkCode` so they merge with the domain constellation; every other context node gets a `ctx:` prefix
+ * so it can't collide with a domain park id. Edge captions are the literal relationship types.
+ */
+export function contextToNvl(memory: UserMemory): { nodes: NvlNode[]; rels: NvlRel[] } {
+  const nodes: NvlNode[] = [{ id: CONTEXT_YOU_ID, caption: 'You', size: 18, color: CONTEXT_YOU }];
+  const rels: NvlRel[] = [];
+  const seen = new Set<string>([CONTEXT_YOU_ID]);
+  const seenEdge = new Set<string>();
+  const addNode = (id: string, caption: string, size = 11) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    nodes.push({ id, caption, size, color: CONTEXT_COLOR });
+  };
+  // Dedupe edges too (not just nodes): duplicate input prefs/amenities must not emit duplicate rels.
+  const addEdge = (to: string, type: string) => {
+    const id = `${CONTEXT_YOU_ID}--${type}--${to}`;
+    if (seenEdge.has(id)) return;
+    seenEdge.add(id);
+    rels.push({ id, from: CONTEXT_YOU_ID, to, caption: type });
+  };
+
+  for (const p of memory.preferences) {
+    const id = `${CONTEXT_PREFIX}${p.kind === 'activity' ? 'Activity' : 'Topic'}:${p.name}`;
+    addNode(id, p.name);
+    addEdge(id, 'PREFERS');
+  }
+  for (const c of memory.considered) {
+    addNode(c.parkCode, c.name, 12); // BARE parkCode → merges with the domain graph
+    addEdge(c.parkCode, 'CONSIDERED');
+  }
+  for (const t of memory.planned) {
+    const id = `${CONTEXT_PREFIX}Trip:${t.tripId}`;
+    addNode(id, t.name, 12);
+    addEdge(id, 'PLANNED');
+  }
+  const { wheelchair, rvMaxLengthFt, requiredAmenities } = memory.travel;
+  if (wheelchair || rvMaxLengthFt != null) {
+    const parts = [wheelchair ? 'wheelchair' : null, rvMaxLengthFt != null ? `RV ≤ ${rvMaxLengthFt}ft` : null].filter(Boolean);
+    addNode(`${CONTEXT_PREFIX}Constraint:travel`, parts.join(' · ') || 'constraints');
+    addEdge(`${CONTEXT_PREFIX}Constraint:travel`, 'TRAVELS_WITH');
+  }
+  for (const a of requiredAmenities) {
+    const id = `${CONTEXT_PREFIX}Amenity:${a}`;
+    addNode(id, a);
+    addEdge(id, 'REQUIRES');
+  }
+  for (const pass of memory.passes) {
+    const id = `${CONTEXT_PREFIX}EntrancePass:${pass.id}`;
+    addNode(id, pass.name);
+    addEdge(id, 'HOLDS');
+  }
+  for (const s of memory.stamps) {
+    const id = `${CONTEXT_PREFIX}PassportStamp:${s.id}`;
+    addNode(id, s.label);
+    addEdge(id, 'COLLECTED');
+  }
+  if (memory.availability.start || memory.availability.end) {
+    const id = `${CONTEXT_PREFIX}Season:window`;
+    addNode(id, `${memory.availability.start ?? '…'} – ${memory.availability.end ?? '…'}`);
+    addEdge(id, 'AVAILABLE');
+  }
+  return { nodes, rels };
+}
+
+/** True when an NVL node id is a domain park code (bare) rather than a prefixed context node. */
+export function isContextParkId(id: string): boolean {
+  return !id.startsWith(CONTEXT_PREFIX);
 }
 
 /** Color for a domain node label in the per-park graph. Pure. */

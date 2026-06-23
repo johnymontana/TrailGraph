@@ -21,7 +21,7 @@ export interface ParkSummary {
   accessible: boolean;
 }
 
-const PARK_SUMMARY_RETURN = `
+export const PARK_SUMMARY_RETURN = `
   p.parkCode AS parkCode, p.fullName AS name, p.designation AS designation, p.states AS states,
   p.location.latitude AS lat, p.location.longitude AS lng,
   CASE WHEN size(coalesce(p.images, [])) > 0 THEN p.images[0] ELSE null END AS image,
@@ -652,18 +652,46 @@ export async function semanticSearch(kind: 'place' | 'person', query: string, li
 /** "Vibe" search (A4): vector candidates → graph re-rank (ADR-012). */
 export async function vibeSearch(
   query: string,
-  opts: { limit?: number; stateCodes?: string[]; activity?: string; topic?: string } = {},
+  opts: {
+    limit?: number;
+    stateCodes?: string[];
+    activity?: string;
+    topic?: string;
+    // Travel constraints (ADR-046): make candidate retrieval respect what the ranger already knows, so
+    // the cards it surfaces don't drift from a constrained final itinerary (Friction #2).
+    rvMaxLengthFt?: number | null;
+    wheelchairAccessible?: boolean;
+    requiredAmenities?: string[];
+    maxBortle?: number | null;
+  } = {},
 ) {
-  const { limit = 15, stateCodes, activity, topic } = opts;
+  const {
+    limit = 15,
+    stateCodes,
+    activity,
+    topic,
+    rvMaxLengthFt = null,
+    wheelchairAccessible = false,
+    requiredAmenities = [],
+    maxBortle = null,
+  } = opts;
   const [vector] = await embed([query]);
-  // Pull more vector candidates when facets will prune them, so enough survive the filter (R4 §2.3:
-  // intent-aware ranking — semantic candidates narrowed by region/activity/topic, then ranked by score).
-  const hasFacets = (stateCodes?.length ?? 0) > 0 || !!activity || !!topic;
+  // Pull more vector candidates when facets/constraints will prune them, so enough survive the filter
+  // (R4 §2.3: intent-aware ranking — semantic candidates narrowed by region/activity/topic + travel
+  // constraints, then ranked by score).
+  const hasConstraints = rvMaxLengthFt != null || wheelchairAccessible || requiredAmenities.length > 0 || maxBortle != null;
+  const hasFacets = (stateCodes?.length ?? 0) > 0 || !!activity || !!topic || hasConstraints;
   return readGraph<ParkSummary & { score: number }>(
     `CALL db.index.vector.queryNodes('park_embedding', toInteger($k), $vector) YIELD node AS p, score
      WHERE ($stateCodes IS NULL OR EXISTS { (p)-[:LOCATED_IN]->(s:State) WHERE s.code IN $stateCodes })
        AND ($activity IS NULL OR (p)-[:OFFERS]->(:Activity {name:$activity}))
        AND ($topic IS NULL OR (p)-[:HAS_TOPIC]->(:Topic {name:$topic}))
+       AND ($rv IS NULL OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.rvMaxLengthFt >= $rv })
+       AND (NOT $wheelchair OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.wheelchairAccessible = true })
+       AND ($maxBortle IS NULL OR coalesce(p.bortleScale, 99) <= $maxBortle)
+       AND ALL(req IN $required WHERE
+             EXISTS { (p)-[:HAS_PLACE]->(:Place)-[:HAS_AMENITY]->(:Amenity {name: req}) }
+             OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) })
      RETURN ${PARK_SUMMARY_RETURN}, score ORDER BY score DESC LIMIT toInteger($limit)`,
     {
       vector,
@@ -672,6 +700,10 @@ export async function vibeSearch(
       stateCodes: stateCodes?.length ? stateCodes : null,
       activity: activity ?? null,
       topic: topic ?? null,
+      rv: rvMaxLengthFt,
+      wheelchair: wheelchairAccessible,
+      required: requiredAmenities,
+      maxBortle,
     },
   );
 }

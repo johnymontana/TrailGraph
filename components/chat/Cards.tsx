@@ -2,6 +2,8 @@
 import { Badge, Box, Card, Icon, Text, Stack, HStack, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
 import { LuTriangleAlert } from 'react-icons/lu';
+import { DarkSkyCard, WeatherCard, AstroCard, ConditionsCard, TripDashboardCard } from '../conditions/ConditionCards';
+import { ProvenanceEdges } from '../parks/ProvenanceEdges';
 
 /** Renders a tool's `{kind,data}` output as a structured card (ADR-013, D5). Graph-grounded only. */
 export function ToolCard({ kind, data: raw }: { kind: string; data: unknown }) {
@@ -33,6 +35,27 @@ export function ToolCard({ kind, data: raw }: { kind: string; data: unknown }) {
       return <ItineraryCard data={data} />;
     case 'alert_list':
       return <AlertList data={data} />;
+    case 'dark_sky_card':
+      return <DarkSkyCard data={data} />;
+    case 'weather_card':
+      return <WeatherCard data={data} />;
+    case 'astro_card':
+      return <AstroCard data={data} />;
+    case 'conditions_card':
+      return <ConditionsCard data={data} />;
+    case 'trip_dashboard':
+      return <TripDashboardCard data={data} />;
+    case 'why_this':
+      return (
+        <Card.Root variant="subtle" size="sm" my={2}>
+          <Card.Body p={3}>
+            <Text fontWeight="semibold" fontFamily="heading" mb={2}>
+              Why {(data.park as string) ?? 'this park'}?
+            </Text>
+            <ProvenanceEdges data={data} />
+          </Card.Body>
+        </Card.Root>
+      );
     default:
       return null;
   }
@@ -46,6 +69,12 @@ export function isRenderableToolOutput(kind: string, data: unknown): boolean {
   if (kind === 'node_results') return ((d.results as unknown[])?.length ?? 0) > 0;
   if (kind === 'itinerary_preview') return !!d.trip;
   if (kind === 'alert_list') return ((d.parks as unknown[])?.length ?? 0) > 0;
+  if (kind === 'dark_sky_card') return d.bortleScale != null || !!d.bestMonths || !!d.crowdLevel || !!d.astro;
+  if (kind === 'weather_card') return !!d.condition || ((d.daily as unknown[])?.length ?? 0) > 0;
+  if (kind === 'astro_card') return !!d.moon || !!d.date;
+  if (kind === 'conditions_card') return !!d.parkCode;
+  if (kind === 'trip_dashboard') return ((d.stops as unknown[])?.length ?? 0) > 0;
+  if (kind === 'why_this') return ((d.prefPaths as unknown[])?.length ?? 0) > 0 || ((d.constraints as unknown[])?.length ?? 0) > 0 || !!d.park;
   return false;
 }
 
@@ -60,8 +89,16 @@ function ParkCards({ data }: { data: Record<string, unknown> }) {
   const seen = new Set<string>();
   const parks = raw.filter((p) => (seen.has(p.parkCode) ? false : (seen.add(p.parkCode), true)));
   if (!parks.length) return null;
+  // Constraint-narrowing provenance (ADR-046, Friction #2): make it legible that candidates were
+  // narrowed to the user's saved constraints, rather than reading like a different, looser query.
+  const narrowedBy = (data.narrowedBy as string[] | undefined)?.filter(Boolean) ?? [];
   return (
     <Stack gap={2} my={2}>
+      {narrowedBy.length ? (
+        <Text fontSize="xs" color="fg.muted">
+          Narrowed to parks that fit your constraints: {narrowedBy.join(' · ')}
+        </Text>
+      ) : null}
       {parks.map((p) => (
         <CLink key={p.parkCode} asChild _hover={{ textDecoration: 'none' }} display="block" w="full">
           <NextLink href={`/parks/${p.parkCode}`}>

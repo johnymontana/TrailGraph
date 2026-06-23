@@ -1,6 +1,7 @@
 import { getUserId } from '../../../../../lib/session';
 import { getTrip } from '../../../../../lib/trips';
 import { tripToIcs } from '../../../../../lib/trip-ics';
+import { sunTimesFor } from '../../../../../lib/datasources';
 
 /** ICS calendar export for a trip (C6). */
 export const dynamic = 'force-dynamic';
@@ -21,7 +22,8 @@ export async function GET(req: Request, { params }: Ctx) {
   const trip = await getTrip(userId, id);
   if (!trip) return Response.json({ error: 'not found' }, { status: 404 });
 
-  const ics = tripToIcs(trip, stamps());
+  // Bake the night's dark-sky facts into each event (ADR-048) via the deterministic astro datasource.
+  const ics = tripToIcs(trip, { ...stamps(), sun: (la, ln, iso) => sunTimesFor(la, ln, iso) });
   return new Response(ics, {
     headers: {
       'content-type': 'text/calendar; charset=utf-8',

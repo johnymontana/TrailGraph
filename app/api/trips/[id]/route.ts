@@ -8,6 +8,7 @@ import {
   renameTrip,
   checkTripAlerts,
   tripCost,
+  tripConditions,
   type NewStop,
 } from '../../../../lib/trips';
 import { suggestDays } from '../../../../lib/itinerary';
@@ -40,7 +41,7 @@ export async function POST(req: Request, { params }: Ctx) {
   if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
   const { id } = await params;
   const body = (await req.json()) as {
-    op: 'addStop' | 'removeStop' | 'reorder' | 'alerts' | 'cost' | 'suggestDays' | 'optimize' | 'rename';
+    op: 'addStop' | 'removeStop' | 'reorder' | 'alerts' | 'cost' | 'conditions' | 'suggestDays' | 'optimize' | 'rename';
     stop?: NewStop;
     stopId?: string;
     orderedStopIds?: string[];
@@ -74,6 +75,8 @@ export async function POST(req: Request, { params }: Ctx) {
       return Response.json({ alerts: await checkTripAlerts(userId, id) });
     case 'cost':
       return Response.json({ cost: await tripCost(userId, id) });
+    case 'conditions':
+      return Response.json({ dashboard: await tripConditions(userId, id) });
     case 'optimize': {
       const trip = await getTrip(userId, id);
       if (!trip) return Response.json({ error: 'not found' }, { status: 404 });

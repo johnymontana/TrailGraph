@@ -10,8 +10,10 @@ import { test, expect } from '@playwright/test';
  */
 // `/plan` redirects anonymous users to `/signin` (ADR-038), so it also exercises the sign-in page.
 // `/trails` carries the new client ThemeChips; every route exercises the mounted-gated nav account
-// control (the highest-risk new hydration surface).
-const ROUTES = ['/', '/explore', '/plan', '/me', '/map', '/graph', '/trails', '/signin'];
+// control (the highest-risk new hydration surface). `/parks/yell` (seeded) exercises the new motion
+// client islands — the ParkHero (layoutId + scale-settle) and the global MotionConfig (ADR-044) — plus
+// the astro "Tonight" stat; `/explore` now carries the RankPanel sliders (ADR-046).
+const ROUTES = ['/', '/explore', '/plan', '/me', '/map', '/graph', '/trails', '/signin', '/parks/yell'];
 const HYDRATION_RX = /hydrat|did not match|text content does not match|tree hydrated|css-\w+/i;
 
 for (const route of ROUTES) {

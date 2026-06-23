@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { neighborhoodToNvl, parkNodeNav, labelColor, HUB_DEGREE, trailToNvl, TRAIL_THEME_PREFIX } from './graph-nvl';
+import { neighborhoodToNvl, parkNodeNav, labelColor, HUB_DEGREE, trailToNvl, TRAIL_THEME_PREFIX, contextToNvl, isContextParkId } from './graph-nvl';
 
 describe('labelColor (per-park graph node palette)', () => {
   it('maps known labels to distinct colors and unknowns to a neutral gray', () => {
@@ -91,5 +91,78 @@ describe('parkNodeNav (per-park graph click routing)', () => {
   it('returns null for non-navigable nodes', () => {
     expect(parkNodeNav({ kind: 'none' })).toBeNull();
     expect(parkNodeNav(undefined)).toBeNull();
+  });
+});
+
+describe('contextToNvl (/me context graph + two-graph overlay merge keys, ADR-047)', () => {
+  const memory = {
+    preferences: [
+      { kind: 'activity' as const, name: 'Stargazing', category: 'activity', value: 'dark skies', feedback: null, weight: 2 },
+      { kind: 'topic' as const, name: 'Geology', category: 'topic', value: 'rocks', feedback: null, weight: null },
+    ],
+    considered: [{ parkCode: 'grca', name: 'Grand Canyon', source: 'viewed' }],
+    planned: [{ tripId: 't1', name: 'Desert loop' }],
+    travel: { wheelchair: true, rvMaxLengthFt: 22, requiredAmenities: ['Restrooms'] },
+    passes: [{ id: 'atb-annual', name: 'America the Beautiful' }],
+    stamps: [{ id: 's1', label: 'Canyon stamp' }],
+    availability: { start: '2026-02-10', end: '2026-02-20' },
+  };
+
+  it('anchors a "You" node and links every bridge with its literal relationship caption', () => {
+    const { nodes, rels } = contextToNvl(memory);
+    expect(nodes.find((n) => n.id === 'ctx:You')).toBeTruthy();
+    const captions = new Set(rels.map((r) => r.caption));
+    for (const t of ['PREFERS', 'CONSIDERED', 'PLANNED', 'TRAVELS_WITH', 'REQUIRES', 'HOLDS', 'COLLECTED', 'AVAILABLE']) {
+      expect(captions.has(t)).toBe(true);
+    }
+    // every edge originates at You
+    expect(rels.every((r) => r.from === 'ctx:You')).toBe(true);
+  });
+
+  it('keys a CONSIDERED park by its BARE parkCode so it merges with the domain graph', () => {
+    const { nodes } = contextToNvl(memory);
+    const grca = nodes.find((n) => n.id === 'grca');
+    expect(grca).toBeTruthy();
+    expect(grca!.caption).toBe('Grand Canyon');
+    expect(isContextParkId('grca')).toBe(true); // bare → navigable park id
+  });
+
+  it('prefixes non-park context nodes with ctx: so they never collide with a parkCode', () => {
+    const { nodes } = contextToNvl(memory);
+    expect(nodes.find((n) => n.id === 'ctx:Activity:Stargazing')).toBeTruthy();
+    expect(nodes.find((n) => n.id === 'ctx:Topic:Geology')).toBeTruthy();
+    expect(nodes.find((n) => n.id === 'ctx:Constraint:travel')).toBeTruthy();
+    expect(isContextParkId('ctx:Activity:Stargazing')).toBe(false);
+  });
+
+  it('renders just the You node for empty memory (nothing to overlay)', () => {
+    const empty = { preferences: [], considered: [], planned: [], travel: { wheelchair: false, rvMaxLengthFt: null, requiredAmenities: [] }, passes: [], stamps: [], availability: { start: null, end: null } };
+    const { nodes, rels } = contextToNvl(empty);
+    expect(nodes).toHaveLength(1);
+    expect(rels).toHaveLength(0);
+  });
+});
+
+describe('contextToNvl edge de-duplication (review finding)', () => {
+  it('does not emit duplicate edges when memory contains duplicate prefs/amenities', () => {
+    const mem = {
+      preferences: [
+        { kind: 'activity' as const, name: 'Stargazing', category: 'activity', value: 'a', feedback: null, weight: null },
+        { kind: 'activity' as const, name: 'Stargazing', category: 'activity', value: 'b', feedback: null, weight: null },
+      ],
+      considered: [],
+      planned: [],
+      travel: { wheelchair: false, rvMaxLengthFt: null, requiredAmenities: ['Restrooms', 'Restrooms'] },
+      passes: [],
+      stamps: [],
+      availability: { start: null, end: null },
+    };
+    const { nodes, rels } = contextToNvl(mem);
+    // one Stargazing node, one Restrooms node (deduped), and exactly one edge each.
+    expect(nodes.filter((n) => n.id === 'ctx:Activity:Stargazing')).toHaveLength(1);
+    expect(nodes.filter((n) => n.id === 'ctx:Amenity:Restrooms')).toHaveLength(1);
+    const ids = rels.map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length); // no duplicate rel ids
+    expect(rels.filter((r) => r.to === 'ctx:Activity:Stargazing')).toHaveLength(1);
   });
 });

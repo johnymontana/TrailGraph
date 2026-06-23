@@ -2,8 +2,9 @@ import { Box, Button, Container } from '@chakra-ui/react';
 import NextLink from 'next/link';
 import { LuBrain } from 'react-icons/lu';
 import { getServerUserId } from '../../lib/session';
-import { getUserMemory } from '../../lib/memory-graph';
+import { getUserMemory, userContextGraph } from '../../lib/memory-graph';
 import { MemoryList } from '../../components/memory/MemoryList';
+import { ContextGraph } from '../../components/memory/ContextGraph';
 import { CollectivePanel } from '../../components/memory/CollectivePanel';
 import { PageHeader } from '../../components/ui/page-header';
 import { EmptyState } from '../../components/ui/empty-state';
@@ -28,7 +29,7 @@ export default async function MePage() {
       </Box>
     );
   }
-  const memory = await getUserMemory(userId);
+  const [memory, context] = await Promise.all([getUserMemory(userId), userContextGraph(userId).catch(() => null)]);
   return (
     <Box>
       <PageHeader
@@ -38,6 +39,7 @@ export default async function MePage() {
         contour
       />
       <Container maxW="3xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 10 }}>
+        {context ? <ContextGraph nodes={context.nodes} rels={context.rels} /> : null}
         <MemoryList initial={memory} />
         <CollectivePanel />
       </Container>
