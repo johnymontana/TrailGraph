@@ -5,6 +5,10 @@ import { defineConfig, devices } from '@playwright/test';
  * Covers the public surface end-to-end; authenticated trip CRUD is covered by integration tests
  * (a magic-link e2e is brittle — tracked as a follow-up via a gated test-login route).
  */
+// Port is configurable (E2E_PORT) so the gate can run when the default dev port (3000) is busy.
+const PORT = process.env.E2E_PORT || '3000';
+const BASE_URL = `http://localhost:${PORT}`;
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
@@ -18,7 +22,7 @@ export default defineConfig({
   timeout: 60_000,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: BASE_URL,
     trace: 'on-first-retry',
     // Software WebGL so MapLibre renders in headless CI.
     launchOptions: { args: ['--enable-unsafe-swiftshader', '--use-gl=swiftshader'] },
@@ -29,8 +33,8 @@ export default defineConfig({
     // *false positives* (React dev double-renders + on-demand style insertion) that the hydration gate
     // would otherwise flag even though production hydrates cleanly — see hydration.spec.ts. A prebuilt
     // server is the truest signal and removes first-hit route-compile latency.
-    command: 'pnpm build && pnpm start',
-    url: 'http://localhost:3000',
+    command: `pnpm build && pnpm start --port ${PORT}`,
+    url: BASE_URL,
     // Reuse only when explicitly requested (e.g., PLAYWRIGHT_REUSE_EXISTING_SERVER=1).
     reuseExistingServer: process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === '1',
     // build + start headroom (build compiles the whole app before the server is ready).

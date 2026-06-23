@@ -158,8 +158,11 @@ export async function rankParks(params: RankParams): Promise<{ items: RankedPark
     OPTIONAL MATCH (u:User {userId:$userId})-[pr:PREFERS]->(d)
       WHERE coalesce(pr.weight, 1.0) > 0 AND ((p)-[:OFFERS]->(d) OR (p)-[:HAS_TOPIC]->(d))
     WITH p, sum(coalesce(pr.weight, 0.0)) AS prefScore, count(DISTINCT d) AS matches, collect(DISTINCT d.name) AS matched
+    // crowdTolerance is a SIGNED adjustment, not a boost-only term: quiet parks gain, busy parks are
+    // penalized, so raising the slider visibly demotes 'high'/'very high'-crowd parks instead of just
+    // nudging the quiet ones up (which prefScore would dominate). Soft — never excludes (ADR-045/046).
     WITH p, matches, matched,
-         prefScore + (CASE p.crowdLevel WHEN 'low' THEN 3 WHEN 'moderate' THEN 2 WHEN 'high' THEN 1 ELSE 0 END)
+         prefScore + (CASE p.crowdLevel WHEN 'low' THEN 2 WHEN 'moderate' THEN 1 WHEN 'high' THEN -2 WHEN 'very high' THEN -4 ELSE 0 END)
                      * coalesce($crowdTolerance, 0.0) AS score
     RETURN ${PARK_SUMMARY_RETURN}, p.crowdLevel AS crowdLevel, p.bortleScale AS bortleScale, score, matches, matched
     ORDER BY score DESC, p.fullName ASC

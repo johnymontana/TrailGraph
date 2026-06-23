@@ -49,14 +49,18 @@ describeIntegration('rankParks (Neo4j)', () => {
     expect(codes).toContain('yell');
   });
 
-  it('crowd-tolerance produces a monotonically non-increasing score ordering', async () => {
+  it('crowd-tolerance demotes busy parks: signed adjustment, monotonic ordering', async () => {
     const { items } = await rankParks({ crowdTolerance: 1, limit: 200 });
     const scores = items.map((p) => p.score);
     expect(scores.every((s, i) => i === 0 || scores[i - 1] >= s)).toBe(true);
-    // a low-crowd park must never rank below a very-high-crowd park under the boost
+    // With no userId (prefScore 0) the ordering is the signed crowd adjustment alone: low > moderate >
+    // (unknown) > high > very high — so a low-crowd park must outrank a busy one, and busy parks get a
+    // negative score rather than a zero "no boost".
     const firstLow = items.findIndex((p) => p.crowdLevel === 'low');
     const firstVeryHigh = items.findIndex((p) => p.crowdLevel === 'very high');
     if (firstLow !== -1 && firstVeryHigh !== -1) expect(firstLow).toBeLessThan(firstVeryHigh);
+    const veryHigh = items.find((p) => p.crowdLevel === 'very high');
+    if (veryHigh) expect(veryHigh.score).toBeLessThan(0); // penalized, not merely un-boosted
   });
 
   it('pages: items ≤ limit and total is the full filtered count', async () => {

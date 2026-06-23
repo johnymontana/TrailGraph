@@ -80,7 +80,10 @@ export function MemoryFormingLayer() {
                   r={11}
                   fill={c.trail}
                   initial={{ scale: reduce ? 1 : 0 }}
-                  animate={reduce ? { scale: 1 } : { scale: [0, 1.18, 1] }}
+                  // Two keyframes only — Motion springs support exactly two. The bouncy spring's low
+                  // damping creates the overshoot "pop" itself (a 3-keyframe [0,1.18,1] under a spring
+                  // throws "Only two keyframes currently supported with spring").
+                  animate={{ scale: 1 }}
                   transition={reduce ? { duration: 0 } : { ...springs.bouncy, delay: durations.fast }}
                   style={{ originX: '220px', originY: '22px' }}
                 />

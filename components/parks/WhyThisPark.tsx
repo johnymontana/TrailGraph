@@ -38,7 +38,8 @@ export function WhyThisPark({ parkCode, parkName }: { parkCode: string; parkName
             <Popover.Arrow>
               <Popover.ArrowTip />
             </Popover.Arrow>
-            <Popover.Body>
+            {/* Cap height + scroll so a rich user's many preference paths don't overgrow the viewport. */}
+            <Popover.Body maxH="min(60vh, 420px)" overflowY="auto">
               <Popover.Title fontWeight="semibold" fontFamily="heading" mb={2}>
                 Why {parkName}?
               </Popover.Title>

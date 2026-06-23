@@ -37,8 +37,9 @@ describe('rankParks (live constraint re-ranking, ADR-046)', () => {
     expect(q).toContain('(p)-[:LOCATED_IN]->(:State {code:$stateCode})');
     // soft preference join must be OPTIONAL so cold-start parks still appear (score 0)
     expect(q).toContain('OPTIONAL MATCH (u:User {userId:$userId})-[pr:PREFERS]->(d)');
-    // crowd-tolerance boost over the existing crowdLevel
-    expect(q).toMatch(/CASE p\.crowdLevel WHEN 'low' THEN 3 WHEN 'moderate' THEN 2 WHEN 'high' THEN 1 ELSE 0 END/);
+    // crowd tolerance is a SIGNED adjustment over the existing crowdLevel: quiet parks gain, busy
+    // parks are penalized (so the slider visibly demotes crowded parks, not just nudges quiet ones up).
+    expect(q).toMatch(/CASE p\.crowdLevel WHEN 'low' THEN 2 WHEN 'moderate' THEN 1 WHEN 'high' THEN -2 WHEN 'very high' THEN -4 ELSE 0 END/);
     expect(q).toContain('coalesce($crowdTolerance, 0.0)');
     expect(params).toMatchObject({
       userId: 'u1',
