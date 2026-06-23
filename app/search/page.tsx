@@ -146,7 +146,7 @@ function Empty() {
 function NodeCard({ hit, type }: { hit: SemanticHit; type: 'place' | 'person' }) {
   const park = hit.parks[0];
   const card = (
-    <Card.Root variant={park ? 'interactive' : 'outline'} overflow="hidden" h="100%">
+    <Card.Root variant={park ? 'interactive' : 'outline'} overflow="hidden" w="full" h="100%">
       {type === 'place' ? (
         <Box h="140px" position="relative" overflow="hidden">
           {hit.image ? (
@@ -181,7 +181,7 @@ function NodeCard({ hit, type }: { hit: SemanticHit; type: 'place' | 'person' })
   );
   // Navigable target is the related park page; non-linked results render as a static card.
   return park ? (
-    <CLink asChild _hover={{ textDecoration: 'none' }}>
+    <CLink asChild _hover={{ textDecoration: 'none' }} display="block" w="full" h="full">
       <NextLink href={`/parks/${park.parkCode}`}>{card}</NextLink>
     </CLink>
   ) : (

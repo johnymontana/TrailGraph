@@ -15,9 +15,9 @@ export function ParkCard({ park, miles }: { park: ParkSummary & { miles?: number
     stateList.length > 3 ? `${stateList.slice(0, 3).join(', ')} +${stateList.length - 3}` : stateList.join(', ');
 
   return (
-    <CLink asChild _hover={{ textDecoration: 'none' }} h="full">
+    <CLink asChild _hover={{ textDecoration: 'none' }} display="block" w="full" h="full">
       <NextLink href={`/parks/${park.parkCode}`}>
-        <Card.Root variant="interactive" overflow="hidden" minW={0} h="full">
+        <Card.Root variant="interactive" overflow="hidden" minW={0} w="full" h="full">
           <Box h="200px" position="relative" overflow="hidden">
             {park.image ? (
               <NextImage

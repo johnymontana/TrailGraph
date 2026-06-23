@@ -63,9 +63,9 @@ function ParkCards({ data }: { data: Record<string, unknown> }) {
   return (
     <Stack gap={2} my={2}>
       {parks.map((p) => (
-        <CLink key={p.parkCode} asChild _hover={{ textDecoration: 'none' }}>
+        <CLink key={p.parkCode} asChild _hover={{ textDecoration: 'none' }} display="block" w="full">
           <NextLink href={`/parks/${p.parkCode}`}>
-            <Card.Root variant="interactive" size="sm">
+            <Card.Root variant="interactive" size="sm" w="full">
               <Card.Body p={3}>
                 <HStack gap={2} wrap="wrap">
                   <Text as="span" fontWeight="semibold" fontFamily="heading">{p.name}</Text>
