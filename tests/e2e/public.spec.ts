@@ -64,7 +64,9 @@ test('park detail renders the monthly visitation chart (§5b, Chakra charts)', a
 
 test('explore dark-sky facet filters to certified parks (§5a)', async ({ page }) => {
   await page.goto('/explore');
-  await page.getByLabel('Dark-sky parks').check();
+  // The Chakra Checkbox hides the real <input> off-screen and the visual control intercepts pointer
+  // events, so toggle it the way a user would — by clicking the label — instead of `.check()` on the input.
+  await page.getByText('Dark-sky parks').click();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page).toHaveURL(/darkSky=1/);
   await expect(page.getByText('Grand Canyon National Park', { exact: true })).toBeVisible();
