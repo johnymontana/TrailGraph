@@ -13,7 +13,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "theme:typegen": "chakra typegen ./theme/index.ts",
-    "postinstall": "chakra typegen ./theme/index.ts",
+    "postinstall": "node -e \"const { existsSync } = require('node:fs'); const { join } = require('node:path'); const cli = join(process.cwd(), 'node_modules', '@chakra-ui', 'cli', 'bin', 'index.js'); if (existsSync(cli)) require('node:child_process').execFileSync(process.execPath, [cli, 'typegen', './theme/index.ts'], { stdio: 'inherit' });\"",
     "db:migrate": "tsx db/migrate.ts",
     "db:verify": "tsx db/verify.ts",
     "nams:spike": "tsx scripts/spike-nams-external-neo4j.ts",

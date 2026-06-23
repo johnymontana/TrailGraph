@@ -181,7 +181,7 @@ test('explore cards surface dark-sky ⭐ and accessibility ♿ badges (ADR-039 P
 test('global footer shows the canonical NPS disclaimer + brand', async ({ page }) => {
   await page.goto('/');
   // The redesign centralizes the NPS disclaimer in a global <footer> (role contentinfo), shown on
-  // content routes (hidden on the full-screen map/graph/plan routes via FooterGate).
+  // content routes (hidden on the full-screen map/graph/plan routes via CSS: body:has([data-fullscreen]) footer).
   const footer = page.getByRole('contentinfo');
   await expect(footer).toBeVisible();
   await expect(footer.getByRole('link', { name: /NPS\.gov/i })).toBeVisible();

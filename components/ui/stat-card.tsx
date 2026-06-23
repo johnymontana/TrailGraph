@@ -15,7 +15,7 @@ export interface StatCardProps {
   tone?: 'brand' | 'accent' | 'neutral';
 }
 
-const toneColor = { brand: 'brand.fg', accent: 'accent.fg', neutral: 'fg.default' } as const;
+const toneColor = { brand: 'brand.fg', accent: 'accent.fg', neutral: 'fg' } as const;
 
 /**
  * Compact "at a glance" stat tile — used in the park-detail stats row and trip cost/alert summaries.

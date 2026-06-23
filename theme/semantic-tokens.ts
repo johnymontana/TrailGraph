@@ -7,6 +7,7 @@
  * etc. exactly like the built-in palettes.
  */
 import { defineSemanticTokens } from '@chakra-ui/react';
+import { ink } from './colors';
 
 /** Build the standard colorPalette slot set for a brand scale (light base + dark override). */
 function palette(name: 'pine' | 'trail' | 'sand') {
@@ -46,12 +47,12 @@ export const semanticTokens = defineSemanticTokens({
 
     // Global surfaces — warm parchment in light, warm near-black in dark.
     bg: {
-      DEFAULT: { value: { base: 'white', _dark: '#14130F' } },
-      canvas: { value: { base: '{colors.sand.50}', _dark: '#14130F' } },
-      subtle: { value: { base: '{colors.sand.100}', _dark: '#252219' } },
-      muted: { value: { base: '{colors.sand.200}', _dark: '#2F2B20' } },
-      emphasized: { value: { base: '{colors.sand.300}', _dark: '#3A3528' } },
-      panel: { value: { base: 'white', _dark: '#1C1A15' } },
+      DEFAULT: { value: { base: 'white', _dark: ink.canvas } },
+      canvas: { value: { base: '{colors.sand.50}', _dark: ink.canvas } },
+      subtle: { value: { base: '{colors.sand.100}', _dark: ink.subtle } },
+      muted: { value: { base: '{colors.sand.200}', _dark: ink.muted } },
+      emphasized: { value: { base: '{colors.sand.300}', _dark: ink.emphasized } },
+      panel: { value: { base: 'white', _dark: ink.panel } },
     },
 
     // Text.
@@ -64,8 +65,8 @@ export const semanticTokens = defineSemanticTokens({
 
     // Borders.
     border: {
-      DEFAULT: { value: { base: '{colors.sand.200}', _dark: '#343024' } },
-      muted: { value: { base: '{colors.sand.100}', _dark: '#2A2720' } },
+      DEFAULT: { value: { base: '{colors.sand.200}', _dark: ink.border } },
+      muted: { value: { base: '{colors.sand.100}', _dark: ink.borderSubtle } },
       emphasized: { value: { base: '{colors.sand.300}', _dark: '{colors.sand.800}' } },
     },
   },

@@ -31,7 +31,8 @@ export default defineConfig({
     // server is the truest signal and removes first-hit route-compile latency.
     command: 'pnpm build && pnpm start',
     url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
+    // Reuse only when explicitly requested (e.g., PLAYWRIGHT_REUSE_EXISTING_SERVER=1).
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === '1',
     // build + start headroom (build compiles the whole app before the server is ready).
     timeout: 300_000,
     // e2e needs no agent/AI Gateway — build/run Next without the eve service. E2E_TEST_MODE enables

@@ -108,7 +108,7 @@ export default function SignInPage() {
                 </Box>
                 <Text fontWeight="semibold" fontFamily="heading">Check your inbox</Text>
                 <Text fontSize="sm" color="fg.muted">
-                  We sent a sign-in link to <Text as="span" fontWeight="medium" color="fg.default">{email.trim()}</Text>.
+                  We sent a sign-in link to <Text as="span" fontWeight="medium" color="fg">{email.trim()}</Text>.
                 </Text>
               </Stack>
             ) : (

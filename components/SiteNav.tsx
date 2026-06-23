@@ -92,7 +92,7 @@ export function SiteNav() {
           <NextLink href="/">
             <HStack gap={2}>
               <Icon as={LuMountainSnow} color="brand.solid" boxSize={6} />
-              <Text fontFamily="heading" fontWeight="bold" color="fg.default" letterSpacing="0.06em">
+              <Text fontFamily="heading" fontWeight="bold" color="fg" letterSpacing="0.06em">
                 TRAILGRAPH
               </Text>
             </HStack>
@@ -207,7 +207,7 @@ export function SiteNav() {
                             py={2.5}
                             rounded="l2"
                             fontWeight={active ? 'semibold' : 'medium'}
-                            color={active ? 'brand.fg' : 'fg.default'}
+                            color={active ? 'brand.fg' : 'fg'}
                             bg={active ? 'brand.subtle' : 'transparent'}
                             _hover={{ textDecoration: 'none', bg: 'bg.subtle' }}
                           >
@@ -228,7 +228,7 @@ export function SiteNav() {
                               px={3}
                               py={2.5}
                               rounded="l2"
-                              color="fg.default"
+                              color="fg"
                               _hover={{ textDecoration: 'none', bg: 'bg.subtle' }}
                             >
                               <NextLink href={l.href} onClick={() => setDrawerOpen(false)}>{l.label}</NextLink>
@@ -240,7 +240,7 @@ export function SiteNav() {
                             px={3}
                             py={2.5}
                             rounded="l2"
-                            color="fg.default"
+                            color="fg"
                             _hover={{ bg: 'bg.subtle' }}
                             onClick={handleSignOut}
                           >
