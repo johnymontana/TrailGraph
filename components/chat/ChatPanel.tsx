@@ -5,6 +5,8 @@ import { useEveAgent } from 'eve/react';
 import { LuSend, LuSparkles } from 'react-icons/lu';
 import { ToolCard, isRenderableToolOutput } from './Cards';
 import { Markdown } from './Markdown';
+import { ToolActivityPill } from './ToolActivityPill';
+import { summarizeActivity, type ActivityPart } from '../../lib/tool-activity';
 
 const SUGGESTIONS = [
   '4 days, mountains and easy hikes near Montana',
@@ -60,6 +62,16 @@ export function ChatPanel() {
     const seenSig = new Set<string>();
     const nodes: ReactNode[] = [];
 
+    // "How I worked" header (ADR §7.7): expose the tool calls as a disclosure pill, with reasoning
+    // behind an optional nested toggle. Reasoning is NO LONGER rendered inline below — it lives in the
+    // pill. Source = the stream parts, never model prose.
+    const activity = summarizeActivity(parts as unknown as ActivityPart[]);
+    if (activity.toolCalls.length > 0 || activity.reasoning) {
+      nodes.push(
+        <ToolActivityPill key="activity" toolCalls={activity.toolCalls} reasoning={activity.reasoning} streaming={streaming} />,
+      );
+    }
+
     parts.forEach((part, j) => {
       if (part.type === 'text' && part.text?.trim()) {
         // Render Markdown incrementally even while streaming (R4 §2.4) so headings/tables/bold appear
@@ -67,8 +79,6 @@ export function ChatPanel() {
         // `###`/`|`/`**`. A half-typed token renders as literal for a frame, far better than the old
         // multi-second raw-syntax window.
         nodes.push(<Markdown key={j}>{part.text}</Markdown>);
-      } else if (part.type === 'reasoning' && part.text) {
-        nodes.push(<Text key={j} fontSize="xs" color="fg.muted" fontStyle="italic">{part.text}</Text>);
       } else if (part.type === 'dynamic-tool' && part.state === 'output-available') {
         const out = part.output as { kind?: string; data?: unknown } | undefined;
         if (!out?.kind) return;
