@@ -103,10 +103,15 @@ function render(
     (s): s is TripMapStop & { lat: number; lng: number } => s.lat != null && s.lng != null,
   );
   const coords: Coord[] = located.map((s) => [s.lng, s.lat]);
-  const fullData = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } } as const;
+  // GeoJSON spec: LineString requires ≥2 positions. Use an empty FeatureCollection when there are fewer.
+  const safeData = (cs: Coord[]) =>
+    cs.length >= 2
+      ? { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: cs } }
+      : { type: 'FeatureCollection' as const, features: [] as never[] };
+  const fullData = safeData(coords);
   const setLine = (cs: Coord[]) => {
     const src = map.getSource('trip-line') as maplibregl.GeoJSONSource | undefined;
-    src?.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: cs } });
+    src?.setData(safeData(cs));
   };
 
   // Ensure the source/layer exist.

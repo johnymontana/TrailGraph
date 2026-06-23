@@ -37,6 +37,7 @@ export function ParkHero({
       css={{ viewTransitionName: `park-${parkCode}-hero` }}
     >
       <motion.div
+        layoutId={`park-${parkCode}-hero`}
         initial={{ scale: 1.06 }}
         animate={{ scale: 1 }}
         transition={springs.morph}
