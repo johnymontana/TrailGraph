@@ -1,8 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Box, Stack, Heading, Text, Input, Button, Flex, HStack, IconButton, Separator, Badge } from '@chakra-ui/react';
+import { LuX } from 'react-icons/lu';
 import { TripMap } from './TripMap';
 import { ParkSearchInput } from './ParkSearchInput';
+import { toast } from '../../lib/toast';
 
 /** Itinerary builder (C1-C4) — drives the Trip service via /api/trips. Fully functional without the agent. */
 interface Stop {
@@ -184,7 +186,19 @@ export function TripBuilder() {
     });
     if (res.ok) {
       const { url } = (await res.json()) as { url: string };
-      setShareUrl(`${window.location.origin}${url}`);
+      const full = `${window.location.origin}${url}`;
+      setShareUrl(full);
+      let copied = false;
+      if (navigator.clipboard?.writeText) {
+        copied = await navigator.clipboard.writeText(full).then(() => true).catch(() => false);
+      }
+      if (copied) {
+        toast.success('Share link copied', 'A read-only link to this trip is on your clipboard.');
+      } else {
+        toast.success('Share link ready', 'Copy the read-only link shown below.');
+      }
+    } else {
+      toast.error("Couldn't create share link", 'Please try again in a moment.');
     }
   }
   async function optimizeRoute() {
@@ -222,7 +236,7 @@ export function TripBuilder() {
       <Heading size="md">Trips</Heading>
       <Flex gap={2}>
         <Input size="sm" placeholder="New trip name" value={newName} onChange={(e) => setNewName(e.target.value)} />
-        <Button size="sm" onClick={create} colorPalette="blue">Create</Button>
+        <Button size="sm" onClick={create} colorPalette="pine">Create</Button>
       </Flex>
       <HStack wrap="wrap">
         {trips.map((t) => (
@@ -244,7 +258,7 @@ export function TripBuilder() {
                 onChange={(e) => setNameDraft(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && rename()}
               />
-              <Button size="xs" colorPalette="blue" onClick={rename}>Save</Button>
+              <Button size="xs" colorPalette="pine" onClick={rename}>Save</Button>
               <Button size="xs" variant="ghost" onClick={() => setEditingName(false)}>Cancel</Button>
             </HStack>
           ) : (
@@ -277,7 +291,7 @@ export function TripBuilder() {
               return (
                 <Box key={s.id}>
                   {day && day !== prevDay ? (
-                    <Text fontSize="xs" fontWeight="bold" color="blue.600" mt={2}>
+                    <Text fontSize="xs" fontWeight="bold" color="brand.fg" mt={2}>
                       Day {day}
                     </Text>
                   ) : null}
@@ -285,8 +299,8 @@ export function TripBuilder() {
                     <Text fontSize="sm" flex="1">
                       {i + 1}. {stopLabel(s)}
                     </Text>
-                    <IconButton size="xs" variant="ghost" aria-label={`Remove ${stopLabel(s)}`} onClick={() => removeStop(s.id)}>
-                      ✕
+                    <IconButton size="xs" variant="ghost" colorPalette="red" aria-label={`Remove ${stopLabel(s)}`} onClick={() => removeStop(s.id)}>
+                      <LuX />
                     </IconButton>
                   </HStack>
                   {s.driveTo ? (
@@ -323,14 +337,14 @@ export function TripBuilder() {
               </HStack>
               {shareUrl ? (
                 <Text fontSize="xs" color="fg.muted">
-                  Read-only link: <Text as="span" color="blue.600">{shareUrl}</Text>
+                  Read-only link: <Text as="span" color="brand.fg">{shareUrl}</Text>
                 </Text>
               ) : null}
             </Stack>
           ) : null}
           {alerts ? (
             alerts.length === 0 ? (
-              <Text fontSize="sm" color="green.600">No active Closure/Danger alerts. ✓</Text>
+              <Text fontSize="sm" color="green.fg">No active Closure/Danger alerts. ✓</Text>
             ) : (
               <Stack gap={1}>
                 {alerts.map((a, i) => (
@@ -348,13 +362,13 @@ export function TripBuilder() {
             )
           ) : null}
           {cost ? (
-            <Box borderWidth="1px" borderRadius="md" p={3}>
+            <Box borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={3}>
               <HStack mb={1}>
                 <Text fontWeight="semibold" flex="1">Estimated entrance fees</Text>
                 <Text fontWeight="bold">${cost.total.toFixed(0)}</Text>
               </HStack>
               {cost.holdsAtb ? (
-                <Text fontSize="xs" color="green.600">
+                <Text fontSize="xs" color="green.fg">
                   Covered by your America the Beautiful annual pass. ✓
                 </Text>
               ) : cost.atbSaves ? (
@@ -366,7 +380,7 @@ export function TripBuilder() {
               )}
             </Box>
           ) : null}
-          {costErr ? <Text fontSize="sm" color="red.600">{costErr}</Text> : null}
+          {costErr ? <Text fontSize="sm" color="red.fg">{costErr}</Text> : null}
         </>
       ) : (
         <Text color="fg.muted" fontSize="sm">Create or select a trip to start building an itinerary.</Text>

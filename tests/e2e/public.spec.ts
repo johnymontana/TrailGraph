@@ -11,7 +11,8 @@ test('landing page renders the value prop and nav', async ({ page }) => {
 
 test('explore lists seeded parks', async ({ page }) => {
   await page.goto('/explore');
-  await expect(page.getByRole('heading', { name: 'Explore the National Parks' })).toBeVisible();
+  // PageHeader h1 after the redesign (was "Explore the National Parks").
+  await expect(page.getByRole('heading', { name: 'Find your park' })).toBeVisible();
   await expect(page.getByText('Yellowstone National Park')).toBeVisible();
 });
 
@@ -63,7 +64,9 @@ test('park detail renders the monthly visitation chart (§5b, Chakra charts)', a
 
 test('explore dark-sky facet filters to certified parks (§5a)', async ({ page }) => {
   await page.goto('/explore');
-  await page.getByLabel('Dark-sky parks').check();
+  // The Chakra Checkbox hides the real <input> off-screen and the visual control intercepts pointer
+  // events, so toggle it the way a user would — by clicking the label — instead of `.check()` on the input.
+  await page.getByText('Dark-sky parks').click();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page).toHaveURL(/darkSky=1/);
   await expect(page.getByText('Grand Canyon National Park', { exact: true })).toBeVisible();
@@ -143,13 +146,16 @@ test('mobile nav exposes the hamburger menu (CSS-responsive SiteNav, R3 §4 carr
   const hamburger = page.getByRole('button', { name: 'Open menu' });
   await expect(hamburger).toBeVisible();
   await hamburger.click();
-  await expect(page.getByRole('menuitem', { name: 'Explore' })).toBeVisible();
+  // The mobile menu is now a Drawer (dialog) of links, not a Menu of menuitems. Scope to the dialog so
+  // the (display:none) desktop "Explore" link doesn't create a strict-mode ambiguity.
+  await expect(page.getByRole('dialog').getByRole('link', { name: 'Explore', exact: true })).toBeVisible();
 });
 
 test('your-memory page gates on sign-in', async ({ page }) => {
   await page.goto('/me');
-  await expect(page.getByRole('heading', { name: 'Your memory' })).toBeVisible();
-  // A "Sign in" link appears in both the nav and the gate prompt — assert at least one is visible.
+  // Signed-out /me now renders a branded empty state (EmptyState title isn't a heading element).
+  await expect(page.getByText(/Your memory lives here/i)).toBeVisible();
+  // A "Sign in" affordance appears in both the nav and the gate CTA — assert at least one is visible.
   await expect(page.getByRole('link', { name: 'Sign in' }).first()).toBeVisible();
 });
 
@@ -174,6 +180,15 @@ test('explore cards surface dark-sky ⭐ and accessibility ♿ badges (ADR-039 P
   await expect(page.getByTitle('Wheelchair-accessible camping').first()).toBeVisible();
 });
 
+test('global footer shows the canonical NPS disclaimer + brand', async ({ page }) => {
+  await page.goto('/');
+  // The redesign centralizes the NPS disclaimer in a global <footer> (role contentinfo), shown on
+  // content routes (hidden on the full-screen map/graph/plan routes via CSS: body:has([data-fullscreen]) footer).
+  const footer = page.getByRole('contentinfo');
+  await expect(footer).toBeVisible();
+  await expect(footer.getByRole('link', { name: /NPS\.gov/i })).toBeVisible();
+});
+
 test('image-less park card shows the branded placeholder (ADR-039 #11)', async ({ page }) => {
   await page.goto('/explore');
   // grca has no dataset image → the deterministic placeholder renders "🏞️ <name>".
@@ -182,7 +197,8 @@ test('image-less park card shows the branded placeholder (ADR-039 #11)', async (
 
 test('trails: theme chips render and a person trail shows the NVL mini-graph + parks (ADR-039 P1.5)', async ({ page }) => {
   await page.goto('/trails');
-  await expect(page.getByRole('heading', { name: 'Thematic trails' })).toBeVisible();
+  // PageHeader h1 after the redesign ("Thematic trails" is now the eyebrow).
+  await expect(page.getByRole('heading', { name: 'Follow a story across the parks' })).toBeVisible();
   // Ferdinand Hayden is seeded across yell + glac (≥2 parks → a People chip).
   const chip = page.getByRole('link', { name: /Ferdinand Hayden/ });
   await expect(chip).toBeVisible();

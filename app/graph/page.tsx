@@ -25,7 +25,7 @@ export default async function GraphPage({ searchParams }: { searchParams: Promis
   ]);
   const highlight = trailTheme ? trail.map((p) => p.parkCode) : (mem?.considered.map((c) => c.parkCode) ?? []);
   return (
-    <Box position="fixed" top="57px" left={0} right={0} bottom={0}>
+    <Box position="fixed" top="57px" left={0} right={0} bottom={0} data-fullscreen>
       <Box position="absolute" top={3} left={3} zIndex={1} bg="bg.panel" borderWidth="1px" borderRadius="md" px={3} py={2} shadow="md" maxW="sm">
         <Heading as="h1" size="sm">The park graph</Heading>
         <Text fontSize="xs" color="fg.muted">

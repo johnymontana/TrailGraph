@@ -1,7 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
 import NextLink from 'next/link';
-import { Box, HStack, Stack, Text, Button, CloseButton } from '@chakra-ui/react';
+import { Box, CloseButton, HStack, Icon, Stack, Text, Button } from '@chakra-ui/react';
+import { LuSparkles } from 'react-icons/lu';
+import { heroContourTexture } from '../theme/textures';
 
 const DISMISS_KEY = 'trailgraph:firstRunBannerDismissed';
 
@@ -25,20 +27,34 @@ export function FirstRunBanner() {
   }
 
   return (
-    <Box borderWidth="1px" borderRadius="lg" bg="bg.subtle" p={4} mb={10} position="relative">
+    <Box
+      borderWidth="1px"
+      borderColor="brand.muted"
+      borderRadius="l2"
+      bg="brand.subtle"
+      backgroundImage={heroContourTexture}
+      p={5}
+      position="relative"
+      overflow="hidden"
+    >
       <HStack justify="space-between" align="start" gap={4}>
-        <Stack gap={3}>
-          <Box>
-            <Text fontWeight="semibold">Tell the ranger what you love</Text>
-            <Text fontSize="sm" color="fg.muted">
-              Seed a few favorites and your homepage, map, and recommendations start tailoring to you.
-            </Text>
+        <HStack align="start" gap={4}>
+          <Box boxSize={10} borderRadius="l2" bg="brand.solid" color="brand.contrast" display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
+            <Icon as={LuSparkles} boxSize={5} />
           </Box>
-          <HStack gap={2} wrap="wrap">
-            <Button asChild colorPalette="blue" size="sm"><NextLink href="/plan">Open the ranger</NextLink></Button>
-            <Button asChild variant="outline" size="sm"><NextLink href="/onboarding">Pick interests</NextLink></Button>
-          </HStack>
-        </Stack>
+          <Stack gap={3}>
+            <Box>
+              <Text fontWeight="semibold" fontFamily="heading">Tell the ranger what you love</Text>
+              <Text fontSize="sm" color="fg.muted">
+                Seed a few favorites and your homepage, map, and recommendations start tailoring to you.
+              </Text>
+            </Box>
+            <HStack gap={2} wrap="wrap">
+              <Button asChild colorPalette="pine" size="sm"><NextLink href="/plan">Open the ranger</NextLink></Button>
+              <Button asChild colorPalette="pine" variant="outline" size="sm"><NextLink href="/onboarding">Pick interests</NextLink></Button>
+            </HStack>
+          </Stack>
+        </HStack>
         <CloseButton aria-label="Dismiss" size="sm" onClick={dismiss} />
       </HStack>
     </Box>

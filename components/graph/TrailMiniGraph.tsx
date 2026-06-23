@@ -20,11 +20,11 @@ export function TrailMiniGraph({
   const { nodes, rels } = trailToNvl(themeLabel, parks);
 
   return (
-    <Box borderWidth="1px" borderRadius="lg" overflow="hidden" mb={4}>
+    <Box borderWidth="1px" borderColor="border" borderRadius="l2" overflow="hidden" bg="bg.subtle">
       <NvlGraph
         nodes={nodes}
         rels={rels}
-        height={260}
+        height={280}
         onNodeClick={(id) => {
           if (id.startsWith(TRAIL_THEME_PREFIX)) return; // the theme hub isn't a destination
           router.push(`/parks/${id}`);

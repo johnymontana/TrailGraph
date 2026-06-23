@@ -47,7 +47,7 @@ export function CollectivePanel() {
       <Text fontSize="xs" color="fg.muted" mb={3}>
         Opt in to see parks that travelers with similar tastes loved. Anonymized — counts only, never identities.
       </Text>
-      <Switch.Root checked={optIn} onCheckedChange={(d) => toggle(!!d.checked)} mb={3}>
+      <Switch.Root colorPalette="pine" checked={optIn} onCheckedChange={(d) => toggle(!!d.checked)} mb={3}>
         <Switch.HiddenInput />
         <Switch.Control />
         <Switch.Label>Share my anonymized preferences to power suggestions</Switch.Label>
@@ -59,8 +59,8 @@ export function CollectivePanel() {
         ) : (
           <Stack gap={2}>
             {picks.map((p) => (
-              <HStack key={p.parkCode} borderWidth="1px" borderRadius="md" p={2}>
-                <CLink asChild flex="1"><NextLink href={`/parks/${p.parkCode}`}>{p.name}</NextLink></CLink>
+              <HStack key={p.parkCode} borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2}>
+                <CLink asChild flex="1" color="brand.fg" fontWeight="medium"><NextLink href={`/parks/${p.parkCode}`}>{p.name}</NextLink></CLink>
                 <Text fontSize="xs" color="fg.muted">{p.travelers} traveler{p.travelers === 1 ? '' : 's'}</Text>
               </HStack>
             ))}

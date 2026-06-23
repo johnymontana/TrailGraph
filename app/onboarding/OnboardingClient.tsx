@@ -2,7 +2,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import NextLink from 'next/link';
-import { Box, Heading, Text, Wrap, Button, Spinner, Link as CLink } from '@chakra-ui/react';
+import { Box, Button, Container, Heading, HStack, Icon, Text, Wrap, Spinner, Link as CLink } from '@chakra-ui/react';
+import { LuCheck, LuCompass } from 'react-icons/lu';
+import { heroContourTexture } from '../../theme/textures';
 
 /**
  * 20-second onboarding seed (§5.5): pick what you love so the ranger and "For you" have something to
@@ -49,33 +51,58 @@ export function OnboardingClient() {
   }
 
   return (
-    <Box maxW="2xl" mx="auto" px={{ base: 4, md: 8 }} py={12}>
-      <Heading as="h1" size="lg" mb={2}>What do you love about parks?</Heading>
-      <Text color="fg.muted" mb={6}>
-        Pick a few — the ranger uses these to tailor recommendations. You can change or delete them
-        anytime on your memory page.
-      </Text>
-      <Wrap gap={3} mb={8}>
-        {CHOICES.map((c) => (
-          <Button
-            key={c.label}
-            variant={picked.has(c.label) ? 'solid' : 'outline'}
-            colorPalette="blue"
-            onClick={() => toggle(c.label)}
-          >
-            {c.label}
+    <Box
+      bg="bg.subtle"
+      backgroundImage={heroContourTexture}
+      borderBottomWidth="1px"
+      borderColor="border"
+      minH="calc(100vh - 57px)"
+    >
+      <Container maxW="2xl" px={{ base: 4, md: 8 }} py={{ base: 12, md: 20 }}>
+        <HStack gap={2} color="accent.fg" mb={3}>
+          <Icon as={LuCompass} boxSize={4} />
+          <Text fontSize="xs" fontWeight="bold" letterSpacing="0.14em" textTransform="uppercase">
+            Welcome to TrailGraph
+          </Text>
+        </HStack>
+        <Heading as="h1" size={{ base: '2xl', md: '3xl' }} mb={3} lineHeight="1.1">
+          What do you love about parks?
+        </Heading>
+        <Text color="fg.muted" mb={8} fontSize="lg">
+          Pick a few — the ranger uses these to tailor recommendations. You can change or delete them
+          anytime on your memory page.
+        </Text>
+
+        <Wrap gap={3} mb={10}>
+          {CHOICES.map((c) => {
+            const on = picked.has(c.label);
+            return (
+              <Button
+                key={c.label}
+                size="lg"
+                variant={on ? 'solid' : 'outline'}
+                colorPalette="pine"
+                bg={on ? undefined : 'bg.panel'}
+                onClick={() => toggle(c.label)}
+                aria-pressed={on}
+              >
+                {on ? <Icon as={LuCheck} /> : null}
+                {c.label}
+              </Button>
+            );
+          })}
+        </Wrap>
+
+        <HStack gap={4}>
+          <Button colorPalette="pine" size="lg" onClick={save} disabled={picked.size === 0 || saving}>
+            {saving ? <Spinner size="sm" mr={2} /> : null}
+            Save {picked.size > 0 ? `${picked.size} ` : ''}and continue
           </Button>
-        ))}
-      </Wrap>
-      <Box display="flex" alignItems="center" gap={4}>
-        <Button colorPalette="blue" onClick={save} disabled={picked.size === 0 || saving}>
-          {saving ? <Spinner size="sm" mr={2} /> : null}
-          Save {picked.size > 0 ? `${picked.size} ` : ''}and continue
-        </Button>
-        <CLink asChild color="fg.muted" fontSize="sm">
-          <NextLink href="/explore">Skip for now</NextLink>
-        </CLink>
-      </Box>
+          <CLink asChild color="fg.muted" fontSize="sm">
+            <NextLink href="/explore">Skip for now</NextLink>
+          </CLink>
+        </HStack>
+      </Container>
     </Box>
   );
 }

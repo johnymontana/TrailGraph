@@ -12,6 +12,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "theme:typegen": "chakra typegen ./theme/index.ts",
+    "postinstall": "node -e \"const { existsSync } = require('node:fs'); const { join } = require('node:path'); const cli = join(process.cwd(), 'node_modules', '@chakra-ui', 'cli', 'bin', 'index.js'); if (existsSync(cli)) require('node:child_process').execFileSync(process.execPath, [cli, 'typegen', './theme/index.ts'], { stdio: 'inherit' });\"",
     "db:migrate": "tsx db/migrate.ts",
     "db:verify": "tsx db/verify.ts",
     "nams:spike": "tsx scripts/spike-nams-external-neo4j.ts",
@@ -52,6 +54,7 @@
     "protomaps-themes-base": "^4.5.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-icons": "^5.5.0",
     "react-markdown": "^10.1.0",
     "recharts": "^3.8.1",
     "remark-gfm": "^4.0.1",
@@ -60,6 +63,7 @@
     "zod": "^4.4.0"
   },
   "devDependencies": {
+    "@chakra-ui/cli": "^3.36.0",
     "@playwright/test": "^1.61.0",
     "@types/geojson": "^7946.0.16",
     "@types/node": "^22.10.0",

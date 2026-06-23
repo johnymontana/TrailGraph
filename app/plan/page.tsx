@@ -25,6 +25,7 @@ export default async function PlanPage() {
       right={0}
       bottom={0}
       direction={{ base: 'column', md: 'row' }}
+      data-fullscreen
     >
       <Heading as="h1" srOnly>Plan a trip</Heading>
       <Box

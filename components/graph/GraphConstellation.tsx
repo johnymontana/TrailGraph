@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { Box, Text, HStack, Stack } from '@chakra-ui/react';
 import { NvlGraph } from './NvlGraph';
 import { neighborhoodToNvl } from '../../lib/graph-nvl';
+import { useColorMode } from '../ui/color-mode';
+import { brandColors } from '../../lib/brandColors';
 
 interface GraphLink { source: string; target: string; value: number; topics?: string[] }
 interface GraphNode { id: string; name: string; degree?: number }
@@ -15,7 +17,9 @@ interface GraphData { nodes: GraphNode[]; links: GraphLink[] }
  */
 export function GraphConstellation({ data, highlight = [] }: { data: GraphData; highlight?: string[] }) {
   const router = useRouter();
+  const { colorMode } = useColorMode();
   const [topic, setTopic] = useState('');
+  const fadeColor = brandColors(colorMode).faded;
 
   const allTopics = useMemo(() => {
     const s = new Set<string>();
@@ -35,26 +39,31 @@ export function GraphConstellation({ data, highlight = [] }: { data: GraphData; 
         matchIds.add(l.target);
       }
     }
-    const FADE = '#c7ccd4';
     const nodes = base.nodes.map((n) =>
-      matchIds.has(n.id) ? n : { ...n, color: FADE, size: Math.max(4, (n.size ?? 8) * 0.55) },
+      matchIds.has(n.id) ? n : { ...n, color: fadeColor, size: Math.max(4, (n.size ?? 8) * 0.55) },
     );
     const rels = base.rels.map((r) => {
       const carries = data.links.find((l) => `${l.source}--${l.target}` === r.id)?.topics?.includes(topic);
-      return carries ? r : { ...r, color: 'rgba(180,190,200,0.12)' };
+      return carries ? r : { ...r, color: 'rgba(171,155,119,0.18)' };
     });
     return { nodes, rels, matchCount: matchIds.size };
-  }, [data, highlight, topic]);
+  }, [data, highlight, topic, fadeColor]);
 
   const legend = (
     <>
       {allTopics.length > 0 ? (
-        <Box position="absolute" top={3} right={3} bg="bg.panel" borderWidth="1px" borderRadius="md" px={2} py={1.5} shadow="md">
+        <Box position="absolute" top={3} right={3} bg="bg.panel/90" backdropFilter="blur(8px)" borderWidth="1px" borderColor="border" borderRadius="l2" px={3} py={2} shadow="md">
           <select
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
             aria-label="Filter the graph by topic"
-            style={{ fontSize: '14px', background: 'transparent', border: 'none', outline: 'none' }}
+            style={{
+              fontSize: '14px',
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              color: 'var(--chakra-colors-fg)',
+            }}
           >
             <option value="">All topics</option>
             {allTopics.map((t) => (
@@ -68,14 +77,14 @@ export function GraphConstellation({ data, highlight = [] }: { data: GraphData; 
           ) : null}
         </Box>
       ) : null}
-      <Stack position="absolute" bottom={3} right={3} bg="bg.panel" borderWidth="1px" borderRadius="md" px={3} py={2} shadow="md" gap={1}>
+      <Stack position="absolute" bottom={3} right={3} bg="bg.panel/90" backdropFilter="blur(8px)" borderWidth="1px" borderColor="border" borderRadius="l2" px={3} py={2} shadow="md" gap={1}>
         <HStack gap={2}>
-          <Box w="10px" h="10px" borderRadius="full" bg="#1864ab" />
+          <Box w="10px" h="10px" borderRadius="full" bg="pine.solid" />
           <Text fontSize="xs">Hub park (shares many topics)</Text>
         </HStack>
         {highlight.length > 0 ? (
           <HStack gap={2}>
-            <Box w="10px" h="10px" borderRadius="full" bg="#e8590c" />
+            <Box w="10px" h="10px" borderRadius="full" bg="accent.solid" />
             <Text fontSize="xs">Your saved / considered parks</Text>
           </HStack>
         ) : null}

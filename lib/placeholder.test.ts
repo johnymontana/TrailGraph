@@ -22,11 +22,14 @@ describe('placeholderHue', () => {
 });
 
 describe('placeholderBackground', () => {
-  it('produces a topo overlay + hue wash referencing the derived hue', () => {
+  it('produces a topo overlay + a brand-arc hue wash', () => {
     const bg = placeholderBackground('grca');
     expect(bg).toContain('repeating-radial-gradient');
     expect(bg).toContain('linear-gradient');
-    expect(bg).toContain(`hsl(${placeholderHue('grca')} `);
+    // Hue is remapped into the brand arc (~28°–150°: pine green → trail orange), not the raw hash.
+    const hue = Number(bg.match(/hsl\(([\d.]+) /)?.[1]);
+    expect(hue).toBeGreaterThanOrEqual(28);
+    expect(hue).toBeLessThanOrEqual(150);
   });
 
   it('is deterministic and falls back to a stable hue for an empty key', () => {

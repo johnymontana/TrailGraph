@@ -12,7 +12,7 @@ export default async function MapPage() {
   const userId = await getServerUserId();
   const initialBounds = userId ? await consideredBounds(userId).catch(() => null) : null;
   return (
-    <Box position="fixed" top="57px" left={0} right={0} bottom={0}>
+    <Box position="fixed" top="57px" left={0} right={0} bottom={0} data-fullscreen>
       <Heading as="h1" srOnly>Map of National Parks</Heading>
       <MapExplorer initialBounds={initialBounds} />
       <CLink

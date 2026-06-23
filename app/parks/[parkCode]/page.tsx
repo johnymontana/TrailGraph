@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import {
   Box,
+  Card,
   Heading,
   Text,
   Stack,
@@ -11,6 +12,8 @@ import {
   Separator,
 } from '@chakra-ui/react';
 import NextImage from 'next/image';
+import { LuCalendar, LuFootprints, LuStar, LuTicket, LuUsers } from 'react-icons/lu';
+import { StatCard } from '../../../components/ui/stat-card';
 import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph, peopleForPark, toursForPark, stampsForPark, eventsForPark, placesForPark, articlesForPark, parkingForPark } from '../../../lib/queries';
 import { getAvailability } from '../../../lib/bridges';
 import { darkSkyRating, monthNames, difficultyDot, getWeather, getConditions, type Difficulty } from '../../../lib/datasources';
@@ -101,17 +104,25 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
     (a, b) => diffOrder[a] - diffOrder[b],
   );
   const feeLabel = fees.length ? `$${Math.round(Number(fees[0].cost))}` : 'Free entry';
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  const diffRange = difficulties.length
+    ? difficulties.length > 1
+      ? `${cap(difficulties[0])}–${cap(difficulties[difficulties.length - 1])}`
+      : cap(difficulties[0])
+    : null;
+  const statesLabel = (park.states as { name: string }[]).map((s) => s.name).filter(Boolean).join(', ');
   const hours = park.operatingHours as { name: string; description: string }[];
 
   return (
     <Box maxW="5xl" mx="auto" px={{ base: 4, md: 8 }} py={6}>
       <RecordView parkCode={parkCode} />
+      {/* Hero — image with a scrim and the park name overlaid (magazine-style). */}
       <Box
         position="relative"
-        h="320px"
+        h={{ base: '280px', md: '400px' }}
         w="100%"
-        mb={5}
-        borderRadius="lg"
+        mb={6}
+        borderRadius="l3"
         overflow="hidden"
       >
         {images[0]?.url ? (
@@ -126,36 +137,54 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
         ) : (
           <Placeholder name={String(park.parkCode)} label={String(park.name)} />
         )}
+        <Box
+          position="absolute"
+          inset={0}
+          style={{ background: 'linear-gradient(to top, rgba(11,46,30,0.92) 0%, rgba(11,46,30,0.30) 50%, transparent 78%)' }}
+        />
+        <Stack position="absolute" bottom={0} left={0} right={0} p={{ base: 5, md: 8 }} gap={2}>
+          {park.designation ? (
+            <Badge colorPalette="trail" variant="solid" alignSelf="start">
+              {park.designation as string}
+            </Badge>
+          ) : null}
+          <Heading
+            as="h1"
+            size={{ base: '2xl', md: '4xl' }}
+            color="white"
+            lineHeight="1.05"
+            textShadow="0 2px 14px rgba(0,0,0,0.5)"
+          >
+            {park.name as string}
+          </Heading>
+          {statesLabel ? (
+            <Text color="whiteAlpha.900" fontSize="sm" textShadow="0 1px 8px rgba(0,0,0,0.6)">
+              {statesLabel}
+            </Text>
+          ) : null}
+        </Stack>
       </Box>
 
-      <Heading as="h1" size="xl">{park.name as string}</Heading>
-      <HStack mt={2} gap={3}>
-        {park.designation ? <Badge colorPalette="blue">{park.designation as string}</Badge> : null}
-        <Text color="fg.muted">
-          {(park.states as { name: string }[]).map((s) => s.name).filter(Boolean).join(', ')}
-        </Text>
-      </HStack>
-
-      {/* "At a glance" — surface the new data right under the title (R4 §3). */}
-      <HStack mt={2} mb={4} gap={5} wrap="wrap" fontSize="sm" color="fg.muted">
-        {dark ? (
-          <HStack gap={1}><Text aria-hidden>⭐</Text><Text>{dark.label}</Text></HStack>
-        ) : null}
-        {difficulties.length ? (
-          <HStack gap={1}><Text aria-hidden>🥾</Text><Text>{difficulties.map(difficultyDot).join(' ')} hikes</Text></HStack>
-        ) : null}
-        {park.crowdLevel ? (
-          <HStack gap={1}><Text aria-hidden>👥</Text><Text>{park.crowdLevel as string} crowds</Text></HStack>
-        ) : null}
-        <HStack gap={1}><Text aria-hidden>🎟️</Text><Text>{feeLabel}</Text></HStack>
+      {/* "At a glance" stat row (R4 §3). */}
+      <SimpleGrid minChildWidth="150px" gap={3} mb={6}>
+        {dark ? <StatCard label="Dark sky" value={dark.label} icon={LuStar} tone="accent" /> : null}
+        {diffRange ? <StatCard label="Hikes" value={diffRange} hint={`${difficulties.map(difficultyDot).join(' ')}`} icon={LuFootprints} /> : null}
+        {park.crowdLevel ? <StatCard label="Crowds" value={park.crowdLevel as string} icon={LuUsers} /> : null}
+        <StatCard label="Entrance" value={feeLabel} icon={LuTicket} tone="brand" />
         {park.timedEntry ? (
-          <CLink href={(park.permitUrl as string) ?? 'https://www.recreation.gov/timed-entry'} gap={1} display="inline-flex" alignItems="center" color="fg.muted">
-            <Text aria-hidden>🎫</Text><Text>Timed entry</Text>
-          </CLink>
+          <StatCard
+            label="Timed entry"
+            value={
+              <CLink href={(park.permitUrl as string) ?? 'https://www.recreation.gov/timed-entry'} color="brand.fg">
+                Required
+              </CLink>
+            }
+            icon={LuCalendar}
+          />
         ) : null}
-      </HStack>
+      </SimpleGrid>
 
-      <Box mb={5}>
+      <Box mb={6}>
         <ParkActions parkCode={parkCode} />
       </Box>
 
@@ -163,13 +192,13 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
       {park.alerts.length > 0 ? (
         <Stack mb={5} gap={2}>
           {park.alerts.map((a) => (
-            <Box key={a.id} borderLeftWidth="4px" borderColor={`${ALERT_COLOR[a.category] ?? 'gray'}.500`} bg="bg.subtle" p={3} borderRadius="md">
+            <Box key={a.id} borderLeftWidth="4px" borderColor={`${ALERT_COLOR[a.category] ?? 'gray'}.solid`} bg="bg.subtle" p={3} borderRadius="l1">
               <HStack>
                 <Badge colorPalette={ALERT_COLOR[a.category] ?? 'gray'}>{a.category}</Badge>
                 <Text fontWeight="semibold">{a.title}</Text>
               </HStack>
               {a.description ? <Text fontSize="sm" mt={1} color="fg.muted">{a.description}</Text> : null}
-              {a.url ? <CLink href={a.url} fontSize="sm" color="blue.600">Official NPS alert →</CLink> : null}
+              {a.url ? <CLink href={a.url} fontSize="sm" color="brand.fg">Official NPS alert →</CLink> : null}
             </Box>
           ))}
         </Stack>
@@ -189,7 +218,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
           {park.topics.length > 0 ? (
             <Box>
               <Heading size="sm" mb={2}>Topics</Heading>
-              <ChipList items={park.topics as string[]} param="topic" colorPalette="green" />
+              <ChipList items={park.topics as string[]} param="topic" colorPalette="trail" />
             </Box>
           ) : null}
 
@@ -221,8 +250,8 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
             <MiniMap lat={park.lat as number} lng={park.lng as number} label={park.name as string} parkCode={parkCode} />
           ) : null}
           <HStack>
-            {park.url ? <CLink href={park.url as string} color="blue.600">Official site →</CLink> : null}
-            {park.directionsUrl ? <CLink href={park.directionsUrl as string} color="blue.600">Directions →</CLink> : null}
+            {park.url ? <CLink href={park.url as string} color="brand.fg">Official site →</CLink> : null}
+            {park.directionsUrl ? <CLink href={park.directionsUrl as string} color="brand.fg">Directions →</CLink> : null}
           </HStack>
 
           {/* §5 conditions: dark sky + best time/crowds (structured, from the data-source adapters). */}
@@ -297,7 +326,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                 <Stack gap={1}>
                   {conditions.webcams.slice(0, 6).map((c) => (
                     <Text key={c.id} fontSize="sm">
-                      {c.url ? <CLink href={c.url} color="blue.600">{c.title} ↗</CLink> : c.title}
+                      {c.url ? <CLink href={c.url} color="brand.fg">{c.title} ↗</CLink> : c.title}
                       <Badge ml={2} colorPalette={c.isStreaming ? 'green' : c.status === 'Active' ? 'blue' : 'gray'}>
                         {c.isStreaming ? 'live' : c.status.toLowerCase()}
                       </Badge>
@@ -330,7 +359,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                 {campgrounds.map((c) => (
                   <Text key={c.id} fontSize="sm">
                     {c.reservationUrl ? (
-                      <CLink href={c.reservationUrl} color="blue.600">{c.name} ↗</CLink>
+                      <CLink href={c.reservationUrl} color="brand.fg">{c.name} ↗</CLink>
                     ) : (
                       c.name
                     )}
@@ -424,8 +453,8 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
           <Heading size="md" mb={3}>Places to see</Heading>
           <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={4}>
             {places.map((pl) => (
-              <Box key={pl.id} borderWidth="1px" borderRadius="lg" overflow="hidden" bg="bg.panel">
-                <Box h="120px" position="relative" overflow="hidden">
+              <Card.Root key={pl.id} variant="outline" overflow="hidden">
+                <Box h="140px" position="relative" overflow="hidden">
                   {pl.image ? (
                     <NextImage src={pl.image} alt={pl.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
                   ) : (
@@ -433,14 +462,14 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                     <Placeholder name={pl.id} iconOnly />
                   )}
                 </Box>
-                <Stack p={3} gap={1}>
+                <Card.Body p={3}>
                   <HStack>
                     <Text fontWeight="medium" lineClamp={1} flex="1">{pl.title}</Text>
-                    {pl.isStamp ? <Badge colorPalette="purple">stamp</Badge> : null}
-                    {pl.audioDescription ? <Badge colorPalette="teal" title={pl.audioDescription}>🔊 audio</Badge> : null}
+                    {pl.isStamp ? <Badge colorPalette="trail">stamp</Badge> : null}
+                    {pl.audioDescription ? <Badge colorPalette="pine" title={pl.audioDescription}>audio</Badge> : null}
                   </HStack>
-                </Stack>
-              </Box>
+                </Card.Body>
+              </Card.Root>
             ))}
           </SimpleGrid>
         </Box>
@@ -454,7 +483,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
             {articles.map((a) => (
               <Box key={a.id}>
                 {a.url ? (
-                  <CLink href={a.url} color="blue.600" fontWeight="medium">{a.title} ↗</CLink>
+                  <CLink href={a.url} color="brand.fg" fontWeight="medium">{a.title} ↗</CLink>
                 ) : (
                   <Text fontWeight="medium">{a.title}</Text>
                 )}

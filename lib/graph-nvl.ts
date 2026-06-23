@@ -1,17 +1,22 @@
 import type { Node as NvlNode, Relationship as NvlRel } from '@neo4j-nvl/base';
+import { pine, sand, trail } from '../theme/colors';
 
 /**
  * Pure data → Neo4j-NVL mappers (no DOM, unit-tested). Two shapes:
  *  - `neighborhoodToNvl` for the /graph constellation (parks linked by shared topics).
  *  - the per-park graph is built server-side in `lib/queries.ts#parkGraph`; `parkNodeNav` here turns a
  *    clicked park-graph node into a route.
+ *
+ * Colors come from the brand palette (theme/colors) — trail orange = highlighted, deep pine = hub,
+ * mid pine = plain park — so the constellation matches the themed UI. Kept as resolved hex (not Chakra
+ * tokens) because NVL renders to canvas/WebGL.
  */
 
-// /graph palette — preserves the semantics of the old GraphView (highlight > hub > plain).
+// /graph palette — highlight > hub > plain, mapped onto pine/trail.
 export const HUB_DEGREE = 5;
-const COLOR_HIGHLIGHT = '#e8590c';
-const COLOR_HUB = '#1864ab';
-const COLOR_PARK = '#4dabf7';
+const COLOR_HIGHLIGHT = trail[500];
+const COLOR_HUB = pine[600];
+const COLOR_PARK = pine[400];
 
 interface NeighborhoodNode {
   id: string;
@@ -75,17 +80,17 @@ export function trailToNvl(
 
 /** Color for a domain node label in the per-park graph. Pure. */
 const LABEL_COLOR: Record<string, string> = {
-  Park: '#1864ab',
-  Activity: '#2f9e44',
-  Topic: '#f08c00',
-  State: '#9c36b5',
-  Campground: '#e8590c',
-  VisitorCenter: '#1098ad',
-  ThingToDo: '#e64980',
-  Alert: '#e03131',
+  Park: pine[600],
+  Activity: pine[500],
+  Topic: trail[500],
+  State: sand[600],
+  Campground: pine[400],
+  VisitorCenter: trail[600],
+  ThingToDo: trail[400],
+  Alert: '#E03131',
 };
 export function labelColor(label: string): string {
-  return LABEL_COLOR[label] ?? '#868e96';
+  return LABEL_COLOR[label] ?? sand[500];
 }
 
 /** Per-park graph node carries a `nav` descriptor so clicks route deterministically (testable). */

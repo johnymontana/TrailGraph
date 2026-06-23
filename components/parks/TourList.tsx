@@ -52,21 +52,21 @@ export function TourList({
         Official NPS tours of {parkName} — each is an ordered path you can turn into a trip and remix.
       </Text>
       {err ? (
-        <Text fontSize="sm" color="red.500" mb={2}>{err}</Text>
+        <Text fontSize="sm" color="red.fg" mb={2}>{err}</Text>
       ) : null}
       <Stack gap={2}>
         {tours.map((t) => (
-          <HStack key={t.id} borderWidth="1px" borderRadius="md" p={3} align="start">
+          <HStack key={t.id} borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={3} align="start">
             <Box flex="1" minW={0}>
               <HStack mb={1}>
-                <Text fontWeight="medium">{t.title}</Text>
-                {t.stops > 0 ? <Badge colorPalette="blue">{t.stops} stop{t.stops === 1 ? '' : 's'}</Badge> : null}
+                <Text fontWeight="medium" fontFamily="heading">{t.title}</Text>
+                {t.stops > 0 ? <Badge colorPalette="pine">{t.stops} stop{t.stops === 1 ? '' : 's'}</Badge> : null}
               </HStack>
               {t.description ? (
                 <Text fontSize="sm" color="fg.muted" lineClamp={2}>{t.description}</Text>
               ) : null}
             </Box>
-            <Button size="sm" colorPalette="blue" variant="outline" disabled={busyId === t.id}
+            <Button size="sm" colorPalette="pine" variant="outline" disabled={busyId === t.id}
               onClick={() => start(t.id)}>
               {busyId === t.id ? 'Starting…' : 'Start a trip'}
             </Button>

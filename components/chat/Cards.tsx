@@ -1,6 +1,7 @@
 'use client';
-import { Box, Text, Badge, Stack, HStack, Link as CLink } from '@chakra-ui/react';
+import { Badge, Box, Card, Icon, Text, Stack, HStack, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
+import { LuTriangleAlert } from 'react-icons/lu';
 
 /** Renders a tool's `{kind,data}` output as a structured card (ADR-013, D5). Graph-grounded only. */
 export function ToolCard({ kind, data: raw }: { kind: string; data: unknown }) {
@@ -8,9 +9,19 @@ export function ToolCard({ kind, data: raw }: { kind: string; data: unknown }) {
   // Surface tool errors instead of silently dropping them (R2 §3.1 — the blank "save as trip" turn).
   if (typeof data.error === 'string') {
     return (
-      <Box borderWidth="1px" borderColor="orange.300" borderRadius="md" p={2} my={2} bg="orange.50">
-        <Text fontSize="sm" color="orange.800">{data.error}</Text>
-      </Box>
+      <HStack
+        borderWidth="1px"
+        borderColor="orange.emphasized"
+        borderRadius="l2"
+        p={3}
+        my={2}
+        bg="orange.subtle"
+        gap={2}
+        align="start"
+      >
+        <Icon as={LuTriangleAlert} color="orange.fg" mt={0.5} flexShrink={0} />
+        <Text fontSize="sm" color="orange.fg">{data.error}</Text>
+      </HStack>
     );
   }
   switch (kind) {
@@ -52,21 +63,21 @@ function ParkCards({ data }: { data: Record<string, unknown> }) {
   return (
     <Stack gap={2} my={2}>
       {parks.map((p) => (
-        <CLink key={p.parkCode} asChild _hover={{ textDecoration: 'none' }}>
+        <CLink key={p.parkCode} asChild _hover={{ textDecoration: 'none' }} display="block" w="full">
           <NextLink href={`/parks/${p.parkCode}`}>
-            <Box borderWidth="1px" borderRadius="md" p={3} bg="bg.panel" _hover={{ shadow: 'sm', borderColor: 'blue.300' }}>
-              <Text as="span" fontWeight="semibold">{p.name}</Text>
-              {p.designation ? (
-                <Badge ml={2} colorPalette="blue">
-                  {p.designation}
-                </Badge>
-              ) : null}
-              {p.matched?.length ? (
-                <Text fontSize="xs" color="fg.muted" mt={1}>
-                  matches: {p.matched.join(', ')}
-                </Text>
-              ) : null}
-            </Box>
+            <Card.Root variant="interactive" size="sm" w="full">
+              <Card.Body p={3}>
+                <HStack gap={2} wrap="wrap">
+                  <Text as="span" fontWeight="semibold" fontFamily="heading">{p.name}</Text>
+                  {p.designation ? <Badge colorPalette="pine">{p.designation}</Badge> : null}
+                </HStack>
+                {p.matched?.length ? (
+                  <Text fontSize="xs" color="fg.muted" mt={1}>
+                    matches: {p.matched.join(', ')}
+                  </Text>
+                ) : null}
+              </Card.Body>
+            </Card.Root>
           </NextLink>
         </CLink>
       ))}
@@ -89,26 +100,28 @@ function NodeResults({ data }: { data: Record<string, unknown> }) {
   return (
     <Stack gap={2} my={2}>
       {results.map((r) => (
-        <Box key={r.id} borderWidth="1px" borderRadius="md" p={3} bg="bg.panel">
-          <HStack mb={r.tags?.length || r.parks?.length ? 1 : 0} wrap="wrap" gap={2}>
-            <Badge colorPalette={type === 'place' ? 'purple' : 'teal'}>{type}</Badge>
-            <Text as="span" fontWeight="semibold">{r.title}</Text>
-            {type === 'place' && r.isStamp ? <Badge colorPalette="orange">stamp</Badge> : null}
-          </HStack>
-          {type === 'person' && r.tags?.length ? (
-            <Text fontSize="xs" color="fg.muted">{r.tags.slice(0, 4).join(', ')}</Text>
-          ) : null}
-          {r.parks?.length ? (
-            <HStack wrap="wrap" gap={2} mt={1}>
-              <Text fontSize="xs" color="fg.muted">at</Text>
-              {r.parks.map((p) => (
-                <CLink key={p.parkCode} asChild fontSize="xs" color="blue.600">
-                  <NextLink href={`/parks/${p.parkCode}`}>{p.parkName}</NextLink>
-                </CLink>
-              ))}
+        <Card.Root key={r.id} variant="outline" size="sm">
+          <Card.Body p={3}>
+            <HStack mb={r.tags?.length || r.parks?.length ? 1 : 0} wrap="wrap" gap={2}>
+              <Badge colorPalette={type === 'place' ? 'trail' : 'pine'}>{type}</Badge>
+              <Text as="span" fontWeight="semibold" fontFamily="heading">{r.title}</Text>
+              {type === 'place' && r.isStamp ? <Badge colorPalette="trail" variant="solid">stamp</Badge> : null}
             </HStack>
-          ) : null}
-        </Box>
+            {type === 'person' && r.tags?.length ? (
+              <Text fontSize="xs" color="fg.muted">{r.tags.slice(0, 4).join(', ')}</Text>
+            ) : null}
+            {r.parks?.length ? (
+              <HStack wrap="wrap" gap={2} mt={1}>
+                <Text fontSize="xs" color="fg.muted">at</Text>
+                {r.parks.map((p) => (
+                  <CLink key={p.parkCode} asChild fontSize="xs" color="brand.fg">
+                    <NextLink href={`/parks/${p.parkCode}`}>{p.parkName}</NextLink>
+                  </CLink>
+                ))}
+              </HStack>
+            ) : null}
+          </Card.Body>
+        </Card.Root>
       ))}
     </Stack>
   );
@@ -125,25 +138,30 @@ function ItineraryCard({ data }: { data: Record<string, unknown> }) {
     driveTo?: { miles: number; minutes: number };
   }[];
   return (
-    <Box borderWidth="1px" borderRadius="md" p={3} my={2} bg="bg.panel">
-      <Text fontWeight="semibold" mb={2}>
-        {trip.name}
-      </Text>
-      <Stack gap={1}>
-        {stops.map((s, i) => (
-          <Box key={i}>
-            <Text fontSize="sm">
-              {i + 1}. {s.parkName ?? s.name ?? 'Stop'}
-            </Text>
-            {s.driveTo ? (
-              <Text fontSize="xs" color="fg.muted" pl={4}>
-                ↓ {Math.round(s.driveTo.miles)} mi · {Math.round(s.driveTo.minutes)} min
-              </Text>
-            ) : null}
-          </Box>
-        ))}
-      </Stack>
-    </Box>
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading" mb={2}>
+          {trip.name}
+        </Text>
+        <Stack gap={1}>
+          {stops.map((s, i) => (
+            <Box key={i}>
+              <HStack gap={2} align="baseline">
+                <Badge colorPalette="pine" variant="solid" borderRadius="full" minW="20px" justifyContent="center">
+                  {i + 1}
+                </Badge>
+                <Text fontSize="sm">{s.parkName ?? s.name ?? 'Stop'}</Text>
+              </HStack>
+              {s.driveTo ? (
+                <Text fontSize="xs" color="fg.muted" pl={7}>
+                  ↓ {Math.round(s.driveTo.miles)} mi · {Math.round(s.driveTo.minutes)} min
+                </Text>
+              ) : null}
+            </Box>
+          ))}
+        </Stack>
+      </Card.Body>
+    </Card.Root>
   );
 }
 
@@ -152,17 +170,20 @@ function AlertList({ data }: { data: Record<string, unknown> }) {
   if (!parks.length) return <Text fontSize="sm" color="fg.muted" my={2}>No active Closure/Danger alerts.</Text>;
   return (
     <Stack gap={2} my={2}>
-      {parks.map((p, i) => (
-        <Box key={i} borderLeftWidth="4px" borderColor="orange.500" pl={3}>
-          <Text fontWeight="semibold" fontSize="sm">{p.park}</Text>
-          {p.alerts.map((a, j) => (
-            <HStack key={j}>
-              <Badge colorPalette={a.category === 'Danger' ? 'red' : 'orange'}>{a.category}</Badge>
-              <Text fontSize="sm">{a.title}</Text>
-            </HStack>
-          ))}
-        </Box>
-      ))}
+      {parks.map((p, i) => {
+        const hasDanger = p.alerts.some((a) => a.category === 'Danger');
+        return (
+          <Box key={i} borderLeftWidth="4px" borderColor={hasDanger ? 'red.solid' : 'orange.solid'} pl={3}>
+            <Text fontWeight="semibold" fontSize="sm" fontFamily="heading">{p.park}</Text>
+            {p.alerts.map((a, j) => (
+              <HStack key={j} gap={2} mt={0.5}>
+                <Badge colorPalette={a.category === 'Danger' ? 'red' : 'orange'}>{a.category}</Badge>
+                <Text fontSize="sm">{a.title}</Text>
+              </HStack>
+            ))}
+          </Box>
+        );
+      })}
     </Stack>
   );
 }

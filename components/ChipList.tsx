@@ -10,7 +10,7 @@ import NextLink from 'next/link';
 export function ChipList({
   items,
   param,
-  colorPalette,
+  colorPalette = 'pine',
   initial = 10,
 }: {
   items: string[];
@@ -24,9 +24,17 @@ export function ChipList({
   return (
     <Wrap gap={2}>
       {shown.map((it) => (
-        <CLink key={it} asChild>
+        <CLink key={it} asChild _hover={{ textDecoration: 'none' }}>
           <NextLink href={`/explore?${param}=${encodeURIComponent(it)}`}>
-            <Badge variant="subtle" colorPalette={colorPalette} cursor="pointer" _hover={{ opacity: 0.8 }}>
+            <Badge
+              variant="subtle"
+              colorPalette={colorPalette}
+              px={2.5}
+              py={1}
+              cursor="pointer"
+              transition="background 0.15s"
+              _hover={{ bg: 'colorPalette.muted' }}
+            >
               {it}
             </Badge>
           </NextLink>

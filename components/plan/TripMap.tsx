@@ -4,6 +4,7 @@ import maplibregl, { type Map as MlMap } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { mapStyle, US_CENTER, registerMapProtocols, attachBasemapFallback } from '../../lib/mapStyle';
 import { useColorMode } from '../ui/color-mode';
+import { brandColors, type BrandColors } from '../../lib/brandColors';
 
 /** Itinerary overlay (B4): numbered stop markers + a route line for the selected trip. */
 export interface TripMapStop {
@@ -16,7 +17,10 @@ export interface TripMapStop {
 export function TripMap({ stops }: { stops: TripMapStop[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
+  const stopsRef = useRef(stops);
   const { colorMode } = useColorMode();
+  const c = brandColors(colorMode);
+  stopsRef.current = stops;
 
   useEffect(() => {
     if (!ref.current) return;
@@ -30,7 +34,7 @@ export function TripMap({ stops }: { stops: TripMapStop[] }) {
       return;
     }
     mapRef.current = map;
-    map.on('load', () => render(map, stops));
+    map.on('load', () => render(map, stopsRef.current, c));
     return () => map.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [colorMode]);
@@ -38,13 +42,14 @@ export function TripMap({ stops }: { stops: TripMapStop[] }) {
   // Re-render markers/line when stops change.
   useEffect(() => {
     const map = mapRef.current;
-    if (map && map.isStyleLoaded()) render(map, stops);
+    if (map && map.isStyleLoaded()) render(map, stops, c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stops]);
 
   return <div ref={ref} style={{ width: '100%', height: '260px', borderRadius: 8, overflow: 'hidden' }} aria-label="Trip itinerary map" role="application" />;
 }
 
-function render(map: MlMap, stops: TripMapStop[]) {
+function render(map: MlMap, stops: TripMapStop[], c: BrandColors) {
   const located = stops.filter(
     (s): s is TripMapStop & { lat: number; lng: number } => s.lat != null && s.lng != null,
   );
@@ -56,7 +61,7 @@ function render(map: MlMap, stops: TripMapStop[]) {
     (map.getSource('trip-line') as maplibregl.GeoJSONSource).setData(lineData);
   } else {
     map.addSource('trip-line', { type: 'geojson', data: lineData });
-    map.addLayer({ id: 'trip-line', type: 'line', source: 'trip-line', paint: { 'line-color': '#1971c2', 'line-width': 3, 'line-dasharray': [2, 1] } });
+    map.addLayer({ id: 'trip-line', type: 'line', source: 'trip-line', paint: { 'line-color': c.pine, 'line-width': 3, 'line-dasharray': [2, 1] } });
   }
 
   // Clear old markers and add numbered ones.
@@ -66,7 +71,7 @@ function render(map: MlMap, stops: TripMapStop[]) {
     el.className = 'trip-stop-marker';
     el.textContent = String(i + 1);
     Object.assign(el.style, {
-      background: '#1971c2', color: '#fff', borderRadius: '50%', width: '22px', height: '22px',
+      background: c.pine, color: '#fff', borderRadius: '50%', width: '22px', height: '22px',
       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '600',
       border: '2px solid #fff',
     });

@@ -4,6 +4,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { mapStyle, registerMapProtocols, attachBasemapFallback } from '../lib/mapStyle';
 import { useColorMode } from './ui/color-mode';
+import { brandColors } from '../lib/brandColors';
 
 /** A small single-marker map for the park detail page (A2 mini-map). With `parkCode`, it also overlays
  * the park's real boundary polygon (NPS-expansion P1 #4) fetched on demand from the cached API route. */
@@ -12,6 +13,7 @@ export function MiniMap({ lat, lng, label, parkCode }: { lat: number; lng: numbe
   const { colorMode } = useColorMode();
   useEffect(() => {
     if (!ref.current) return;
+    const c = brandColors(colorMode);
     registerMapProtocols();
     let map: maplibregl.Map;
     try {
@@ -23,7 +25,7 @@ export function MiniMap({ lat, lng, label, parkCode }: { lat: number; lng: numbe
         attributionControl: { compact: true },
       });
       attachBasemapFallback(map);
-      new maplibregl.Marker({ color: '#1971c2' }).setLngLat([lng, lat]).setPopup(new maplibregl.Popup().setText(label)).addTo(map);
+      new maplibregl.Marker({ color: c.pine }).setLngLat([lng, lat]).setPopup(new maplibregl.Popup().setText(label)).addTo(map);
     } catch (err) {
       console.warn('[MiniMap] map unavailable (WebGL?):', (err as Error).message);
       return;
@@ -37,8 +39,8 @@ export function MiniMap({ lat, lng, label, parkCode }: { lat: number; lng: numbe
           .then((geo: GeoJSON.GeoJSON | null) => {
             if (!geo || !('features' in geo) || geo.features.length === 0 || !m.getStyle()) return;
             m.addSource('park-boundary', { type: 'geojson', data: geo });
-            m.addLayer({ id: 'park-boundary-fill', type: 'fill', source: 'park-boundary', paint: { 'fill-color': '#2f9e44', 'fill-opacity': 0.12 } });
-            m.addLayer({ id: 'park-boundary-line', type: 'line', source: 'park-boundary', paint: { 'line-color': '#2f9e44', 'line-width': 2 } });
+            m.addLayer({ id: 'park-boundary-fill', type: 'fill', source: 'park-boundary', paint: { 'fill-color': c.pine, 'fill-opacity': 0.12 } });
+            m.addLayer({ id: 'park-boundary-line', type: 'line', source: 'park-boundary', paint: { 'line-color': c.pine, 'line-width': 2 } });
             try {
               const b = new maplibregl.LngLatBounds();
               const extend = (coords: GeoJSON.Position[]) => coords.forEach((c) => b.extend([c[0], c[1]]));

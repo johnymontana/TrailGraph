@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Box, Heading, Stack, HStack, Text, Badge, Button, Link as CLink, Spinner, Input } from '@chakra-ui/react';
+import { Box, Heading, Stack, HStack, Text, Badge, Button, IconButton, Link as CLink, Spinner, Input } from '@chakra-ui/react';
 import NextLink from 'next/link';
+import { LuThumbsDown, LuThumbsUp } from 'react-icons/lu';
 import type { UserMemory } from '../../lib/memory-graph';
 
 /**
@@ -76,8 +77,8 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
         ) : (
           <Stack gap={2}>
             {mem.preferences.map((p) => (
-              <HStack key={`${p.kind}:${p.name}`} borderWidth="1px" borderRadius="md" p={2}>
-                <Badge colorPalette={p.kind === 'activity' ? 'blue' : 'green'}>{p.kind}</Badge>
+              <HStack key={`${p.kind}:${p.name}`} borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2}>
+                <Badge colorPalette={p.kind === 'activity' ? 'trail' : 'pine'}>{p.kind}</Badge>
                 <Text flex="1">
                   {p.name}
                   {p.value && p.value.toLowerCase() !== p.name.toLowerCase() ? (
@@ -85,7 +86,7 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
                   ) : null}
                 </Text>
                 {p.weight != null && p.weight !== 1 ? (
-                  <Badge colorPalette={p.weight < 1 ? 'gray' : 'purple'} title="Influence on your recommendations">
+                  <Badge colorPalette={p.weight < 1 ? 'sand' : 'trail'} title="Influence on your recommendations">
                     {p.weight < 1 ? '↓' : '↑'}{p.weight}×
                   </Badge>
                 ) : null}
@@ -93,10 +94,10 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
                   onClick={() => act({ op: 'setWeight', kind: p.kind, name: p.name, weight: Math.max(0, Math.round(((p.weight ?? 1) - 0.5) * 10) / 10) })}>Less</Button>
                 <Button size="xs" variant="ghost" disabled={busy} title="Boost in recommendations"
                   onClick={() => act({ op: 'setWeight', kind: p.kind, name: p.name, weight: Math.min(3, Math.round(((p.weight ?? 1) + 0.5) * 10) / 10) })}>More</Button>
-                <Button size="xs" variant={p.feedback === 'up' ? 'solid' : 'ghost'} disabled={busy}
-                  onClick={() => act({ op: 'feedback', kind: p.kind, name: p.name, vote: 'up' })}>👍</Button>
-                <Button size="xs" variant={p.feedback === 'down' ? 'solid' : 'ghost'} disabled={busy}
-                  onClick={() => act({ op: 'feedback', kind: p.kind, name: p.name, vote: 'down' })}>👎</Button>
+                <IconButton size="xs" aria-label="Mark this preference helpful" colorPalette="pine" variant={p.feedback === 'up' ? 'solid' : 'ghost'} disabled={busy}
+                  onClick={() => act({ op: 'feedback', kind: p.kind, name: p.name, vote: 'up' })}><LuThumbsUp /></IconButton>
+                <IconButton size="xs" aria-label="Mark this preference wrong" colorPalette="red" variant={p.feedback === 'down' ? 'solid' : 'ghost'} disabled={busy}
+                  onClick={() => act({ op: 'feedback', kind: p.kind, name: p.name, vote: 'down' })}><LuThumbsDown /></IconButton>
                 <Button size="xs" colorPalette="red" variant="ghost" disabled={busy}
                   onClick={() => act({ op: 'deletePreference', kind: p.kind, name: p.name })}>Delete</Button>
               </HStack>
@@ -117,7 +118,7 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
           Constraints the ranger honors in every recommendation and itinerary.
         </Text>
         <Stack gap={3}>
-          <HStack borderWidth="1px" borderRadius="md" p={2}>
+          <HStack borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2}>
             <Text flex="1">Wheelchair-accessible sites</Text>
             <Button size="xs" disabled={busy}
               variant={mem.travel.wheelchair ? 'solid' : 'ghost'}
@@ -126,7 +127,7 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
               {mem.travel.wheelchair ? 'Required' : 'Off'}
             </Button>
           </HStack>
-          <HStack borderWidth="1px" borderRadius="md" p={2}>
+          <HStack borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2}>
             <Text flex="1">RV / trailer length (ft)</Text>
             <Input size="xs" type="number" min={0} w="20" value={rvDraft} placeholder="e.g. 30"
               onChange={(e) => setRvDraft(e.target.value)} />
@@ -134,14 +135,14 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
               onClick={() => act({ op: 'setTravelConstraints', rvMaxLengthFt: rvDraft.trim() === '' ? null : Number(rvDraft) })}>Save</Button>
           </HStack>
           {mem.travel.requiredAmenities.length > 0 ? (
-            <HStack borderWidth="1px" borderRadius="md" p={2} flexWrap="wrap" gap={2}>
+            <HStack borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2} flexWrap="wrap" gap={2}>
               <Text>Must have:</Text>
               {mem.travel.requiredAmenities.map((a) => (
                 <Badge key={a} colorPalette="orange">{a}</Badge>
               ))}
             </HStack>
           ) : null}
-          <HStack borderWidth="1px" borderRadius="md" p={2} flexWrap="wrap">
+          <HStack borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2} flexWrap="wrap">
             <Text flex="1" minW="32">Travel dates</Text>
             <Input size="xs" type="date" w="36" value={startDraft} onChange={(e) => setStartDraft(e.target.value)} />
             <Text color="fg.muted">–</Text>
@@ -164,7 +165,7 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
           A pass you hold makes covered parks free in trip costs; stamps are your collection.
         </Text>
         <Stack gap={3}>
-          <HStack borderWidth="1px" borderRadius="md" p={2}>
+          <HStack borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2}>
             <Text flex="1">America the Beautiful — annual pass</Text>
             {mem.passes.some((p) => p.id === 'atb-annual') ? (
               <Button size="xs" colorPalette="green" disabled={busy} onClick={() => act({ op: 'clearPass', passId: 'atb-annual' })}>
@@ -177,7 +178,7 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
             )}
           </HStack>
           {mem.stamps.length > 0 ? (
-            <Box borderWidth="1px" borderRadius="md" p={2}>
+            <Box borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2}>
               <Text fontSize="sm" mb={2}>Collected stamps ({mem.stamps.length})</Text>
               <Stack gap={1}>
                 {mem.stamps.map((s) => (
@@ -210,9 +211,9 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
         ) : (
           <Stack gap={2}>
             {(showAllConsidered ? mem.considered : mem.considered.slice(0, 8)).map((c) => (
-              <HStack key={c.parkCode} borderWidth="1px" borderRadius="md" p={2}>
+              <HStack key={c.parkCode} borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2}>
                 <Stack flex="1" gap={0}>
-                  <CLink asChild><NextLink href={`/parks/${c.parkCode}`}>{c.name}</NextLink></CLink>
+                  <CLink asChild color="brand.fg" fontWeight="medium"><NextLink href={`/parks/${c.parkCode}`}>{c.name}</NextLink></CLink>
                   {/* Why is this here? Surface the CONSIDERED edge's provenance (ADR-039, friction #10). */}
                   {(() => {
                     const reason = consideredReason(c.source);
