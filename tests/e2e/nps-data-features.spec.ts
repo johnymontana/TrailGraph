@@ -28,7 +28,8 @@ test('park page shows an accessibility scorecard, framed as reported (F5)', asyn
 test('park page lists campground inventory facets (F3)', async ({ page }) => {
   await page.goto('/parks/yell');
   await expect(page.getByRole('heading', { name: 'Campgrounds' })).toBeVisible();
-  await expect(page.getByText('Canyon Campground')).toBeVisible();
+  // Scope to the campground link (the seed's alert text also mentions "Canyon Campground").
+  await expect(page.getByRole('link', { name: /Canyon Campground/ })).toBeVisible();
   await expect(page.getByText(/273 sites/)).toBeVisible();
 });
 

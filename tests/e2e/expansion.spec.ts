@@ -72,7 +72,7 @@ test('unified search page renders its query form and is in the nav', async ({ pa
   await expect(page.getByRole('button', { name: 'Search' })).toBeVisible();
   // No query yet → prompt, not results. (Semantic results need populated embeddings + the AI Gateway,
   // which CI/e2e don't have — same reason vibeSearch has no e2e; results aren't asserted here.)
-  await expect(page.getByText(/search across parks, places, and people/i)).toBeVisible();
+  await expect(page.getByText(/search across parks, places/i)).toBeVisible();
 });
 
 test('explore exposes an amenity facet that filters parks', async ({ page }) => {
