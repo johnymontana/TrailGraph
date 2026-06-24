@@ -68,12 +68,28 @@ export interface NpsCampground {
   reservationUrl?: string;
   amenities?: Record<string, unknown>;
   accessibility?: Record<string, unknown>;
+  operatingHours?: unknown[]; // requested via fields= (F1)
+  campsites?: Record<string, unknown>; // F3: site-type counts (tentOnly, electricalHookups, rvOnly, group, totalSites…)
+  numberOfSitesReservable?: string | number; // F3
+  numberOfSitesFirstComeFirstServe?: string | number; // F3
+  fees?: unknown[]; // F3
 }
 
 export interface NpsThingToDo {
   id: string;
   title: string;
   shortDescription?: string;
+  longDescription?: string; // requested via fields= (F7) — richer text for length/elevation extraction
+  duration?: string;
+  durationDescription?: string;
+  timeOfDay?: string[];
+  season?: string[];
+  topics?: NpsActivityRef[];
+  tags?: string[];
+  arePetsPermitted?: string | boolean;
+  isReservationRequired?: string | boolean;
+  doFeesApply?: string | boolean;
+  accessibilityInformation?: string; // F5
   latitude?: string;
   longitude?: string;
   relatedParks?: { parkCode: string }[];
@@ -124,6 +140,8 @@ export interface NpsTourStop {
   assetType?: string; // Place | Campground | VisitorCenter
   assetId?: string;
   title?: string;
+  audioFileUrl?: string; // F6: self-guided audio
+  transcript?: string;
 }
 export interface NpsTour {
   id: string;
@@ -149,10 +167,13 @@ export interface NpsPassportStamp {
 export interface NpsParkingLot {
   id: string;
   name?: string;
+  description?: string;
   latitude?: string;
   longitude?: string;
   relatedParks?: NpsRelatedPark[];
   accessibility?: Record<string, unknown>;
+  operatingHours?: unknown[]; // F1/F10 (requested via fields=)
+  livedata?: Record<string, unknown>; // F10: real-time availability (sparse); kept runtime, not stored
 }
 
 /** Articles (`/articles`) — "learn more" content; `(:Article)-[:ABOUT]->(:Park)`. */
@@ -161,8 +182,59 @@ export interface NpsArticle {
   title?: string;
   url?: string;
   listingDescription?: string;
+  bodyText?: string; // full article body — must be requested via fields=; activates article_fulltext (F8)
   relatedParks?: NpsRelatedPark[];
   images?: NpsImage[];
+}
+
+/** Webcams (`/webcams`, bonus) — `(:Webcam)-[:ABOUT]->(:Park)`. */
+export interface NpsWebcam {
+  id: string;
+  title?: string;
+  description?: string;
+  url?: string;
+  status?: string;
+  isStreaming?: boolean;
+  images?: NpsImage[];
+  relatedParks?: NpsRelatedPark[];
+}
+
+/** Lesson plans (`/lessonplans`, bonus) — educator content; `(:LessonPlan)-[:ABOUT]->(:Park)`. */
+export interface NpsLessonPlan {
+  id: string;
+  title?: string;
+  url?: string;
+  gradeLevel?: string;
+  subject?: string;
+  duration?: string;
+  relatedParks?: NpsRelatedPark[];
+  topics?: NpsActivityRef[];
+}
+
+/** Multimedia (`/multimedia/audio|galleries|videos`, F6) — one shape covers the three (extra fields ignored). */
+export interface NpsMultimedia {
+  id: string;
+  title?: string;
+  description?: string;
+  durationMs?: number | string;
+  permalinkUrl?: string;
+  transcript?: string;
+  assetCount?: number | string;
+  relatedParks?: NpsRelatedPark[];
+  tags?: string[];
+}
+
+/** News releases (`/newsreleases`, F8) — timely content; `(:NewsRelease)-[:ABOUT]->(:Park)`. */
+export interface NpsNewsRelease {
+  id: string;
+  url?: string;
+  title?: string;
+  abstract?: string;
+  releasedate?: string; // e.g. "2026-06-20 00:00:00.0"
+  image?: NpsImage;
+  images?: NpsImage[];
+  relatedParks?: NpsRelatedPark[];
+  tags?: string[];
 }
 
 export interface NpsGeneric {
@@ -207,14 +279,25 @@ export async function fetchPage<T>(
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const res = await fetch(url, { headers: { 'X-Api-Key': env.nps.apiKey } });
-    if (res.ok) return (await res.json()) as NpsPage<T>;
+    if (res.ok) {
+      // A truncated/malformed body (seen on large /multimedia pages — the server cuts the response
+      // mid-string) makes res.json() throw. That's almost always transient, so retry like a 5xx rather
+      // than letting one bad page abort the whole resource. The final NpsRateLimitError below makes a
+      // *persistently* bad page PAUSE the resource (resume next run) instead of hard-failing the sync.
+      try {
+        return (await res.json()) as NpsPage<T>;
+      } catch {
+        await sleep(500 * 2 ** attempt);
+        continue;
+      }
+    }
     if (res.status === 429 || res.status >= 500) {
       await sleep(500 * 2 ** attempt); // exponential backoff
       continue;
     }
     throw new Error(`NPS ${resource} ${res.status}: ${await res.text()}`);
   }
-  throw new NpsRateLimitError(`NPS ${resource} rate-limited (429/5xx) after retries`);
+  throw new NpsRateLimitError(`NPS ${resource} unavailable (429/5xx/parse error) after retries`);
 }
 
 /**

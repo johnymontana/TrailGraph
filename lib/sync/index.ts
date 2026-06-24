@@ -17,6 +17,10 @@ import {
   type NpsPassportStamp,
   type NpsParkingLot,
   type NpsArticle,
+  type NpsNewsRelease,
+  type NpsMultimedia,
+  type NpsWebcam,
+  type NpsLessonPlan,
 } from '../nps';
 import {
   upsertParks,
@@ -33,9 +37,17 @@ import {
   upsertParkingLots,
   upsertArticles,
   upsertEntrancePasses,
+  upsertEntranceFees,
+  upsertEvents,
+  upsertNewsReleases,
+  upsertMultimedia,
+  upsertWebcams,
+  upsertLessonPlans,
 } from './upserts';
 import { embedParks } from './embed-parks';
 import { embedPlaces, embedPeople, embedArticles } from './embed-nodes';
+import { deriveNear } from './derive-near';
+import { deriveSharedEdges } from './derive-shared';
 
 /**
  * NPS sync orchestrator (ADR-007).
@@ -203,38 +215,6 @@ async function pagedStep<T>(
   return { resource, counts: { count }, ms };
 }
 
-// ─── Generic upserts for the long-tail resources ───────────────────────────────
-async function upsertEvents(events: NpsGeneric[]): Promise<{ active: number; expired: number }> {
-  const rows = events.map((e) => ({
-    id: String(e.id),
-    title: String(e.title ?? ''),
-    dateStart: (e.datestart as string) ?? null,
-    dateEnd: (e.dateend as string) ?? null,
-    parkCode: (e.sitecode as string) ?? (e.parkCode as string) ?? null,
-    lat: e.latitude ? Number(e.latitude) : null,
-    lng: e.longitude ? Number(e.longitude) : null,
-  }));
-  const ids = rows.map((r) => r.id);
-  const up = await writeGraph<{ c: number }>(
-    `UNWIND $rows AS row
-     MERGE (e:Event {id: row.id})
-       SET e.title = row.title, e.dateStart = row.dateStart, e.dateEnd = row.dateEnd,
-           e.active = true,
-           e.location = CASE WHEN row.lat IS NOT NULL AND row.lng IS NOT NULL
-                             THEN point({latitude: row.lat, longitude: row.lng}) ELSE e.location END,
-           e.lastSyncedAt = datetime()
-     WITH e, row WHERE row.parkCode IS NOT NULL
-     MATCH (p:Park {parkCode: row.parkCode}) MERGE (e)-[:HELD_AT]->(p)
-     RETURN count(e) AS c`,
-    { rows },
-  );
-  const exp = await writeGraph<{ c: number }>(
-    `MATCH (e:Event) WHERE e.active = true AND NOT e.id IN $ids SET e.active = false RETURN count(e) AS c`,
-    { ids },
-  );
-  return { active: up[0]?.c ?? 0, expired: exp[0]?.c ?? 0 };
-}
-
 // ─── Tier orchestration ────────────────────────────────────────────────────────
 export async function runSlowSync(): Promise<StepResult[]> {
   'use workflow';
@@ -264,17 +244,37 @@ export async function runSlowSync(): Promise<StepResult[]> {
   );
   out.push(
     await step('campgrounds', 'slow', async () => ({
-      count: await upsertCampgrounds(await fetchAll<NpsCampground>('campgrounds')),
+      // F1 hours + F3 inventory (campsites/fees) — additive fields=.
+      count: await upsertCampgrounds(
+        await fetchAll<NpsCampground>('campgrounds', { fields: ['operatingHours', 'campsites', 'fees'] }),
+      ),
     })),
   );
   out.push(
     await step('visitorcenters', 'slow', async () => ({
-      count: await upsertVisitorCenters(await fetchAll<NpsGeneric>('visitorcenters')),
+      count: await upsertVisitorCenters(await fetchAll<NpsGeneric>('visitorcenters', { fields: ['operatingHours', 'accessibility'] })),
     })),
   );
   out.push(
     await step('thingstodo', 'slow', async () => ({
-      count: await upsertThingsToDo(await fetchAll<NpsThingToDo>('thingstodo')),
+      // F7 (granular facets) + F5 (accessibilityInformation) — all additive fields=.
+      count: await upsertThingsToDo(
+        await fetchAll<NpsThingToDo>('thingstodo', {
+          fields: [
+            'longDescription',
+            'duration',
+            'durationDescription',
+            'timeOfDay',
+            'season',
+            'topics',
+            'tags',
+            'arePetsPermitted',
+            'isReservationRequired',
+            'doFeesApply',
+            'accessibilityInformation',
+          ],
+        }),
+      ),
     })),
   );
   // NPS expansion (Phase 1): places, people, tours, then amenity bridges (need places/VCs to exist).
@@ -297,9 +297,17 @@ export async function runSlowSync(): Promise<StepResult[]> {
   // Content endpoints (Phase 1 cont.): passport stamps, parking lots, articles. Entrance passes are
   // derived from already-synced Park JSON (no extra NPS fetch) so they don't add rate-limit pressure.
   out.push(await pagedStep<NpsPassportStamp>('passportstamplocations', 'passportstamplocations', undefined, upsertPassportStamps));
-  out.push(await pagedStep<NpsParkingLot>('parkinglots', 'parkinglots', undefined, upsertParkingLots));
-  out.push(await pagedStep<NpsArticle>('articles', 'articles', ['images'], upsertArticles));
-  out.push(await step('entrancepasses', 'slow', async () => ({ count: await upsertEntrancePasses() })));
+  // F10: request static detail fields (accessibility/hours; livedata stays a runtime concern).
+  out.push(await pagedStep<NpsParkingLot>('parkinglots', 'parkinglots', ['accessibility', 'operatingHours'], upsertParkingLots));
+  // bodyText activates the article_fulltext/article_embedding indexes (latent-bug fix, plan F8); when
+  // fields= is set NPS drops bodyText from the default payload, so it must be requested explicitly.
+  out.push(await pagedStep<NpsArticle>('articles', 'articles', ['images', 'bodyText'], upsertArticles));
+  out.push(
+    await step('entrancepasses', 'slow', async () => ({
+      passes: await upsertEntrancePasses(),
+      fees: await upsertEntranceFees(), // F2: (:Park)-[:CHARGES]->(:EntranceFee) from already-synced JSON
+    })),
+  );
 
   out.push(await step('embeddings', 'slow', async () => embedParks()));
   // Semantic vectors for the new nodes (content-hash gated; first run is a large one-time backfill).
@@ -311,6 +319,21 @@ export async function runSlowSync(): Promise<StepResult[]> {
     out.push(await step('embed-articles', 'slow', async () => embedArticles()));
   }
 
+  // F6: multimedia is a large, opt-in corpus (galleries can be 10k+ assets) — gate behind SYNC_MULTIMEDIA=1.
+  if (process.env.SYNC_MULTIMEDIA === '1') {
+    out.push(await pagedStep<NpsMultimedia>('multimedia-audio', 'multimedia/audio', ['transcript'], (b) => upsertMultimedia('AudioFile', b)));
+    out.push(await pagedStep<NpsMultimedia>('multimedia-galleries', 'multimedia/galleries', undefined, (b) => upsertMultimedia('Gallery', b)));
+    out.push(await pagedStep<NpsMultimedia>('multimedia-videos', 'multimedia/videos', ['transcript'], (b) => upsertMultimedia('Video', b)));
+  }
+
+  // Bonus: webcams as graph nodes + lesson plans (educator content).
+  out.push(await pagedStep<NpsWebcam>('webcams', 'webcams', undefined, upsertWebcams));
+  out.push(await pagedStep<NpsLessonPlan>('lessonplans', 'lessonplans', undefined, upsertLessonPlans));
+
+  // Derivations run last (need the full corpus): NEAR proximity (F9) + materialized shared-topic/activity (bonus).
+  out.push(await step('derive-near', 'slow', async () => deriveNear()));
+  out.push(await step('derive-shared', 'slow', async () => deriveSharedEdges()));
+
   return out;
 }
 
@@ -318,7 +341,19 @@ export async function runFastSync(): Promise<StepResult[]> {
   'use workflow';
   const out: StepResult[] = [];
   out.push(await step('alerts', 'fast', async () => upsertAlerts(await fetchAll<NpsAlert>('alerts'))));
-  out.push(await step('events', 'fast', async () => upsertEvents(await fetchAll<NpsGeneric>('events'))));
+  out.push(
+    await step('events', 'fast', async () => {
+      // F4: richer events + recurrence expanded to CalendarDate over a 120-day horizon from today.
+      const todayISO = new Date().toISOString().slice(0, 10);
+      return upsertEvents(await fetchAll<NpsGeneric>('events', { fields: ['dates', 'types', 'tags'] }), todayISO);
+    }),
+  );
+  // F8: news releases are volatile → fast tier (like alerts/events).
+  out.push(
+    await step('newsreleases', 'fast', async () => ({
+      count: await upsertNewsReleases(await fetchAll<NpsNewsRelease>('newsreleases', { fields: ['relatedParks'] })),
+    })),
+  );
   return out;
 }
 

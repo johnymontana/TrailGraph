@@ -36,7 +36,8 @@ export async function forYou(
       AND (NOT $wheelchair OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.wheelchairAccessible = true })
       AND ALL(req IN $required WHERE
             EXISTS { (p)-[:HAS_PLACE]->(:Place)-[:HAS_AMENITY]->(:Amenity {name: req}) }
-            OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) })
+            OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) }
+            OR EXISTS { (p)<-[:IN_PARK]-(:Campground)-[:HAS_AMENITY]->(:Amenity {name: req}) })
     WITH p, sum(coalesce(pr.weight, 1.0)) AS score, count(DISTINCT d) AS matches, collect(DISTINCT d.name) AS matched
     RETURN p.parkCode AS parkCode, p.fullName AS name, p.designation AS designation, p.states AS states,
            p.location.latitude AS lat, p.location.longitude AS lng,
@@ -152,7 +153,8 @@ export async function rankParks(params: RankParams): Promise<{ items: RankedPark
   where.push('(NOT $wheelchair OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.wheelchairAccessible = true })');
   where.push(`ALL(req IN $required WHERE
         EXISTS { (p)-[:HAS_PLACE]->(:Place)-[:HAS_AMENITY]->(:Amenity {name: req}) }
-        OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) })`);
+        OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) }
+        OR EXISTS { (p)<-[:IN_PARK]-(:Campground)-[:HAS_AMENITY]->(:Amenity {name: req}) })`);
   where.push('($maxBortle IS NULL OR coalesce(p.bortleScale, 99) <= $maxBortle)');
   const whereClause = 'WHERE ' + where.join('\n      AND ');
   // With a free-text query, draw the candidate set from the same fulltext index searchParks uses (then

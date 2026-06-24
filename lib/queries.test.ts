@@ -7,8 +7,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('./neo4j', () => ({ readGraph: vi.fn(), writeGraph: vi.fn() }));
 vi.mock('./embed-cache', () => ({ embedQuery: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]) }));
 
-import { imagesWithFallback, vibeSearch } from './queries';
+import { imagesWithFallback, vibeSearch, searchParks, facets, closureWarningsForTrip, parksWithEventOn, tripBudget } from './queries';
 import { readGraph } from './neo4j';
+
+const ALL_DAY = { monday: 'All Day', tuesday: 'All Day', wednesday: 'All Day', thursday: 'All Day', friday: 'All Day', saturday: 'All Day', sunday: 'All Day' };
 
 describe('imagesWithFallback (park hero image source, ADR-039 #7)', () => {
   it('prefers the rich imagesFull records when present', () => {
@@ -70,5 +72,34 @@ describe('vibeSearch constraint-aware candidates (ADR-046, Friction #2)', () => 
     const [, params] = mockRead.mock.calls[0] as [string, Record<string, unknown>];
     expect(params).toMatchObject({ rv: null, wheelchair: false, required: [], maxBortle: null });
     expect(params.k).toBe(10 * 2);
+  });
+});
+
+describe('tripBudget (F2)', () => {
+  const mockRead = vi.mocked(readGraph);
+  beforeEach(() => {
+    mockRead.mockReset();
+  });
+
+  it('coerces missing matching entrance fees to 0 in the query contract', async () => {
+    mockRead
+      .mockResolvedValueOnce([
+        { parkCode: 'acad', name: 'Acadia National Park', fee: 0, feeFree: false },
+        { parkCode: 'grca', name: 'Grand Canyon National Park', fee: 0, feeFree: true },
+      ] as never)
+      .mockResolvedValueOnce([{ cost: 80 }] as never);
+
+    const budget = await tripBudget(['acad', 'grca'], 'vehicle');
+
+    const [query, params] = mockRead.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('ELSE coalesce(fee, 0.0) END AS fee');
+    expect(params).toMatchObject({ parkCodes: ['acad', 'grca'], unit: 'vehicle' });
+    expect(budget.parks).toEqual([
+      { parkCode: 'acad', name: 'Acadia National Park', fee: 0, feeFree: false },
+      { parkCode: 'grca', name: 'Grand Canyon National Park', fee: 0, feeFree: true },
+    ]);
+    expect(budget.total).toBe(0);
+    expect(budget.atbCost).toBe(80);
+    expect(budget.atbSaves).toBe(false);
   });
 });

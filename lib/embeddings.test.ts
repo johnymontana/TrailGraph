@@ -50,6 +50,10 @@ describe('composeArticleText', () => {
     expect(composeArticleText({ title: 'Geysers', description: 'How they work.' })).toBe('Geysers\nHow they work.');
     expect(composeArticleText({ title: 'Just a title' })).toBe('Just a title');
   });
+  it('includes the full body for semantic search (F8)', () => {
+    expect(composeArticleText({ title: 'Geysers', description: 'Blurb.', body: 'The caldera powers 10,000 features.' }))
+      .toBe('Geysers\nBlurb.\nThe caldera powers 10,000 features.');
+  });
 });
 
 describe('clampForEmbedding (8192-token input guard)', () => {

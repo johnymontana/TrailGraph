@@ -2,6 +2,7 @@ import { writeGraph, readGraph } from './neo4j';
 import { memory } from './memory';
 import { canonicalizeValue } from './canonicalize';
 import { preferenceSignature, suppress, isSuppressed } from './tombstone';
+import { ACCESS_AMENITIES, ACCESS_NAME_BY_ID } from './datasources/accessibility';
 
 /**
  * Cross-graph bridges (ADR-010). Path A = exact, deterministic edges written with the parkCode/name
@@ -188,6 +189,38 @@ export async function setTravelConstraints(
       { userId, name: target.name },
     );
   }
+}
+
+/** Canonical accessibility amenity ids (F5) the user can require — for the `set_accessibility_needs` tool. */
+export const ACCESSIBILITY_FEATURE_IDS = ACCESS_AMENITIES.map((a) => a.id);
+
+/**
+ * F5: record the user's accessibility needs as `(:User)-[:REQUIRES]->(:Amenity {accessibility})`, reusing
+ * the existing REQUIRES bridge so `vibeSearch`/`explain`/`recommend` honor them with no new filter code.
+ * MERGEs the canonical amenity so it works even before a sync has tagged it. Returns the ids applied.
+ */
+export async function setAccessibilityNeeds(userId: string, featureIds: string[]): Promise<string[]> {
+  const valid = [...new Set(featureIds)].filter((id) => ACCESS_AMENITIES.some((a) => a.id === id));
+  if (!valid.length) return [];
+  await writeGraph(
+    `MERGE (u:User {userId: $userId})
+     WITH u UNWIND $ids AS aid
+     MERGE (am:Amenity {id: aid}) ON CREATE SET am.name = $names[aid], am.accessibility = true
+     MERGE (u)-[:REQUIRES]->(am)`,
+    { userId, ids: valid, names: ACCESS_NAME_BY_ID },
+  );
+  return valid;
+}
+
+/** Clear only the user's accessibility REQUIRES edges (P2-2) — leaves non-accessibility amenity needs +
+ * the wheelchair/RV scalar constraints intact (unlike `clearTravelConstraints`). */
+export async function clearAccessibilityNeeds(userId: string): Promise<void> {
+  await writeGraph(
+    `MATCH (u:User {userId:$userId})-[r:REQUIRES]->(am:Amenity)
+     WHERE coalesce(am.accessibility, false) = true OR am.id IN $ids
+     DELETE r`,
+    { userId, ids: ACCESSIBILITY_FEATURE_IDS },
+  );
 }
 
 export async function getTravelConstraints(userId: string): Promise<TravelConstraints> {

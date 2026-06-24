@@ -16,6 +16,10 @@ export interface RankDefaults {
   requiredAmenities: string[];
 }
 
+/** Campground amenities offered as live-toggle chips (P1-4). These exist as `:Amenity {name}` nodes
+ * (synthesized by the F3 campground-inventory sync) and filter via `REQUIRES`/the rank query. */
+const CAMP_AMENITY_CHIPS = ['Dump Station', 'Showers', 'Potable Water', 'Cell Reception'];
+
 /** The active /explore faceted filters — the live panel refines WITHIN these (ADR-046). */
 export interface RankFacets {
   q?: string;
@@ -48,6 +52,10 @@ export function RankPanel({ defaults, facets = {} }: { defaults: RankDefaults; f
   const [crowd, setCrowd] = useState(0);
   const [wheelchair, setWheelchair] = useState(defaults.wheelchairAccessible);
   const [rvFt, setRvFt] = useState(defaults.rvMaxLengthFt ?? 0);
+  // Required amenities (P1-4): seed from the user's saved constraints, then toggle campground chips live.
+  const [requiredAmenities, setRequiredAmenities] = useState<string[]>(defaults.requiredAmenities);
+  const toggleAmenity = (a: string) =>
+    setRequiredAmenities((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
   // `null` = not loaded yet (first paint, before the initial fetch resolves) vs `[]` = loaded, no
   // matches. Distinguishing them kills the one-frame "0 matches" flash the test report flagged (§5.2):
   // we show a skeleton until the first response, never "no parks match".
@@ -86,7 +94,7 @@ export function RankPanel({ defaults, facets = {} }: { defaults: RankDefaults; f
             crowdTolerance: crowd / 100,
             wheelchairAccessible: wheelchair || undefined,
             rvMaxLengthFt: rvFt > 0 ? rvFt : undefined,
-            requiredAmenities: defaults.requiredAmenities,
+            requiredAmenities,
             limit: 12,
           }),
         });
@@ -110,7 +118,7 @@ export function RankPanel({ defaults, facets = {} }: { defaults: RankDefaults; f
     crowd,
     wheelchair,
     rvFt,
-    defaults.requiredAmenities,
+    requiredAmenities,
     facets.q,
     facets.stateCode,
     facets.activity,
@@ -191,6 +199,37 @@ export function RankPanel({ defaults, facets = {} }: { defaults: RankDefaults; f
           <Switch.Label>Wheelchair-accessible camping</Switch.Label>
         </Switch.Root>
       </SimpleGrid>
+
+      {/* Campground amenity chips (P1-4) — toggle to require an amenity; re-ranks live. */}
+      <Box mt={4}>
+        <Text fontSize="sm" color="fg.muted" mb={2}>Require campground amenities</Text>
+        <Flex gap={2} wrap="wrap">
+          {CAMP_AMENITY_CHIPS.map((a) => {
+            const active = requiredAmenities.includes(a);
+            return (
+              <Box
+                key={a}
+                as="button"
+                onClick={() => toggleAmenity(a)}
+                px={3}
+                py={1}
+                borderRadius="full"
+                borderWidth="1px"
+                borderColor={active ? 'brand.solid' : 'border'}
+                bg={active ? 'brand.muted' : 'transparent'}
+                color={active ? 'brand.fg' : 'fg.muted'}
+                fontSize="sm"
+                cursor="pointer"
+                transition="background 0.15s, border-color 0.15s"
+                _hover={{ borderColor: 'brand.solid' }}
+                aria-pressed={active}
+              >
+                {a}
+              </Box>
+            );
+          })}
+        </Flex>
+      </Box>
 
       <Flex align="center" gap={2} mt={4} mb={2}>
         <Text fontSize="sm" color="fg.muted">

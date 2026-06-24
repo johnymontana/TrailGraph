@@ -127,6 +127,74 @@ export async function seedTestData(): Promise<void> {
       SET ev.title='Perseid Star Party', ev.active=true, ev.dateStart='2026-08-11', ev.dateEnd='2026-08-13'
     MERGE (ev)-[:HELD_AT]->(yell)
   `);
+
+  // ── NPS data-features fixtures (plan F1–F10 + bonuses) ──────────────────────────
+  // Second block so it can MATCH the nodes the first block MERGEd (committed by now).
+  await writeGraph(`
+    MATCH (yell:Park {parkCode:'yell'}), (grca:Park {parkCode:'grca'})
+    MATCH (cg:Campground {id:'cg-canyon'})
+    MATCH (lot:ParkingLot {id:'lot-canyon'})
+    MATCH (ev:Event {id:'event-yell-astro'})
+    MATCH (ttd:ThingToDo {id:'ttd-rim'})
+    MATCH (art:Article {id:'article-yell-geysers'})
+    MATCH (amrest:Amenity {id:'amen-restrooms'})
+    MATCH (volc:Topic {id:'top-volc'})
+    // F1: real operatingHours JSON (Park Hours all-day + a dated road closure) + derived season summary.
+    SET yell.operatingHours='[{"name":"Park Hours","standardHours":{"monday":"All Day","tuesday":"All Day","wednesday":"All Day","thursday":"All Day","friday":"All Day","saturday":"All Day","sunday":"All Day"},"exceptions":[]},{"name":"North Entrance Road","standardHours":{"monday":"All Day","tuesday":"All Day","wednesday":"All Day","thursday":"All Day","friday":"All Day","saturday":"All Day","sunday":"All Day"},"exceptions":[{"name":"Winter closure","startDate":"2026-11-01","endDate":"2027-04-15","exceptionHours":{"monday":"Closed","tuesday":"Closed","wednesday":"Closed","thursday":"Closed","friday":"Closed","saturday":"Closed","sunday":"Closed"}}]}]',
+        yell.seasonalClosureSummary='North Entrance Road: closed Nov 1 – Apr 15'
+    MERGE (winter:Season {name:'winter'}) MERGE (spring:Season {name:'spring'})
+    MERGE (summer:Season {name:'summer'}) MERGE (fall:Season {name:'fall'})
+    MERGE (yell)-[:OPEN_IN]->(summer) MERGE (yell)-[:OPEN_IN]->(fall)
+    MERGE (yell)-[:OPEN_IN]->(spring) MERGE (yell)-[:OPEN_IN]->(winter)
+    // F1 hours nodes (so graph-level reads have data too).
+    MERGE (oh:OperatingHours {id:'yell:hours:1'})
+      SET oh.name='North Entrance Road', oh.allYear=false, oh.mon='All Day', oh.tue='All Day', oh.wed='All Day', oh.thu='All Day', oh.fri='All Day', oh.sat='All Day', oh.sun='All Day'
+    MERGE (yell)-[:HAS_HOURS]->(oh)
+    MERGE (ex:HoursException {id:'yell:hours:1:exc:0'})
+      SET ex.name='Winter closure', ex.startDate=date('2026-11-01'), ex.endDate=date('2027-04-15'),
+          ex.mon='Closed', ex.tue='Closed', ex.wed='Closed', ex.thu='Closed', ex.fri='Closed', ex.sat='Closed', ex.sun='Closed'
+    MERGE (oh)-[:HAS_EXCEPTION]->(ex)
+    // F2: structured entrance fee + a fee-free day; grca charges nothing.
+    MERGE (fee:EntranceFee {id:'yell:Private Vehicle'}) SET fee.title='Entrance - Private Vehicle', fee.cost=35.0, fee.unit='vehicle'
+    MERGE (yell)-[:CHARGES]->(fee)
+    SET grca.feeFree=true
+    MERGE (ff:FeeFreeDay {date: date('2026-08-04')}) SET ff.name='Anniversary of the Great American Outdoors Act'
+    // F3: campground inventory + the (previously dead) (:Campground)-[:HAS_AMENITY] edge.
+    SET cg.totalSites=273, cg.sitesReservable=273, cg.sitesFirstCome=0, cg.tentSites=200, cg.rvSites=73,
+        cg.electricSites=0, cg.groupSites=0, cg.hasDumpStation=true, cg.hasShowers=true,
+        cg.hasPotableWater=true, cg.hasHookups=false, cg.cellReception=true
+    MERGE (dump:Amenity {id:'amen:dump-station'}) SET dump.name='Dump Station'
+    MERGE (cg)-[:HAS_AMENITY]->(dump)
+    // F4: event enrichment + EventType + materialized CalendarDate.
+    SET ev.category='Astronomy', ev.isFree=true, ev.regRequired=false
+    MERGE (etype:EventType {name:'Astronomy'}) MERGE (ev)-[:OF_TYPE]->(etype)
+    MERGE (cd:CalendarDate {date: date('2026-08-12')}) MERGE (ev)-[:OCCURS_ON]->(cd)
+    // F5: tag accessibility amenities + a canonical wheelchair amenity on the campground.
+    SET amrest.accessibility=true
+    MERGE (wc:Amenity {id:'amen:wheelchair-accessible'}) SET wc.name='Wheelchair Accessible', wc.accessibility=true
+    MERGE (cg)-[:HAS_AMENITY]->(wc)
+    // F7: thing-to-do facets + topic/season edges.
+    SET ttd.petsAllowed=true, ttd.timeOfDay=['Dawn','Dusk'], ttd.season=['spring','summer','fall'],
+        ttd.durationText='1-2 hours', ttd.reservationRequired=false, ttd.feesApply=false
+    MERGE (ttd)-[:RELATES_TO_TOPIC]->(volc)
+    MERGE (ttd)-[:BEST_IN]->(summer)
+    // F8: news release + article body (activates article_fulltext).
+    MERGE (nr:NewsRelease {id:'news-yell-1'})
+      SET nr.title='Yellowstone announces summer road work', nr.abstract='Crews will repave the Grand Loop Road this summer.',
+          nr.url='https://www.nps.gov/yell/news1.htm', nr.releaseDate=date('2026-06-15')
+    MERGE (nr)-[:ABOUT]->(yell)
+    SET art.body='The Yellowstone caldera powers more than 10,000 hydrothermal features, including the largest concentration of geysers on Earth such as Old Faithful and Steamboat Geyser.'
+    // F10: parking detail (accessible spaces + EV charging).
+    SET lot.accessibleSpaces=12, lot.hasEvCharging=true, lot.hasLiveData=false
+    // Bonus: queryable contacts + a webcam node + a lesson plan.
+    SET yell.phone='307-344-7381', yell.email='yell_info@nps.gov'
+    MERGE (wcam:Webcam {id:'webcam-yell-oldfaithful'})
+      SET wcam.title='Old Faithful Webcam', wcam.url='https://www.nps.gov/yell/webcam', wcam.status='Active', wcam.isStreaming=true
+    MERGE (wcam)-[:ABOUT]->(yell)
+    MERGE (lp:LessonPlan {id:'lesson-yell-geology'})
+      SET lp.title='Geology of Yellowstone', lp.url='https://www.nps.gov/yell/lesson1.htm', lp.gradeLevel='6-8', lp.subject='Earth Science'
+    MERGE (lp)-[:ABOUT]->(yell)
+  `);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
