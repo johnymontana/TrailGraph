@@ -61,6 +61,14 @@ export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: un
       return <QuestionCard data={data} onAnswer={onAnswer} />;
     case 'watch_list':
       return <WatchListCard data={data} />;
+    case 'hours_card':
+      return <HoursCard data={data} />;
+    case 'budget_card':
+      return <BudgetCard data={data} />;
+    case 'accessibility_card':
+      return <AccessibilityCard data={data} />;
+    case 'news_card':
+      return <NewsCard data={data} />;
     case 'why_this':
       return (
         <Card.Root variant="subtle" size="sm" my={2}>
@@ -337,6 +345,120 @@ function WatchListCard({ data }: { data: Record<string, unknown> }) {
           <Badge colorPalette={w.kind === 'trip' ? 'pine' : 'trail'}>{w.kind}</Badge>
           <Text fontSize="sm" flex="1">{w.label ?? w.refId}</Text>
         </HStack>
+      ))}
+    </Stack>
+  );
+}
+
+/** Open/closed + seasonal-closure card (F1, check_open). State is open/closed/unknown — "unknown" when
+ * the park reports no hours, never a false "closed". Framed as reported, not a safety guarantee. */
+function HoursCard({ data }: { data: Record<string, unknown> }) {
+  const state = (data.state as string) ?? 'unknown';
+  const name = (data.name as string) ?? 'This park';
+  const date = data.date as string | undefined;
+  const closure = data.closureSummary as string | null;
+  const feeFree = data.feeFree as { name: string } | null;
+  const palette = state === 'open' ? 'pine' : state === 'closed' ? 'red' : 'gray';
+  const label = state === 'open' ? 'Open' : state === 'closed' ? 'Closed' : 'Hours not reported';
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <HStack gap={2} wrap="wrap" mb={closure || feeFree ? 1 : 0}>
+          <Text fontWeight="semibold" fontFamily="heading">{name}</Text>
+          {date ? <Text fontSize="sm" color="fg.muted">· {date}</Text> : null}
+          <Badge colorPalette={palette}>{label}</Badge>
+          {feeFree ? <Badge colorPalette="trail" variant="solid">Fee-free: {feeFree.name}</Badge> : null}
+        </HStack>
+        {closure ? <Text fontSize="sm" color="fg.muted">{closure}</Text> : null}
+        <Text fontSize="xs" color="fg.muted" mt={2}>Hours are reported by the park — verify before you go.</Text>
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+/** Trip entrance-fee budget vs the annual pass (F2, trip_budget). Entrance fees only. */
+function BudgetCard({ data }: { data: Record<string, unknown> }) {
+  const unit = (data.unit as string) ?? 'vehicle';
+  const parks = (data.parks ?? []) as { parkCode: string; name: string; fee: number | null; feeFree: boolean }[];
+  const total = (data.total as number) ?? 0;
+  const atbCost = (data.atbCost as number) ?? 80;
+  const atbSaves = !!data.atbSaves;
+  if (!parks.length) return null;
+  const fmt = (n: number) => `$${n.toFixed(2)}`;
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading" mb={2}>Trip entrance fees · per {unit}</Text>
+        <Stack gap={1}>
+          {parks.map((p) => (
+            <HStack key={p.parkCode} justify="space-between">
+              <CLink asChild fontSize="sm" color="brand.fg"><NextLink href={`/parks/${p.parkCode}`}>{p.name}</NextLink></CLink>
+              <Text fontSize="sm" color="fg.muted">{p.feeFree ? 'Free' : p.fee != null ? fmt(p.fee) : '—'}</Text>
+            </HStack>
+          ))}
+        </Stack>
+        <HStack justify="space-between" mt={2} pt={2} borderTopWidth="1px" borderColor="border">
+          <Text fontWeight="medium" fontSize="sm">Pay per park</Text>
+          <Text fontWeight="medium" fontSize="sm">{fmt(total)}</Text>
+        </HStack>
+        <HStack justify="space-between">
+          <Text fontSize="sm">America the Beautiful annual pass</Text>
+          <Text fontSize="sm">{fmt(atbCost)}</Text>
+        </HStack>
+        <Text fontSize="xs" color={atbSaves ? 'brand.fg' : 'fg.muted'} mt={2}>
+          {atbSaves ? `The annual pass saves ${fmt(total - atbCost)} on this trip.` : 'Paying per park is cheaper for this trip.'}
+        </Text>
+        <Text fontSize="xs" color="fg.muted" mt={1}>Entrance fees only — excludes timed-entry reservations. As of last sync.</Text>
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+/** Accessibility scorecard (F5, accessibility_scorecard). Self-reported — framed as "reported". */
+function AccessibilityCard({ data }: { data: Record<string, unknown> }) {
+  const name = (data.name as string) ?? 'This park';
+  const features = (data.features ?? []) as string[];
+  const accessibleCampgrounds = (data.accessibleCampgrounds as number) ?? 0;
+  const audioDescribedPlaces = (data.audioDescribedPlaces as number) ?? 0;
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading" mb={2}>Accessibility · {name}</Text>
+        {features.length ? (
+          <HStack wrap="wrap" gap={1} mb={2}>
+            {features.map((f) => (
+              <Badge key={f} colorPalette="pine">{f}</Badge>
+            ))}
+          </HStack>
+        ) : (
+          <Text fontSize="sm" color="fg.muted" mb={2}>No accessibility features reported for this park.</Text>
+        )}
+        <Stack gap={0.5} fontSize="sm" color="fg.muted">
+          {accessibleCampgrounds > 0 ? <Text>{accessibleCampgrounds} accessible campground{accessibleCampgrounds > 1 ? 's' : ''}</Text> : null}
+          {audioDescribedPlaces > 0 ? <Text>{audioDescribedPlaces} audio-described place{audioDescribedPlaces > 1 ? 's' : ''}</Text> : null}
+        </Stack>
+        <Text fontSize="xs" color="fg.muted" mt={2}>Reported by the park — verify specifics with the park before you go.</Text>
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+/** Latest news releases for a park (F8, find_news). */
+function NewsCard({ data }: { data: Record<string, unknown> }) {
+  const news = (data.news ?? []) as { id: string; title: string; abstract: string | null; url: string | null; releaseDate: string | null }[];
+  if (!news.length) return <Text fontSize="sm" color="fg.muted" my={2}>No recent news releases for this park.</Text>;
+  return (
+    <Stack gap={2} my={2}>
+      {news.map((n) => (
+        <Box key={n.id} borderLeftWidth="4px" borderColor="blue.solid" pl={3}>
+          {n.url ? (
+            <CLink href={n.url} color="brand.fg" fontWeight="medium" fontSize="sm">{n.title} ↗</CLink>
+          ) : (
+            <Text fontWeight="medium" fontSize="sm">{n.title}</Text>
+          )}
+          {n.releaseDate ? <Text as="span" fontSize="xs" color="fg.muted"> · {n.releaseDate}</Text> : null}
+          {n.abstract ? <Text fontSize="sm" color="fg.muted" lineClamp={2}>{n.abstract}</Text> : null}
+        </Box>
       ))}
     </Stack>
   );

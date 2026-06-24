@@ -5,6 +5,51 @@ import { classifyDifficulty, difficultyDot } from './trails';
 import { recreationUrl, parseRidbId } from './recreation';
 import { weatherCodeLabel } from './weather';
 import { roadEventSeverity } from './conditions';
+import { isFeeFreeDay, FEE_FREE_DAYS } from './feefree';
+import { accessibilityFromText, deriveAccessibilityAmenityIds } from './accessibility';
+import { regionForState } from './regions';
+
+describe('isFeeFreeDay (F2 curated seed)', () => {
+  it('matches a curated fee-free day and rejects others', () => {
+    const sample = FEE_FREE_DAYS[0];
+    expect(isFeeFreeDay(sample.date)?.name).toBe(sample.name);
+    expect(isFeeFreeDay('2026-03-03')).toBeNull();
+  });
+  it('ships ~6 dates, all ISO-formatted', () => {
+    expect(FEE_FREE_DAYS.length).toBeGreaterThanOrEqual(5);
+    for (const d of FEE_FREE_DAYS) expect(d.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('accessibility derivation (F5, reuse :Amenity)', () => {
+  it('maps free text to canonical accessibility amenity ids', () => {
+    expect(accessibilityFromText('Wheelchair accessible boardwalk with braille signage')).toEqual(
+      expect.arrayContaining(['amen:wheelchair-accessible', 'amen:braille']),
+    );
+    expect(accessibilityFromText('Audio description available')).toEqual(['amen:audio-description']);
+    expect(accessibilityFromText('')).toEqual([]);
+  });
+  it('honors a negation guard for the generic wheelchair claim', () => {
+    expect(accessibilityFromText('This trail is not accessible')).not.toContain('amen:wheelchair-accessible');
+    // a specific feature still counts even alongside a negation
+    expect(accessibilityFromText('Not wheelchair accessible, but braille guides exist')).toEqual(['amen:braille']);
+  });
+  it('deriveAccessibilityAmenityIds merges text + boolean flags', () => {
+    expect(deriveAccessibilityAmenityIds({ wheelchair: true })).toEqual(['amen:wheelchair-accessible']);
+    expect(deriveAccessibilityAmenityIds({ audioDescription: true })).toEqual(['amen:audio-description']);
+    const ids = deriveAccessibilityAmenityIds({ text: 'accessible parking', wheelchair: true });
+    expect(ids).toEqual(expect.arrayContaining(['amen:accessible-parking', 'amen:wheelchair-accessible']));
+  });
+});
+
+describe('regionForState (F9)', () => {
+  it('maps states to curated regions, case-insensitively', () => {
+    expect(regionForState('UT')).toBe('Rocky Mountains');
+    expect(regionForState('ca')).toBe('Pacific West');
+    expect(regionForState('AK')).toBe('Alaska');
+    expect(regionForState('ZZ')).toBeNull();
+  });
+});
 
 describe('darkSkyRating (§5a)', () => {
   it('maps Bortle to a 1–5 star rating (darker = more stars)', () => {

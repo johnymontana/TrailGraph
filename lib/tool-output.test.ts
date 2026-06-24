@@ -69,6 +69,19 @@ describe('isRenderableToolOutput', () => {
     expect(isRenderableToolOutput('leaderboard_card', { entries: [] })).toBe(false);
   });
 
+  it('hours_card (F1): state or name; budget_card (F2): at least one park', () => {
+    expect(isRenderableToolOutput('hours_card', { state: 'open' })).toBe(true);
+    expect(isRenderableToolOutput('hours_card', { name: 'Glacier' })).toBe(true);
+    expect(isRenderableToolOutput('hours_card', {})).toBe(false);
+    expect(isRenderableToolOutput('budget_card', { parks: [{}] })).toBe(true);
+    expect(isRenderableToolOutput('budget_card', { parks: [] })).toBe(false);
+    expect(isRenderableToolOutput('accessibility_card', { features: [] })).toBe(true); // renders "none reported"
+    expect(isRenderableToolOutput('accessibility_card', { name: 'Glacier' })).toBe(true);
+    expect(isRenderableToolOutput('accessibility_card', {})).toBe(false);
+    expect(isRenderableToolOutput('news_card', { news: [] })).toBe(true); // renders "no recent news"
+    expect(isRenderableToolOutput('news_card', {})).toBe(false);
+  });
+
   it('question_card: needs a prompt and at least one option', () => {
     expect(isRenderableToolOutput('question_card', { prompt: 'Pick one', options: [{}] })).toBe(true);
     expect(isRenderableToolOutput('question_card', { prompt: 'Pick one', options: [] })).toBe(false);

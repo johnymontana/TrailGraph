@@ -41,9 +41,14 @@ export function ParkCard({ park, miles }: { park: ParkSummary & { miles?: number
               />
             ) : null}
 
-            {/* At-a-glance facets as icon chips (ADR-039): dark-sky + accessible. */}
-            {park.darkSky || park.accessible ? (
+            {/* At-a-glance facets as icon chips (ADR-039): dark-sky + accessible + fee-free. */}
+            {park.darkSky || park.accessible || park.feeFree ? (
               <HStack position="absolute" top={2} right={2} gap={1}>
+                {park.feeFree ? (
+                  <Badge bg="blackAlpha.700" color="white" gap={1} title="No entrance fee" aria-label="No entrance fee">
+                    Free
+                  </Badge>
+                ) : null}
                 {park.darkSky ? (
                   <Badge bg="blackAlpha.700" color="white" gap={1} title="Dark-sky park" aria-label="Dark-sky park">
                     <Icon boxSize={3}><LuStar /></Icon>

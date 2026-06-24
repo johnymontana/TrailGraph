@@ -14,7 +14,7 @@ import {
 import NextImage from 'next/image';
 import { LuCalendar, LuFootprints, LuMoon, LuStar, LuTicket, LuUsers } from 'react-icons/lu';
 import { StatCard } from '../../../components/ui/stat-card';
-import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph, peopleForPark, toursForPark, stampsForPark, eventsForPark, placesForPark, articlesForPark, parkingForPark } from '../../../lib/queries';
+import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph, peopleForPark, toursForPark, stampsForPark, eventsForPark, placesForPark, articlesForPark, parkingForPark, accessibilityScorecard, newsForPark, mediaForPark, type AccessibilityScorecard, type ParkMedia } from '../../../lib/queries';
 import { getAvailability } from '../../../lib/bridges';
 import { darkSkyRating, monthNames, difficultyDot, getWeather, getConditions, getAstro, sqmFromBortle, type Difficulty } from '../../../lib/datasources';
 import { explainForParks } from '../../../lib/explain';
@@ -62,7 +62,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
   const park = await parkDetail(parkCode);
   if (!park) notFound();
 
-  const [similar, nearby, together, graph, weather, people, tours, conditions, places, articles, parking] = await Promise.all([
+  const [similar, nearby, together, graph, weather, people, tours, conditions, places, articles, parking, accessibility, news, media] = await Promise.all([
     similarParks(parkCode).catch(() => []),
     nearbyParks(parkCode).catch(() => []),
     oftenPlannedTogether(parkCode).catch(() => []),
@@ -75,7 +75,10 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
     getConditions(parkCode).catch(() => ({ webcams: [], roadEvents: [] })),
     placesForPark(parkCode).catch(() => [] as { id: string; title: string; image: string | null; audioDescription: string | null; isStamp: boolean }[]),
     articlesForPark(parkCode).catch(() => [] as { id: string; title: string; url: string | null; description: string | null }[]),
-    parkingForPark(parkCode).catch(() => [] as { id: string; name: string; wheelchairAccessible: boolean }[]),
+    parkingForPark(parkCode).catch(() => [] as { id: string; name: string; wheelchairAccessible: boolean; accessibleSpaces: number | null; hasEvCharging: boolean; hasLiveData: boolean }[]),
+    accessibilityScorecard(parkCode).catch(() => null as AccessibilityScorecard | null),
+    newsForPark(parkCode).catch(() => [] as { id: string; title: string; abstract: string | null; url: string | null; releaseDate: string | null }[]),
+    mediaForPark(parkCode).catch(() => ({ audio: [], galleries: [], videos: [] }) as ParkMedia),
   ]);
 
   // Personalized rationale (§5f): "because you liked …" on related cards, for signed-in users.
@@ -89,7 +92,18 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
     ? await getAvailability(userId).catch(() => ({ start: null, end: null }))
     : { start: null, end: null };
   const events = await eventsForPark(parkCode, availability).catch(
-    () => [] as { id: string; title: string; dateStart: string | null; dateEnd: string | null; inWindow: boolean }[],
+    () =>
+      [] as {
+        id: string;
+        title: string;
+        dateStart: string | null;
+        dateEnd: string | null;
+        inWindow: boolean;
+        category: string | null;
+        isFree: boolean | null;
+        regRequired: boolean | null;
+        types: string[];
+      }[],
   );
   const rationale: Record<string, string[]> = userId
     ? await explainForParks(userId, [...similar, ...nearby, ...together].map((p) => p.parkCode)).catch(
@@ -102,7 +116,15 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
   };
 
   const images = park.images as { url: string; altText?: string }[];
-  const campgrounds = park.campgrounds as { id: string; name: string; reservationUrl: string | null }[];
+  const campgrounds = park.campgrounds as {
+    id: string;
+    name: string;
+    reservationUrl: string | null;
+    totalSites: number | null;
+    sitesFirstCome: number | null;
+    hasHookups: boolean | null;
+    hasDumpStation: boolean | null;
+  }[];
   const visitorCenters = park.visitorCenters as { id: string; name: string }[];
   const thingsToDo = park.thingsToDo as {
     id: string;
@@ -110,6 +132,10 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
     difficulty: Difficulty | null;
     length: number | null;
     elevationGain: number | null;
+    durationText: string | null;
+    petsAllowed: boolean | null;
+    timeOfDay: string[];
+    season: string[];
   }[];
   const bestMonths = park.bestMonths as number[];
   const monthlyVisits = park.monthlyVisits as number[];
@@ -147,6 +173,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
     : null;
   const statesLabel = (park.states as { name: string }[]).map((s) => s.name).filter(Boolean).join(', ');
   const hours = park.operatingHours as { name: string; description: string }[];
+  const openSeasons = (park.openSeasons as string[]) ?? [];
 
   return (
     <Box maxW="5xl" mx="auto" px={{ base: 4, md: 8 }} py={6}>
@@ -249,10 +276,22 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
             <Text fontSize="sm" color="fg.muted">No entrance fee.</Text>
           )}
 
-          {hours[0]?.description ? (
+          {hours[0]?.description || park.seasonalClosureSummary || openSeasons.length ? (
             <Box>
-              <Heading size="sm" mb={2}>Hours</Heading>
-              <Text fontSize="sm" color="fg.muted">{hours[0].description}</Text>
+              <Heading size="sm" mb={2}>Hours &amp; seasons</Heading>
+              {hours[0]?.description ? <Text fontSize="sm" color="fg.muted">{hours[0].description}</Text> : null}
+              {park.seasonalClosureSummary ? (
+                <Text fontSize="sm" color="orange.fg" mt={1}>⚠ {park.seasonalClosureSummary as string}</Text>
+              ) : null}
+              {openSeasons.length ? (
+                <HStack mt={2} gap={1} wrap="wrap">
+                  <Text fontSize="xs" color="fg.muted">Generally open:</Text>
+                  {openSeasons.map((s) => (
+                    <Badge key={s} colorPalette="pine" textTransform="capitalize">{s}</Badge>
+                  ))}
+                </HStack>
+              ) : null}
+              <Text fontSize="xs" color="fg.muted" mt={2}>Hours are reported by the park — verify before you go.</Text>
             </Box>
           ) : null}
         </Stack>
@@ -265,6 +304,12 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
             {park.url ? <CLink href={park.url as string} color="brand.fg">Official site →</CLink> : null}
             {park.directionsUrl ? <CLink href={park.directionsUrl as string} color="brand.fg">Directions →</CLink> : null}
           </HStack>
+          {park.phone || park.email ? (
+            <HStack gap={4} fontSize="sm" color="fg.muted" wrap="wrap">
+              {park.phone ? <Text>📞 {park.phone as string}</Text> : null}
+              {park.email ? <CLink href={`mailto:${park.email as string}`} color="brand.fg">✉ {park.email as string}</CLink> : null}
+            </HStack>
+          ) : null}
 
           {/* §5 conditions: dark sky + best time/crowds (structured, from the data-source adapters). */}
           {dark || bestMonths.length > 0 || park.crowdLevel || monthlyVisits.length === 12 || weather ? (
@@ -362,6 +407,8 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                     {n.difficulty ? `${difficultyDot(n.difficulty)} ` : ''}{n.title}
                     {n.length != null ? <Text as="span" color="fg.muted"> · {n.length} mi</Text> : null}
                     {n.elevationGain != null ? <Text as="span" color="fg.muted"> · {n.elevationGain} ft gain</Text> : null}
+                    {n.durationText ? <Text as="span" color="fg.muted"> · {n.durationText}</Text> : null}
+                    {n.petsAllowed ? <Badge ml={2} colorPalette="trail">dog-friendly</Badge> : null}
                   </Text>
                 ))}
               </Stack>
@@ -371,15 +418,24 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
             <Box>
               <Heading size="sm" mb={2}>Campgrounds</Heading>
               <Stack gap={1}>
-                {campgrounds.map((c) => (
-                  <Text key={c.id} fontSize="sm">
-                    {c.reservationUrl ? (
-                      <CLink href={c.reservationUrl} color="brand.fg">{c.name} ↗</CLink>
-                    ) : (
-                      c.name
-                    )}
-                  </Text>
-                ))}
+                {campgrounds.map((c) => {
+                  const facets = [
+                    c.totalSites ? `${c.totalSites} sites` : null,
+                    c.sitesFirstCome ? 'first-come' : null,
+                    c.hasHookups ? 'hookups' : null,
+                    c.hasDumpStation ? 'dump station' : null,
+                  ].filter(Boolean);
+                  return (
+                    <Text key={c.id} fontSize="sm">
+                      {c.reservationUrl ? (
+                        <CLink href={c.reservationUrl} color="brand.fg">{c.name} ↗</CLink>
+                      ) : (
+                        c.name
+                      )}
+                      {facets.length ? <Text as="span" color="fg.muted"> · {facets.join(' · ')}</Text> : null}
+                    </Text>
+                  );
+                })}
               </Stack>
             </Box>
           ) : null}
@@ -393,6 +449,23 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
               </Stack>
             </Box>
           ) : null}
+          {accessibility && (accessibility.features.length > 0 || accessibility.accessibleCampgrounds > 0 || accessibility.audioDescribedPlaces > 0) ? (
+            <Box>
+              <Heading size="sm" mb={2}>Accessibility</Heading>
+              {accessibility.features.length > 0 ? (
+                <HStack wrap="wrap" gap={1} mb={1}>
+                  {accessibility.features.map((f) => (
+                    <Badge key={f} colorPalette="pine">{f}</Badge>
+                  ))}
+                </HStack>
+              ) : null}
+              <Stack gap={0.5} fontSize="sm" color="fg.muted">
+                {accessibility.accessibleCampgrounds > 0 ? <Text>{accessibility.accessibleCampgrounds} accessible campground(s)</Text> : null}
+                {accessibility.audioDescribedPlaces > 0 ? <Text>{accessibility.audioDescribedPlaces} audio-described place(s)</Text> : null}
+              </Stack>
+              <Text fontSize="xs" color="fg.muted" mt={1}>Reported by the park — verify before you go.</Text>
+            </Box>
+          ) : null}
           {parking.length > 0 ? (
             <Box>
               <Heading size="sm" mb={2}>Parking</Heading>
@@ -400,7 +473,10 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                 {parking.map((p) => (
                   <Text key={p.id} fontSize="sm">
                     {p.name}
+                    {p.accessibleSpaces ? <Text as="span" color="fg.muted"> · {p.accessibleSpaces} accessible spaces</Text> : null}
                     {p.wheelchairAccessible ? <Badge ml={2} colorPalette="green">accessible</Badge> : null}
+                    {p.hasEvCharging ? <Badge ml={2} colorPalette="trail">EV charging</Badge> : null}
+                    {p.hasLiveData ? <Badge ml={2} colorPalette="blue">live</Badge> : null}
                   </Text>
                 ))}
               </Stack>
@@ -470,8 +546,11 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
             {events.map((e) => (
               <Text key={e.id} fontSize="sm">
                 {e.inWindow ? <Badge mr={2} colorPalette="green">during your visit</Badge> : null}
+                {e.isFree ? <Badge mr={2} colorPalette="trail">free</Badge> : null}
                 {e.title}
+                {e.types?.length ? <Badge ml={2} colorPalette="pine">{e.types[0]}</Badge> : null}
                 {e.dateStart ? <Text as="span" color="fg.muted"> · {e.dateStart}{e.dateEnd && e.dateEnd !== e.dateStart ? `–${e.dateEnd}` : ''}</Text> : null}
+                {e.regRequired ? <Text as="span" color="fg.muted"> · registration required</Text> : null}
               </Text>
             ))}
           </Stack>
@@ -503,6 +582,55 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
               </Card.Root>
             ))}
           </SimpleGrid>
+        </Box>
+      ) : null}
+
+      {/* Self-guided audio, galleries & videos (F6, only when SYNC_MULTIMEDIA=1). */}
+      {media.audio.length > 0 || media.galleries.length > 0 || media.videos.length > 0 ? (
+        <Box mt={12}>
+          <Heading size="md" mb={3}>Audio &amp; media</Heading>
+          <Stack gap={1}>
+            {media.audio.map((a) => (
+              <Text key={a.id} fontSize="sm">
+                🎧 {a.url ? <CLink href={a.url} color="brand.fg">{a.title} ↗</CLink> : a.title}
+                {a.durationMs ? <Text as="span" color="fg.muted"> · {Math.round(a.durationMs / 60000)} min</Text> : null}
+                {a.hasTranscript ? <Badge ml={2} colorPalette="pine">transcript</Badge> : null}
+              </Text>
+            ))}
+            {media.videos.map((v) => (
+              <Text key={v.id} fontSize="sm">
+                🎬 {v.url ? <CLink href={v.url} color="brand.fg">{v.title} ↗</CLink> : v.title}
+                {v.durationMs ? <Text as="span" color="fg.muted"> · {Math.round(v.durationMs / 60000)} min</Text> : null}
+              </Text>
+            ))}
+            {media.galleries.map((g) => (
+              <Text key={g.id} fontSize="sm">
+                🖼 {g.url ? <CLink href={g.url} color="brand.fg">{g.title} ↗</CLink> : g.title}
+                {g.assetCount ? <Text as="span" color="fg.muted"> · {g.assetCount} photos</Text> : null}
+              </Text>
+            ))}
+          </Stack>
+        </Box>
+      ) : null}
+
+      {/* Latest from this park — recent NPS news releases (F8). */}
+      {news.length > 0 ? (
+        <Box mt={12}>
+          <Heading size="md" mb={3}>Latest from this park</Heading>
+          <Stack gap={2}>
+            {news.map((n) => (
+              <Box key={n.id} borderLeftWidth="4px" borderColor="blue.solid" pl={3}>
+                {n.url ? (
+                  <CLink href={n.url} color="brand.fg" fontWeight="medium">{n.title} ↗</CLink>
+                ) : (
+                  <Text fontWeight="medium">{n.title}</Text>
+                )}
+                {n.releaseDate ? <Text as="span" fontSize="xs" color="fg.muted"> · {n.releaseDate}</Text> : null}
+                {n.abstract ? <Text fontSize="sm" color="fg.muted" lineClamp={2}>{n.abstract}</Text> : null}
+              </Box>
+            ))}
+          </Stack>
+          <Text fontSize="xs" color="fg.muted" mt={2}>As of last sync — see the official park site for the latest.</Text>
         </Box>
       ) : null}
 

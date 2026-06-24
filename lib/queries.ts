@@ -2,6 +2,8 @@ import { readGraph } from './neo4j';
 import { embedQuery } from './embed-cache';
 import { labelColor, type ParkNodeNav } from './graph-nvl';
 import { normalizeCrowdCurve, type CrowdCurvePoint } from './datasources/visitation';
+import { parseOperatingHours, openStateOn, summarizeClosures, type DayState } from './sync/hours';
+import { isFeeFreeDay } from './datasources/feefree';
 import type { Node as NvlNode, Relationship as NvlRel } from '@neo4j-nvl/base';
 
 /**
@@ -20,6 +22,7 @@ export interface ParkSummary {
   // At-a-glance facets surfaced as card badges (ADR-039). Derived from already-synced §5 props.
   darkSky: boolean;
   accessible: boolean;
+  feeFree: boolean; // F2: park charges no entrance fee
 }
 
 export const PARK_SUMMARY_RETURN = `
@@ -27,7 +30,8 @@ export const PARK_SUMMARY_RETURN = `
   p.location.latitude AS lat, p.location.longitude AS lng,
   CASE WHEN size(coalesce(p.images, [])) > 0 THEN p.images[0] ELSE null END AS image,
   (coalesce(p.darkSkyCertified, false) OR coalesce(p.bortleScale, 99) <= 3) AS darkSky,
-  EXISTS { (cg:Campground)-[:IN_PARK]->(p) WHERE cg.wheelchairAccessible = true } AS accessible
+  EXISTS { (cg:Campground)-[:IN_PARK]->(p) WHERE cg.wheelchairAccessible = true } AS accessible,
+  coalesce(p.feeFree, false) AS feeFree
 `;
 
 /** Faceted + full-text park search (A1, A3) with paging + accurate total (§2.9). */
@@ -108,9 +112,28 @@ export async function parkDetail(parkCode: string) {
     topics: string[];
     states: { code: string; name: string }[];
     alerts: { id: string; category: string; title: string; url: string | null; description: string }[];
-    campgrounds: { id: string; name: string; reservationUrl: string | null }[];
+    campgrounds: {
+      id: string;
+      name: string;
+      reservationUrl: string | null;
+      totalSites: number | null;
+      sitesFirstCome: number | null;
+      hasHookups: boolean | null;
+      hasDumpStation: boolean | null;
+    }[];
     visitorCenters: { id: string; name: string }[];
-    thingsToDo: { id: string; title: string; difficulty: string | null; length: number | null; elevationGain: number | null }[];
+    thingsToDo: {
+      id: string;
+      title: string;
+      difficulty: string | null;
+      length: number | null;
+      elevationGain: number | null;
+      durationText: string | null;
+      petsAllowed: boolean | null;
+      timeOfDay: string[];
+      season: string[];
+    }[];
+    openSeasons: string[];
   }>(
     // Each list is its own CALL subquery to avoid a cartesian product across relationship types.
     `
@@ -121,11 +144,12 @@ export async function parkDetail(parkCode: string) {
     CALL { WITH p OPTIONAL MATCH (al:Alert)-[:AFFECTS]->(p) WHERE al.active = true
            RETURN collect(DISTINCT {id: al.id, category: al.category, title: al.title, url: al.url, description: al.description}) AS alerts }
     CALL { WITH p OPTIONAL MATCH (c:Campground)-[:IN_PARK]->(p)
-           RETURN collect(DISTINCT {id: c.id, name: c.name, reservationUrl: c.reservationUrl}) AS campgrounds }
+           RETURN collect(DISTINCT {id: c.id, name: c.name, reservationUrl: c.reservationUrl, totalSites: c.totalSites, sitesFirstCome: c.sitesFirstCome, hasHookups: c.hasHookups, hasDumpStation: c.hasDumpStation}) AS campgrounds }
     CALL { WITH p OPTIONAL MATCH (v:VisitorCenter)-[:IN_PARK]->(p) RETURN collect(DISTINCT {id: v.id, name: v.name}) AS visitorCenters }
-    CALL { WITH p OPTIONAL MATCH (n:ThingToDo)-[:AT_PARK]->(p) RETURN collect(DISTINCT {id: n.id, title: n.title, difficulty: n.difficulty, length: n.lengthMiles, elevationGain: n.elevationGainFt}) AS thingsToDo }
+    CALL { WITH p OPTIONAL MATCH (n:ThingToDo)-[:AT_PARK]->(p) RETURN collect(DISTINCT {id: n.id, title: n.title, difficulty: n.difficulty, length: n.lengthMiles, elevationGain: n.elevationGainFt, durationText: n.durationText, petsAllowed: n.petsAllowed, timeOfDay: coalesce(n.timeOfDay, []), season: coalesce(n.season, [])}) AS thingsToDo }
+    CALL { WITH p OPTIONAL MATCH (p)-[:OPEN_IN]->(s:Season) RETURN collect(DISTINCT s.name) AS openSeasons }
     RETURN p{.*} AS p, p.location.latitude AS lat, p.location.longitude AS lng,
-      activities, topics, states, alerts, campgrounds, visitorCenters, thingsToDo
+      activities, topics, states, alerts, campgrounds, visitorCenters, thingsToDo, openSeasons
     `,
     { parkCode },
   );
@@ -148,6 +172,8 @@ export async function parkDetail(parkCode: string) {
     url: p.url,
     directionsUrl: p.directionsUrl,
     weatherInfo: p.weatherInfo,
+    phone: (p.phone as string) ?? null, // bonus: queryable contacts
+    email: (p.email as string) ?? null,
     lat: r.lat,
     lng: r.lng,
     // The hero reads `images[0].url`. `imagesFull` (rich JSON) is the primary source, but it's empty for
@@ -172,6 +198,124 @@ export async function parkDetail(parkCode: string) {
     annualVisits: (p.annualVisits as number) ?? null,
     timedEntry: (p.timedEntry as boolean) ?? false,
     permitUrl: (p.permitUrl as string) ?? null,
+    // F1: seasonal access — denormalized closure summary + the open seasons derived at sync.
+    seasonalClosureSummary: (p.seasonalClosureSummary as string) ?? null,
+    openSeasons: (r.openSeasons ?? []).filter(Boolean),
+  };
+}
+
+export interface OpenCheck {
+  parkCode: string;
+  name: string;
+  date: string;
+  state: DayState; // 'open' | 'closed' | 'unknown'
+  closureSummary: string | null;
+  feeFree: { name: string } | null;
+}
+
+/**
+ * F1: is a park open on a given ISO date? Reuses the stored operatingHours JSON + the pure
+ * `lib/sync/hours.ts` logic (the graph nodes power cross-park date filtering; this point check is cheap
+ * and DRY). `state` is 'unknown' (never falsely 'closed') when the park reports no hours. Also flags a
+ * national fee-free day on that date (F2).
+ */
+export async function checkOpen(parkCode: string, isoDate: string): Promise<OpenCheck | null> {
+  const rows = await readGraph<{ name: string; hours: string | null; summary: string | null }>(
+    `MATCH (p:Park {parkCode: $parkCode})
+     RETURN p.fullName AS name, p.operatingHours AS hours, p.seasonalClosureSummary AS summary`,
+    { parkCode },
+  );
+  if (!rows.length) return null;
+  let raw: unknown = [];
+  try {
+    raw = rows[0].hours ? JSON.parse(rows[0].hours) : [];
+  } catch {
+    raw = [];
+  }
+  const schedules = parseOperatingHours(raw, parkCode);
+  const ff = isFeeFreeDay(isoDate);
+  return {
+    parkCode,
+    name: rows[0].name,
+    date: isoDate,
+    state: openStateOn(schedules, isoDate),
+    closureSummary: rows[0].summary ?? summarizeClosures(schedules),
+    feeFree: ff ? { name: ff.name } : null,
+  };
+}
+
+export interface TripBudget {
+  unit: string;
+  parks: { parkCode: string; name: string; fee: number | null; feeFree: boolean }[];
+  total: number;
+  atbCost: number;
+  atbSaves: boolean; // does the America-the-Beautiful annual pass beat paying per-park?
+}
+
+/**
+ * F2: total entrance cost for a set of parks for one billing unit (vehicle/person/motorcycle), and
+ * whether the $80 America-the-Beautiful annual pass is cheaper. Sums the per-park `EntranceFee` of that
+ * unit (cheapest when a park lists several). Parks with no fee of that unit (or feeFree) contribute 0.
+ */
+export async function tripBudget(parkCodes: string[], unit = 'vehicle'): Promise<TripBudget> {
+  const rows = await readGraph<{ parkCode: string; name: string; fee: number | null; feeFree: boolean }>(
+    `UNWIND $parkCodes AS pc
+     MATCH (p:Park {parkCode: pc})
+     OPTIONAL MATCH (p)-[:CHARGES]->(f:EntranceFee {unit: $unit})
+     WITH p, min(f.cost) AS fee
+     RETURN p.parkCode AS parkCode, p.fullName AS name,
+            CASE WHEN coalesce(p.feeFree, false) THEN 0.0 ELSE fee END AS fee,
+            coalesce(p.feeFree, false) AS feeFree
+     ORDER BY name ASC`,
+    { parkCodes, unit },
+  );
+  const total = rows.reduce((s, r) => s + (r.fee ?? 0), 0);
+  const atb = await readGraph<{ cost: number | null }>(
+    `MATCH (e:EntrancePass {id: 'atb-annual'}) RETURN e.cost AS cost`,
+  );
+  const atbCost = atb[0]?.cost ?? 80;
+  return { unit, parks: rows, total, atbCost, atbSaves: total > atbCost };
+}
+
+export interface AccessibilityScorecard {
+  parkCode: string;
+  name: string;
+  features: string[]; // distinct accessibility amenity names present across the park's child nodes
+  accessibleCampgrounds: number;
+  audioDescribedPlaces: number;
+}
+
+/**
+ * F5: a park's accessibility scorecard — the distinct accessibility amenities reported across its
+ * places/campgrounds/visitor-centers/things-to-do/parking, plus accessible-campground and
+ * audio-described-place counts. Data is self-reported by the park ("reported, verify with the park").
+ */
+export async function accessibilityScorecard(parkCode: string): Promise<AccessibilityScorecard | null> {
+  const rows = await readGraph<{
+    name: string;
+    features: string[];
+    accessibleCampgrounds: number;
+    audioDescribedPlaces: number;
+  }>(
+    `MATCH (p:Park {parkCode: $parkCode})
+     CALL {
+       WITH p
+       MATCH (child)-[:HAS_AMENITY]->(am:Amenity {accessibility: true})
+       WHERE EXISTS { (p)-[:HAS_PLACE]->(child) } OR EXISTS { (child)-[:IN_PARK]->(p) } OR EXISTS { (child)-[:AT_PARK]->(p) }
+       RETURN collect(DISTINCT am.name) AS features
+     }
+     CALL { WITH p OPTIONAL MATCH (cg:Campground)-[:IN_PARK]->(p) WHERE cg.wheelchairAccessible = true RETURN count(DISTINCT cg) AS accessibleCampgrounds }
+     CALL { WITH p OPTIONAL MATCH (p)-[:HAS_PLACE]->(pl:Place) WHERE pl.audioDescription IS NOT NULL AND pl.audioDescription <> '' RETURN count(DISTINCT pl) AS audioDescribedPlaces }
+     RETURN p.fullName AS name, features, accessibleCampgrounds, audioDescribedPlaces`,
+    { parkCode },
+  );
+  if (!rows.length) return null;
+  return {
+    parkCode,
+    name: rows[0].name,
+    features: (rows[0].features ?? []).filter(Boolean),
+    accessibleCampgrounds: rows[0].accessibleCampgrounds ?? 0,
+    audioDescribedPlaces: rows[0].audioDescribedPlaces ?? 0,
   };
 }
 
@@ -292,6 +436,29 @@ export async function nearbyParks(parkCode: string, radiusMiles = 200, limit = 6
      RETURN ${PARK_SUMMARY_RETURN}, point.distance(p.location, src.location)/1609.344 AS miles
      ORDER BY miles ASC LIMIT toInteger($limit)`,
     { parkCode, meters: radiusMiles * 1609.344, limit },
+  );
+}
+
+/**
+ * F9: parks linked by a materialized NEAR edge (nearest-N within radius), ordered by drive-line distance.
+ * Use for tight multi-park trip-candidate seeding ("what else is near Mesa Verde?"). Falls back to the
+ * runtime `nearbyParks` shape when NEAR edges aren't built yet (returns []).
+ */
+export async function nearParks(parkCode: string, limit = 8): Promise<(ParkSummary & { miles: number })[]> {
+  return readGraph(
+    `MATCH (src:Park {parkCode: $parkCode})-[r:NEAR]->(p:Park)
+     RETURN ${PARK_SUMMARY_RETURN}, r.miles AS miles
+     ORDER BY miles ASC LIMIT toInteger($limit)`,
+    { parkCode, limit },
+  );
+}
+
+/** F9: parks in a curated region, for regional discovery on Explore. */
+export async function parksInRegion(region: string, limit = 60): Promise<ParkSummary[]> {
+  return readGraph(
+    `MATCH (p:Park)-[:IN_REGION]->(:Region {name: $region})
+     RETURN ${PARK_SUMMARY_RETURN} ORDER BY name ASC LIMIT toInteger($limit)`,
+    { region, limit },
   );
 }
 
@@ -548,15 +715,51 @@ export async function eventsForPark(
   parkCode: string,
   window: { start: string | null; end: string | null } = { start: null, end: null },
   limit = 12,
-): Promise<{ id: string; title: string; dateStart: string | null; dateEnd: string | null; inWindow: boolean }[]> {
+): Promise<
+  {
+    id: string;
+    title: string;
+    dateStart: string | null;
+    dateEnd: string | null;
+    inWindow: boolean;
+    category: string | null;
+    isFree: boolean | null;
+    regRequired: boolean | null;
+    types: string[];
+  }[]
+> {
   return readGraph(
     `MATCH (e:Event)-[:HELD_AT]->(:Park {parkCode: $parkCode})
      WHERE e.active = true
+     OPTIONAL MATCH (e)-[:OF_TYPE]->(et:EventType)
+     WITH e, collect(DISTINCT et.name) AS types
      RETURN e.id AS id, e.title AS title, e.dateStart AS dateStart, e.dateEnd AS dateEnd,
+            e.category AS category, e.isFree AS isFree, e.regRequired AS regRequired, types,
             ($start IS NOT NULL AND $end IS NOT NULL AND e.dateStart IS NOT NULL
              AND e.dateStart <= $end AND coalesce(e.dateEnd, e.dateStart) >= $start) AS inWindow
      ORDER BY inWindow DESC, e.dateStart ASC LIMIT toInteger($limit)`,
     { parkCode, start: window.start, end: window.end, limit },
+  );
+}
+
+/**
+ * F4: parks with an event on a specific date (via materialized OCCURS_ON), optionally filtered to an
+ * event type (e.g. "Astronomy" near a new-moon window). One-hop traversal, no RRULE math at query time.
+ */
+export async function parksWithEventOn(
+  isoDate: string,
+  eventType?: string,
+  limit = 25,
+): Promise<{ parkCode: string; name: string; title: string; type: string | null }[]> {
+  return readGraph(
+    `MATCH (e:Event)-[:OCCURS_ON]->(:CalendarDate {date: date($isoDate)})
+     WHERE e.active = true
+     MATCH (e)-[:HELD_AT]->(p:Park)
+     ${eventType ? 'WHERE EXISTS { (e)-[:OF_TYPE]->(:EventType {name: $eventType}) }' : ''}
+     OPTIONAL MATCH (e)-[:OF_TYPE]->(et:EventType)
+     RETURN p.parkCode AS parkCode, p.fullName AS name, e.title AS title, head(collect(et.name)) AS type
+     ORDER BY name ASC LIMIT toInteger($limit)`,
+    { isoDate, eventType: eventType ?? null, limit },
   );
 }
 
@@ -605,14 +808,70 @@ export async function articlesForPark(
   );
 }
 
+/** F8: latest news releases about a park, most recent first (releaseDate returned as ISO via toString). */
+export async function newsForPark(
+  parkCode: string,
+  limit = 5,
+): Promise<{ id: string; title: string; abstract: string | null; url: string | null; releaseDate: string | null }[]> {
+  return readGraph(
+    `MATCH (nr:NewsRelease)-[:ABOUT]->(:Park {parkCode: $parkCode})
+     RETURN nr.id AS id, nr.title AS title, nr.abstract AS abstract, nr.url AS url,
+            CASE WHEN nr.releaseDate IS NULL THEN null ELSE toString(nr.releaseDate) END AS releaseDate
+     ORDER BY nr.releaseDate DESC LIMIT toInteger($limit)`,
+    { parkCode, limit },
+  );
+}
+
+/**
+ * F8: full-text article search — now that `Article.body` is populated, the `article_fulltext` index
+ * returns meaningful results (it was empty before). Returns the matched article + its parks.
+ */
+export async function searchArticles(
+  query: string,
+  limit = 10,
+): Promise<{ id: string; title: string; url: string | null; parks: string[]; score: number }[]> {
+  return readGraph(
+    `CALL db.index.fulltext.queryNodes('article_fulltext', $q) YIELD node AS ar, score
+     OPTIONAL MATCH (ar)-[:ABOUT]->(p:Park)
+     WITH ar, score, [x IN collect(DISTINCT p.parkCode) WHERE x IS NOT NULL] AS parks
+     RETURN ar.id AS id, ar.title AS title, ar.url AS url, parks, score
+     ORDER BY score DESC LIMIT toInteger($limit)`,
+    { q: query, limit },
+  );
+}
+
+export interface ParkMedia {
+  audio: { id: string; title: string; durationMs: number | null; url: string | null; hasTranscript: boolean }[];
+  galleries: { id: string; title: string; assetCount: number | null; url: string | null }[];
+  videos: { id: string; title: string; durationMs: number | null; url: string | null }[];
+}
+
+/** F6: self-guided audio, galleries, and videos for a park (only populated when SYNC_MULTIMEDIA=1). */
+export async function mediaForPark(parkCode: string, limit = 8): Promise<ParkMedia> {
+  const rows = await readGraph<ParkMedia>(
+    `MATCH (p:Park {parkCode: $parkCode})
+     CALL { WITH p OPTIONAL MATCH (a:AudioFile)-[:ABOUT]->(p)
+       RETURN collect({id: a.id, title: a.title, durationMs: a.durationMs, url: a.url, hasTranscript: a.transcript IS NOT NULL})[0..toInteger($limit)] AS audio }
+     CALL { WITH p OPTIONAL MATCH (g:Gallery)-[:ABOUT]->(p)
+       RETURN collect({id: g.id, title: g.title, assetCount: g.assetCount, url: g.url})[0..toInteger($limit)] AS galleries }
+     CALL { WITH p OPTIONAL MATCH (v:Video)-[:ABOUT]->(p)
+       RETURN collect({id: v.id, title: v.title, durationMs: v.durationMs, url: v.url})[0..toInteger($limit)] AS videos }
+     RETURN audio, galleries, videos`,
+    { parkCode, limit },
+  );
+  return rows[0] ?? { audio: [], galleries: [], videos: [] };
+}
+
 /** Parking lots at a park (NPS-expansion P3): arrival logistics + accessibility. */
 export async function parkingForPark(
   parkCode: string,
   limit = 12,
-): Promise<{ id: string; name: string; wheelchairAccessible: boolean }[]> {
+): Promise<{ id: string; name: string; wheelchairAccessible: boolean; accessibleSpaces: number | null; hasEvCharging: boolean; hasLiveData: boolean }[]> {
   return readGraph(
     `MATCH (pl:ParkingLot)-[:IN_PARK]->(:Park {parkCode: $parkCode})
-     RETURN pl.id AS id, pl.name AS name, coalesce(pl.wheelchairAccessible, false) AS wheelchairAccessible
+     RETURN pl.id AS id, pl.name AS name, coalesce(pl.wheelchairAccessible, false) AS wheelchairAccessible,
+            pl.accessibleSpaces AS accessibleSpaces, coalesce(pl.hasEvCharging, false) AS hasEvCharging,
+            coalesce(pl.hasLiveData, false) AS hasLiveData
      ORDER BY name ASC LIMIT toInteger($limit)`,
     { parkCode, limit },
   );
@@ -701,7 +960,8 @@ export async function vibeSearch(
        AND ($maxBortle IS NULL OR coalesce(p.bortleScale, 99) <= $maxBortle)
        AND ALL(req IN $required WHERE
              EXISTS { (p)-[:HAS_PLACE]->(:Place)-[:HAS_AMENITY]->(:Amenity {name: req}) }
-             OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) })
+             OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) }
+             OR EXISTS { (p)<-[:IN_PARK]-(:Campground)-[:HAS_AMENITY]->(:Amenity {name: req}) })
      RETURN ${PARK_SUMMARY_RETURN}, score ORDER BY score DESC LIMIT toInteger($limit)`,
     {
       vector,
