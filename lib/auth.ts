@@ -17,6 +17,11 @@ export const auth = betterAuth({
   // Production uses passwordless magic link only. E2E enables email+password (set E2E_TEST_MODE=1)
   // so Playwright can authenticate deterministically without an email round-trip.
   emailAndPassword: { enabled: process.env.E2E_TEST_MODE === '1' },
+  // The e2e suite runs against a PRODUCTION build (`pnpm start`), where Better Auth enables its
+  // rate-limiter by default — dozens of sequential test sign-ups then trip a 429 cascade. Disable it
+  // ONLY in E2E_TEST_MODE; production keeps the default protection. (Spread so dev/prod defaults are
+  // otherwise untouched.)
+  ...(process.env.E2E_TEST_MODE === '1' ? { rateLimit: { enabled: false } } : {}),
   plugins: [
     magicLink({
       async sendMagicLink({ email, url }) {
