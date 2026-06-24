@@ -1,3 +1,4 @@
+import './server-guard'; // BETTER_AUTH_SECRET-bearing; keep it out of any client bundle (S9)
 import { betterAuth } from 'better-auth';
 import { magicLink } from 'better-auth/plugins';
 import { Resend } from 'resend';
@@ -14,6 +15,10 @@ export const auth = betterAuth({
   database: neo4jAdapter(),
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,
+  // Pin the allowed origin for callbacks/redirects (S5). Defaults to deriving from the request when
+  // unset; pinning it to BETTER_AUTH_URL prevents host-header redirect tricks. Skipped when unset
+  // (e.g. local dev / E2E) so the request-derived default still works there.
+  ...(process.env.BETTER_AUTH_URL ? { trustedOrigins: [process.env.BETTER_AUTH_URL] } : {}),
   // Production uses passwordless magic link only. E2E enables email+password (set E2E_TEST_MODE=1)
   // so Playwright can authenticate deterministically without an email round-trip.
   emailAndPassword: { enabled: process.env.E2E_TEST_MODE === '1' },

@@ -1,6 +1,7 @@
 import { getUserId } from '../../../../lib/session';
 import { getUserMemory } from '../../../../lib/memory-graph';
 import { reconcileUser, reconcileAll } from '../../../../lib/reconcile-memory';
+import { assertCron } from '../../../../lib/cron-auth';
 
 /**
  * Memory reconciliation (§2.1/§5).
@@ -11,8 +12,11 @@ import { reconcileUser, reconcileAll } from '../../../../lib/reconcile-memory';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get('authorization') === `Bearer ${secret}`) {
+  // A Bearer token means the scheduled all-users reconcile — validate it fail-closed (S2/S3). A
+  // signed-in user reconciling themselves authenticates via cookie (no Authorization header).
+  if (req.headers.get('authorization')) {
+    const deny = assertCron(req);
+    if (deny) return deny;
     return Response.json(await reconcileAll());
   }
   const userId = await getUserId(req);
@@ -23,9 +27,7 @@ export async function POST(req: Request) {
 
 /** Scheduled reconcile of all chatting users (Vercel Cron sends GET with the CRON_SECRET bearer). */
 export async function GET(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get('authorization') !== `Bearer ${secret}`) {
-    return Response.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  const deny = assertCron(req);
+  if (deny) return deny;
   return Response.json(await reconcileAll());
 }

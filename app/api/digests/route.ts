@@ -2,6 +2,8 @@ import { Resend } from 'resend';
 import { usersWithWatches } from '../../../lib/watches';
 import { buildDigest } from '../../../lib/digest';
 import { digestEmailHtml } from '../../../lib/digest-email';
+import { assertCron } from '../../../lib/cron-auth';
+import { pruneRateBuckets } from '../../../lib/rate-limit';
 
 /**
  * Proactive Ranger digest cron (ADR-052). Vercel Cron calls this daily with the CRON_SECRET bearer; it
@@ -14,14 +16,12 @@ export const maxDuration = 300;
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
-function authorized(req: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return process.env.NODE_ENV !== 'production';
-  return req.headers.get('authorization') === `Bearer ${secret}`;
-}
-
 export async function GET(req: Request) {
-  if (!authorized(req)) return Response.json({ error: 'unauthorized' }, { status: 401 });
+  const deny = assertCron(req);
+  if (deny) return deny;
+
+  // Piggyback the daily prune of expired rate-limit buckets on this cron (audit C1 housekeeping).
+  const pruned = await pruneRateBuckets().catch(() => 0);
 
   const baseUrl = process.env.BETTER_AUTH_URL ?? 'https://trailgraph.app';
   const emailFrom = process.env.EMAIL_FROM;
@@ -49,5 +49,5 @@ export async function GET(req: Request) {
     }
   }
 
-  return Response.json({ users: users.length, built, emailed });
+  return Response.json({ users: users.length, built, emailed, pruned });
 }

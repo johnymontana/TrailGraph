@@ -1,3 +1,4 @@
+import './server-guard'; // secret-bearing (driver creds); block accidental client-bundle import (S9)
 import neo4j, { type Driver, type Session, type QueryResult } from 'neo4j-driver';
 import { env } from './env';
 

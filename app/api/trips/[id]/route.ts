@@ -9,11 +9,12 @@ import {
   checkTripAlerts,
   tripCost,
   tripConditions,
-  type NewStop,
 } from '../../../../lib/trips';
 import { suggestDays } from '../../../../lib/itinerary';
 import { nearestNeighborOrder } from '../../../../lib/route-order';
 import { forkTrip, tripDiff } from '../../../../lib/trip-lab';
+import { parseBody, TripActionSchema } from '../../../../lib/validation';
+import { rateLimit, rlUser } from '../../../../lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,15 +41,19 @@ export async function DELETE(req: Request, { params }: Ctx) {
 export async function POST(req: Request, { params }: Ctx) {
   const userId = await getUserId(req);
   if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
+  // Cap trip mutations per user (audit C7): addStop/removeStop/reorder/optimize/fork each can fire an
+  // ORS routing call, so an unthrottled edit loop would burn the tight ORS free tier.
+  const rl = await rateLimit(rlUser(userId, 'tripmut'), 30, 60);
+  if (!rl.ok) {
+    return Response.json(
+      { error: 'rate_limited' },
+      { status: 429, headers: { 'Retry-After': String(Math.max(1, Math.ceil((rl.resetAt - Date.now()) / 1000))) } },
+    );
+  }
   const { id } = await params;
-  const body = (await req.json()) as {
-    op: 'addStop' | 'removeStop' | 'reorder' | 'alerts' | 'cost' | 'conditions' | 'suggestDays' | 'optimize' | 'rename' | 'fork' | 'diff';
-    stop?: NewStop;
-    stopId?: string;
-    orderedStopIds?: string[];
-    name?: string;
-    otherTripId?: string;
-  };
+  const parsed = await parseBody(req, TripActionSchema);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
 
   switch (body.op) {
     case 'fork': {

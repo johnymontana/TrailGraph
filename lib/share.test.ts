@@ -21,14 +21,15 @@ describe('createShareLink (R4 — owner-scoped)', () => {
     expect(writeGraph).not.toHaveBeenCalled();
   });
 
-  it('mints a hex token (no dashes) and persists a ShareLink when owned', async () => {
+  it('mints a hex token (no dashes) and persists a read-only ShareLink with a TTL when owned', async () => {
     readGraph.mockResolvedValue([{ ok: true }]);
     writeGraph.mockResolvedValue(undefined);
-    const token = await createShareLink('owner', 't1', 'edit');
+    const token = await createShareLink('owner', 't1'); // read-only only (S7: edit role removed)
     expect(token).toMatch(/^[0-9a-f]{32}$/);
     expect(writeGraph).toHaveBeenCalledTimes(1);
-    const [, params] = writeGraph.mock.calls[0];
-    expect(params).toMatchObject({ userId: 'owner', tripId: 't1', role: 'edit', token });
+    const [cypher, params] = writeGraph.mock.calls[0] as [string, Record<string, unknown>];
+    expect(params).toMatchObject({ userId: 'owner', tripId: 't1', token, ttlDays: 30 });
+    expect(cypher).toContain('expiresAt'); // S6: links expire
   });
 });
 

@@ -17,7 +17,27 @@ export interface Watch {
   createdAt: string | null;
 }
 
-export async function createWatch(userId: string, kind: WatchKind, refId: string, label?: string): Promise<string> {
+/** Max distinct watches per user (audit C8) — bounds the daily digest fan-out + per-park NPS fetches. */
+export const WATCH_CAP = 25;
+
+export type CreateWatchResult = { id: string } | { error: string };
+
+export async function createWatch(userId: string, kind: WatchKind, refId: string, label?: string): Promise<CreateWatchResult> {
+  // Re-watching an existing (kind, refId) is always allowed (idempotent label update). Only a NEW watch
+  // is blocked once the user is at the cap, so a small TOCTOU race can at worst yield one extra watch.
+  const existing = await readGraph<{ id: string }>(
+    `MATCH (:User {userId:$userId})-[:WATCHES]->(w:Watch {kind:$kind, refId:$refId}) RETURN w.id AS id`,
+    { userId, kind, refId },
+  );
+  if (!existing.length) {
+    const counted = await readGraph<{ total: number }>(
+      `OPTIONAL MATCH (:User {userId:$userId})-[:WATCHES]->(w:Watch) RETURN count(w) AS total`,
+      { userId },
+    );
+    if ((counted[0]?.total ?? 0) >= WATCH_CAP) {
+      return { error: `You've reached the limit of ${WATCH_CAP} watches. Remove one first (clear_watch).` };
+    }
+  }
   const id = randomUUID();
   const rows = await writeGraph<{ id: string }>(
     `
@@ -29,7 +49,7 @@ export async function createWatch(userId: string, kind: WatchKind, refId: string
     `,
     { userId, kind, refId, id, label: label ?? null },
   );
-  return rows[0]?.id ?? id;
+  return { id: rows[0]?.id ?? id };
 }
 
 export async function listWatches(userId: string): Promise<Watch[]> {

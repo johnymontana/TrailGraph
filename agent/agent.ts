@@ -18,4 +18,14 @@ export default defineAgent({
       },
     },
   },
+  // Cost ceiling (audit C2). Compact earlier than Eve's 0.9 default so one pathological/looping turn
+  // can't churn ~90% of the context window repeatedly before summarizing. Eve has no first-class
+  // per-turn step cap; the per-user rate limit (agent/channels/eve.ts) and the runaway clamp
+  // (agent/hooks/turn-accounting.ts) cap turn *count* and runaway turns respectively.
+  // (Optional further saving: set `compaction.model` to a cheaper gateway model for summaries — use the
+  // DOT model id, e.g. 'anthropic/claude-haiku-4.5', and verify it carries context-window metadata, or
+  // Eve refuses to compile compaction against it.)
+  compaction: {
+    thresholdPercent: 0.6,
+  },
 });

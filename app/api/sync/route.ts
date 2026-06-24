@@ -1,5 +1,7 @@
 import { runSync, syncStatus, type Tier } from '../../../lib/sync';
 import { syncDataSources } from '../../../lib/datasources';
+import { assertCron } from '../../../lib/cron-auth';
+import { serverError } from '../../../lib/http';
 
 /**
  * Cron-triggered NPS sync (ADR-007). Vercel Cron calls this with the configured Authorization
@@ -12,16 +14,9 @@ export const dynamic = 'force-dynamic';
 // function. Raise this on Pro (up to 800 with Fluid Compute) if you want fewer resumes.
 export const maxDuration = 300;
 
-function authorized(req: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return process.env.NODE_ENV !== 'production'; // allow in dev, require in prod
-  return req.headers.get('authorization') === `Bearer ${secret}`;
-}
-
 export async function GET(req: Request) {
-  if (!authorized(req)) {
-    return Response.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  const deny = assertCron(req);
+  if (deny) return deny;
   const tier = new URL(req.url).searchParams.get('tier') as Tier | null;
   if (!tier) {
     return Response.json({ status: await syncStatus() });
@@ -35,6 +30,6 @@ export async function GET(req: Request) {
     const paused = results.filter((r) => r.counts.paused).map((r) => r.resource);
     return Response.json({ tier, paused, results, dataSources });
   } catch (err) {
-    return Response.json({ tier, error: (err as Error).message }, { status: 500 });
+    return serverError('sync', err, { tier });
   }
 }

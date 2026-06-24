@@ -127,7 +127,10 @@ async function watchedParks(userId: string): Promise<WatchedPark[]> {
       }
     }
   }
-  return [...parks.values()];
+  // Cap parks resolved per digest (audit C8): bounds per-park NPS/conditions fetches so one heavy user
+  // can't lengthen the 300s digest cron. The per-user watch cap (WATCH_CAP) already bounds this; this
+  // is the belt-and-suspenders limit on distinct parks.
+  return [...parks.values()].slice(0, 50);
 }
 
 /**

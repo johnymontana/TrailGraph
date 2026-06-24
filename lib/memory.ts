@@ -1,3 +1,4 @@
+import './server-guard'; // NAMS key-bearing; keep it out of any client bundle (S9)
 import { MemoryClient } from '@neo4j-labs/agent-memory';
 import { env } from './env';
 

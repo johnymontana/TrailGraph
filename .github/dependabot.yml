@@ -1,0 +1,24 @@
+# Automated dependency + Actions updates (audit S11). Weekly, grouped to keep PR volume sane.
+version: 2
+updates:
+  - package-ecosystem: npm # works against pnpm-lock.yaml
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      # Batch low-risk minor/patch bumps into one PR; majors come through individually for review.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # The agent runtime + memory client are pinned to exact versions on purpose (audit S12); bump
+      # them deliberately, not via automated PRs.
+      - dependency-name: eve
+      - dependency-name: "@neo4j-labs/agent-memory"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

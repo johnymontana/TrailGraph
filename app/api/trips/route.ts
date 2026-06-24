@@ -1,5 +1,6 @@
 import { getUserId } from '../../../lib/session';
-import { listTrips, createTrip, createTripFromTour, type NewTrip } from '../../../lib/trips';
+import { listTrips, createTrip, createTripFromTour } from '../../../lib/trips';
+import { parseBody, CreateTripSchema } from '../../../lib/validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,14 +13,16 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const userId = await getUserId(req);
   if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
-  const body = (await req.json()) as NewTrip & { fromTourId?: string };
+  const parsed = await parseBody(req, CreateTripSchema);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
   // Seed from an official NPS tour (P1 #3) when `fromTourId` is supplied.
-  if (body?.fromTourId) {
+  if (body.fromTourId) {
     const created = await createTripFromTour(userId, body.fromTourId);
     if (!created) return Response.json({ error: 'tour has no usable stops' }, { status: 400 });
     return Response.json({ id: created.tripId, name: created.name, stops: created.stops }, { status: 201 });
   }
-  if (!body?.name) return Response.json({ error: 'name required' }, { status: 400 });
-  const id = await createTrip(userId, body);
+  if (!body.name) return Response.json({ error: 'name required' }, { status: 400 });
+  const id = await createTrip(userId, { ...body, name: body.name });
   return Response.json({ id }, { status: 201 });
 }

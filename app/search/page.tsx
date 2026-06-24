@@ -2,7 +2,10 @@ import { Box, Card, Container, Heading, Icon, SimpleGrid, Stack, Text, Input, Bu
 import NextLink from 'next/link';
 import NextImage from 'next/image';
 import { LuSearch, LuSparkles } from 'react-icons/lu';
+import { headers } from 'next/headers';
 import { vibeSearch, semanticSearch, type SemanticHit } from '../../lib/queries';
+import { embedQuery } from '../../lib/embed-cache';
+import { rateLimit, rlIp, clientIpFrom } from '../../lib/rate-limit';
 import { ParkCard } from '../../components/ParkCard';
 import { Placeholder } from '../../components/Placeholder';
 import { PageHeader } from '../../components/ui/page-header';
@@ -31,13 +34,30 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const q = sp.q?.trim() || '';
   const limit = 8;
 
-  const [parks, places, people] = q
-    ? await Promise.all([
-        vibeSearch(q, { limit }).catch(() => []),
-        semanticSearch('place', q, limit).catch(() => [] as SemanticHit[]),
-        semanticSearch('person', q, limit).catch(() => [] as SemanticHit[]),
-      ])
-    : [[], [], []];
+  type ParkHit = Awaited<ReturnType<typeof vibeSearch>>[number];
+  let parks: ParkHit[] = [];
+  let places: SemanticHit[] = [];
+  let people: SemanticHit[] = [];
+  let throttled = false;
+
+  if (q) {
+    // Anonymous compute guard (audit C5/C6): cap embeddings per IP. The query is embedded ONCE and the
+    // vector reused across all three vector indexes (parks/places/people) instead of three embeds.
+    const ip = clientIpFrom(await headers());
+    const { ok } = await rateLimit(rlIp(ip, 'search'), 20, 60);
+    if (!ok) {
+      throttled = true;
+    } else {
+      const vec = await embedQuery(q).catch(() => null);
+      if (vec) {
+        [parks, places, people] = await Promise.all([
+          vibeSearch(q, { limit, vector: vec }).catch(() => [] as ParkHit[]),
+          semanticSearch('place', q, limit, vec).catch(() => [] as SemanticHit[]),
+          semanticSearch('person', q, limit, vec).catch(() => [] as SemanticHit[]),
+        ]);
+      }
+    }
+  }
 
   return (
     <Box>
@@ -81,6 +101,8 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       <Container maxW="6xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 10 }}>
         {!q ? (
           <Text color="fg.muted">Enter a description above to search across parks, places, and people.</Text>
+        ) : throttled ? (
+          <Text color="fg.muted">You&rsquo;re searching a lot right now — please wait a moment and try again.</Text>
         ) : (
           <Stack gap={12}>
             <Section title="Parks" count={parks.length}>

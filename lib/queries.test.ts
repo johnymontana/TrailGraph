@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // queries.ts imports the Neo4j driver boundary at module load; mock it so this pure-logic unit test
-// never touches a real DB (matches lib/memory-graph.test.ts). vibeSearch also embeds the query.
+// never touches a real DB (matches lib/memory-graph.test.ts). vibeSearch embeds the query via the
+// embed-cache, so mock that too — otherwise embedQuery would issue its own readGraph cache lookup and
+// shift the vibeSearch query off mock.calls[0].
 vi.mock('./neo4j', () => ({ readGraph: vi.fn(), writeGraph: vi.fn() }));
-vi.mock('./embeddings', () => ({ embed: vi.fn().mockResolvedValue([[0.1, 0.2, 0.3]]) }));
+vi.mock('./embed-cache', () => ({ embedQuery: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]) }));
 
 import { imagesWithFallback, vibeSearch } from './queries';
 import { readGraph } from './neo4j';

@@ -1,5 +1,5 @@
 import { readGraph } from './neo4j';
-import { embed } from './embeddings';
+import { embedQuery } from './embed-cache';
 import { labelColor, type ParkNodeNav } from './graph-nvl';
 import { normalizeCrowdCurve, type CrowdCurvePoint } from './datasources/visitation';
 import type { Node as NvlNode, Relationship as NvlRel } from '@neo4j-nvl/base';
@@ -634,10 +634,17 @@ export interface SemanticHit {
  * card-ready fields (image/stamp flag for places, tags for both). Requires the `place_embedding`/
  * `person_embedding` indexes (migration 004) and embeddings written by `embed-nodes.ts`.
  */
-export async function semanticSearch(kind: 'place' | 'person', query: string, limit = 10): Promise<SemanticHit[]> {
+export async function semanticSearch(
+  kind: 'place' | 'person',
+  query: string,
+  limit = 10,
+  // Pass a precomputed query vector to embed once and reuse across searches (audit C5: /search embeds
+  // the same text for parks + places + people). Omit it and the cached embedding is used.
+  vector?: number[],
+): Promise<SemanticHit[]> {
   const index = kind === 'place' ? 'place_embedding' : 'person_embedding';
   const rel = kind === 'place' ? 'HAS_PLACE' : 'ASSOCIATED_WITH';
-  const [vector] = await embed([query]);
+  const v = vector ?? (await embedQuery(query));
   return readGraph(
     `CALL db.index.vector.queryNodes($index, toInteger($k), $vector) YIELD node AS n, score
      OPTIONAL MATCH (n)-[:${rel}]-(p:Park)
@@ -646,7 +653,7 @@ export async function semanticSearch(kind: 'place' | 'person', query: string, li
             CASE WHEN size(coalesce(n.images, [])) > 0 THEN n.images[0] ELSE null END AS image,
             coalesce(n.isStamp, false) AS isStamp, coalesce(n.tags, []) AS tags, score
      ORDER BY score DESC LIMIT toInteger($limit)`,
-    { index, k: limit, vector, limit },
+    { index, k: limit, vector: v, limit },
   );
 }
 
@@ -664,6 +671,8 @@ export async function vibeSearch(
     wheelchairAccessible?: boolean;
     requiredAmenities?: string[];
     maxBortle?: number | null;
+    // Precomputed query vector to embed once and reuse across searches (audit C5). Omit to use the cache.
+    vector?: number[];
   } = {},
 ) {
   const {
@@ -676,7 +685,7 @@ export async function vibeSearch(
     requiredAmenities = [],
     maxBortle = null,
   } = opts;
-  const [vector] = await embed([query]);
+  const vector = opts.vector ?? (await embedQuery(query));
   // Pull more vector candidates when facets/constraints will prune them, so enough survive the filter
   // (R4 §2.3: intent-aware ranking — semantic candidates narrowed by region/activity/topic + travel
   // constraints, then ranked by score).
