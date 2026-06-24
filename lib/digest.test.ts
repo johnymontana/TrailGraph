@@ -22,6 +22,12 @@ describe('upcomingFeeFree (ADR-052)', () => {
   it('returns null when none fall inside the window', () => {
     expect(upcomingFeeFree('2026-06-23', 7)).toBeNull(); // next is Aug 4
   });
+  it('includes a fee-free day that is exactly today', () => {
+    expect(upcomingFeeFree('2026-06-19', 0)?.date).toBe('2026-06-19');
+  });
+  it('returns null once all 2026 fee-free days are in the past', () => {
+    expect(upcomingFeeFree('2026-12-01', 60)).toBeNull();
+  });
 });
 
 describe('darkSkyDigestItem (ADR-052)', () => {
@@ -33,6 +39,14 @@ describe('darkSkyDigestItem (ADR-052)', () => {
   });
 });
 
+describe('darkSkyDigestItem boundaries (ADR-052)', () => {
+  it('fires at the edges: moon < 25 AND dark hours ≥ 4', () => {
+    expect(darkSkyDigestItem(astro(24, 4), 'grba', 'Great Basin')).not.toBeNull();
+    expect(darkSkyDigestItem(astro(25, 6), 'grba', 'Great Basin')).toBeNull(); // moon == 25 → not "new"
+    expect(darkSkyDigestItem(astro(10, 3.9), 'grba', 'Great Basin')).toBeNull(); // < 4 h
+  });
+});
+
 describe('roadClosureItems (ADR-052)', () => {
   const ev = (title: string, severityRank: number): RoadEvent => ({ id: title, title, type: 'Incident', severity: 'major', severityRank });
   it('keeps only significant (rank ≥ 2) events as warn items', () => {
@@ -40,6 +54,10 @@ describe('roadClosureItems (ADR-052)', () => {
     expect(items).toHaveLength(1);
     expect(items[0].tone).toBe('warn');
     expect(items[0].detail).toContain('Going-to-the-Sun closed');
+  });
+  it('caps at 3 items even when many roads are closed', () => {
+    const many = Array.from({ length: 6 }, (_, i) => ev(`Road ${i} closed`, 3));
+    expect(roadClosureItems(many, 'glac', 'Glacier')).toHaveLength(3);
   });
 });
 

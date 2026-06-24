@@ -122,6 +122,28 @@ describe('meteorShowers (ADR-055)', () => {
   });
 });
 
+describe('meteorShowers — beyond basics', () => {
+  it('surfaces multiple simultaneously-active showers, strongest first', () => {
+    // Late July: Delta Aquariids (peak Jul 30) AND Perseids (active from Jul 17) overlap.
+    const showers = meteorShowers('2024-07-30');
+    const names = showers.map((s) => s.name);
+    expect(names).toContain('Delta Aquariids');
+    expect(names).toContain('Perseids');
+    // Delta Aquariids is at peak (intensity 100) and should outrank the still-ramping Perseids.
+    expect(showers[0].name).toBe('Delta Aquariids');
+    expect(showers[0].intensityPct).toBeGreaterThanOrEqual(showers[1].intensityPct);
+  });
+  it('excludes a shower one day past its active window', () => {
+    // Lyrids active Apr 16–25; Apr 27 is outside.
+    expect(meteorShowers('2024-04-27').some((s) => s.name === 'Lyrids')).toBe(false);
+  });
+  it('Geminids hit ZHR 150 at peak', () => {
+    const g = meteorShowers('2024-12-14').find((s) => s.name === 'Geminids');
+    expect(g?.zhr).toBe(150);
+    expect(g?.intensityPct).toBe(100);
+  });
+});
+
 describe('satellitePasses (ADR-055)', () => {
   // Propagate the canonical ISS fixture NEAR its epoch (2008-09-20) so SGP4 stays valid.
   const NEAR_EPOCH = '2008-09-21';
@@ -153,6 +175,20 @@ describe('satellitePasses (ADR-055)', () => {
   });
   it('returns [] for no TLEs (graceful when CelesTrak is down)', () => {
     expect(satellitePasses(GC.lat, GC.lng, [], NEAR_EPOCH)).toEqual([]);
+  });
+  it('visibleOnly returns a subset of all passes (dark + sunlit gate)', () => {
+    const all = satellitePasses(GC.lat, GC.lng, [SAMPLE_ISS_TLE], NEAR_EPOCH, { stepSec: 20 });
+    const visible = satellitePasses(GC.lat, GC.lng, [SAMPLE_ISS_TLE], NEAR_EPOCH, { stepSec: 20, visibleOnly: true });
+    expect(visible.length).toBeLessThanOrEqual(all.length);
+    expect(visible.every((p) => p.visible)).toBe(true);
+  });
+  it('handles multiple satellites and stays chronologically sorted + deterministic', () => {
+    const tles = [SAMPLE_ISS_TLE, { ...SAMPLE_ISS_TLE, name: 'ISS (CLONE)' }];
+    const a = satellitePasses(GC.lat, GC.lng, tles, NEAR_EPOCH, { stepSec: 30 });
+    const b = satellitePasses(GC.lat, GC.lng, tles, NEAR_EPOCH, { stepSec: 30 });
+    expect(a).toEqual(b); // deterministic
+    expect(a.some((p) => p.name === 'ISS (CLONE)')).toBe(true);
+    for (let i = 1; i < a.length; i++) expect(Date.parse(a[i - 1].start)).toBeLessThanOrEqual(Date.parse(a[i].start));
   });
 });
 
@@ -188,5 +224,38 @@ describe('shotPlan (ADR-055)', () => {
   });
   it('is deterministic', () => {
     expect(shotPlan(GC.lat, GC.lng, 150, '2024-06-21')).toEqual(shotPlan(GC.lat, GC.lng, 150, '2024-06-21'));
+  });
+  it('reports no alignment under the midnight sun (no astronomical darkness)', () => {
+    const plan = shotPlan(70, 20, 150, '2024-06-21'); // 70°N at solstice → never dark
+    expect(plan.coreVisible).toBe(false);
+    expect(plan.bestAlignment).toBeNull();
+    expect(plan.window.hours).toBeNull();
+    expect(plan.advice).toMatch(/No astronomical darkness/i);
+  });
+  it('normalizes the foreground bearing into 0–360', () => {
+    const plan = shotPlan(GC.lat, GC.lng, 380, '2024-06-21'); // 380 → 20
+    expect(plan.foregroundAzimuthDeg).toBe(20);
+  });
+});
+
+describe('parseTle — beyond basics', () => {
+  it('parses multiple records and skips junk/garbage lines', () => {
+    const text = [
+      '# a comment / header junk',
+      SAMPLE_ISS_TLE.name,
+      SAMPLE_ISS_TLE.line1,
+      SAMPLE_ISS_TLE.line2,
+      'TIANGONG',
+      SAMPLE_ISS_TLE.line1.replace('25544', '48274'),
+      SAMPLE_ISS_TLE.line2.replace('25544', '48274'),
+    ].join('\n');
+    const tles = parseTle(text);
+    expect(tles.length).toBe(2);
+    expect(tles[1].name).toBe('TIANGONG');
+    expect(tles.every((t) => t.line1.startsWith('1 ') && t.line2.startsWith('2 '))).toBe(true);
+  });
+  it('returns [] for empty/garbage input', () => {
+    expect(parseTle('')).toEqual([]);
+    expect(parseTle('just some text\nwith no tle lines')).toEqual([]);
   });
 });

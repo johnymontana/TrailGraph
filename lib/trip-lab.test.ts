@@ -9,10 +9,11 @@ describe('trip-lab pure helpers (ADR-056)', () => {
     expect(round1(12.36)).toBe(12.4);
   });
 
-  it('addDaysIso advances UTC dates and rolls months/years', () => {
+  it('addDaysIso advances UTC dates and rolls months/years/leap days', () => {
     expect(addDaysIso('2026-06-23', 0)).toBe('2026-06-23');
     expect(addDaysIso('2026-06-23', 9)).toBe('2026-07-02');
     expect(addDaysIso('2026-12-31', 1)).toBe('2027-01-01');
+    expect(addDaysIso('2028-02-28', 1)).toBe('2028-02-29'); // 2028 is a leap year
   });
 
   it('maxFee takes the priciest line and tolerates junk', () => {

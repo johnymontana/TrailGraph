@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { darkSkyRating } from './darksky';
+import { darkSkyRating, DARK_SKY } from './darksky';
 import { deriveBestMonths, crowdLevel, monthNames } from './visitation';
 import { classifyDifficulty, difficultyDot } from './trails';
 import { recreationUrl, parseRidbId } from './recreation';
@@ -13,6 +13,21 @@ describe('darkSkyRating (§5a)', () => {
     expect(darkSkyRating(4)).toMatchObject({ stars: 3 });
     expect(darkSkyRating(6)).toMatchObject({ stars: 2 });
     expect(darkSkyRating(9)).toMatchObject({ stars: 1 });
+  });
+
+  it('backfills the flagship dark-sky parks (§5.1: grba, bibe, deva) as certified', () => {
+    for (const code of ['grba', 'bibe', 'deva']) {
+      const rec = DARK_SKY.find((r) => r.parkCode === code);
+      expect(rec, `${code} missing from DARK_SKY`).toBeTruthy();
+      expect(rec!.certified).toBe(true);
+      expect(rec!.bortle).toBeLessThanOrEqual(3); // among the darkest in the lower 48
+      expect(darkSkyRating(rec!.bortle).stars).toBeGreaterThanOrEqual(4);
+    }
+  });
+
+  it('has no duplicate parkCodes in the dark-sky dataset', () => {
+    const codes = DARK_SKY.map((r) => r.parkCode);
+    expect(new Set(codes).size).toBe(codes.length);
   });
 });
 

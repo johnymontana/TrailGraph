@@ -43,7 +43,9 @@ test('park detail shows description, alert, related parks, and actions', async (
 
 test('park detail shows §5 conditions (dark sky) and difficulty dots', async ({ page }) => {
   await page.goto('/parks/grca');
-  await expect(page.getByRole('heading', { name: 'Conditions' })).toBeVisible();
+  // `exact` so it matches the "Conditions" panel heading, not the sibling "Live conditions" heading
+  // (which renders only when the live NPS API returns webcams/roadevents).
+  await expect(page.getByRole('heading', { name: 'Conditions', exact: true })).toBeVisible();
   // "dark skies" now appears in both the at-a-glance strip and the Conditions panel → scope to first.
   await expect(page.getByText(/dark skies/i).first()).toBeVisible(); // seeded Bortle 2 → "Excellent dark skies"
 });
