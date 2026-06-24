@@ -7,8 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('./neo4j', () => ({ readGraph: vi.fn(), writeGraph: vi.fn() }));
 vi.mock('./embed-cache', () => ({ embedQuery: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]) }));
 
-import { imagesWithFallback, vibeSearch, searchParks, facets, closureWarningsForTrip, parksWithEventOn } from './queries';
-import { imagesWithFallback, tripBudget, vibeSearch } from './queries';
+import { imagesWithFallback, vibeSearch, searchParks, facets, closureWarningsForTrip, parksWithEventOn, tripBudget } from './queries';
 import { readGraph } from './neo4j';
 
 const ALL_DAY = { monday: 'All Day', tuesday: 'All Day', wednesday: 'All Day', thursday: 'All Day', friday: 'All Day', saturday: 'All Day', sunday: 'All Day' };
