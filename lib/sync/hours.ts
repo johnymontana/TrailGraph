@@ -217,7 +217,7 @@ export function monthsInRange(startISO: string, endISO: string): number[] {
 export function deriveOpenSeasons(schedules: HoursSchedule[]): Season[] {
   const primary = primarySchedule(schedules);
   if (!primary) return [];
-  const standardOpen = WEEKDAYS.some((wd) => dayState(primary[wd]) !== 'closed');
+  const standardOpen = WEEKDAYS.some((wd) => dayState(primary[wd]) === 'open');
   const openMonths = new Set<number>(standardOpen ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] : []);
   for (const ex of primary.exceptions) {
     if (!ex.startDate || !ex.endDate) continue;

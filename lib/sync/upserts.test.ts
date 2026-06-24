@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+vi.mock('../neo4j', () => ({ readGraph: vi.fn(), writeGraph: vi.fn() }));
 import {
   normalizeCampgroundAccessibility,
   normalizeParkingAccessibility,
@@ -14,7 +15,18 @@ import {
   parseReleaseDate,
   extractParkingDetail,
   extractContacts,
+  upsertOperatingHoursForOwners,
+  upsertEntranceFees,
 } from './upserts';
+import { readGraph, writeGraph } from '../neo4j';
+
+const mockRead = vi.mocked(readGraph);
+const mockWrite = vi.mocked(writeGraph);
+
+beforeEach(() => {
+  mockRead.mockReset();
+  mockWrite.mockReset();
+});
 
 describe('normalizeCampgroundAccessibility (NPS accessibility blob → structured props)', () => {
   it('extracts wheelchair + RV max length from typical fields', () => {
@@ -269,5 +281,61 @@ describe('extractContacts (bonus)', () => {
   it('returns nulls for an empty/missing blob', () => {
     expect(extractContacts(undefined)).toEqual({ phone: null, email: null });
     expect(extractContacts({})).toEqual({ phone: null, email: null });
+  });
+});
+
+describe('operating hours upserts (F1/F3/F10)', () => {
+  it('rebuilds owner hours even when the current payload has zero schedules', async () => {
+    mockWrite.mockResolvedValueOnce([{ c: 1 }] as never);
+
+    const count = await upsertOperatingHoursForOwners('Park', 'parkCode', [{ ownerKey: 'acad', schedules: [] }]);
+
+    const [query, params] = mockWrite.mock.calls[0] as [string, Record<string, unknown>];
+    expect(query).toContain('OPTIONAL MATCH (o)-[:HAS_HOURS]->(oldH:OperatingHours)');
+    expect(query).toContain('FOREACH (e IN oldEs | DETACH DELETE e)');
+    expect(query).toContain('UNWIND row.schedules AS sch');
+    expect(params).toEqual({ rows: [{ ownerKey: 'acad', schedules: [] }] });
+    expect(count).toBe(1);
+  });
+});
+
+describe('entrance fee upserts (F2)', () => {
+  it('clears stale fees even when no current fee rows can be derived', async () => {
+    mockRead.mockResolvedValueOnce([] as never);
+    mockWrite.mockResolvedValueOnce([] as never);
+
+    const count = await upsertEntranceFees();
+
+    expect(mockWrite).toHaveBeenCalledTimes(1);
+    expect(mockWrite.mock.calls[0]).toEqual(['MATCH (f:EntranceFee) DETACH DELETE f']);
+    expect(count).toBe(0);
+  });
+
+  it('rebuilds all fee nodes after clearing the derived fee set', async () => {
+    mockRead.mockResolvedValueOnce([
+      {
+        parkCode: 'yell',
+        fees: JSON.stringify([{ title: 'Entrance - Private Vehicle', cost: '35', description: 'Per car' }]),
+      },
+    ] as never);
+    mockWrite.mockResolvedValueOnce([] as never).mockResolvedValueOnce([{ c: 1 }] as never);
+
+    const count = await upsertEntranceFees();
+
+    expect(mockWrite).toHaveBeenCalledTimes(2);
+    expect(mockWrite.mock.calls[0]).toEqual(['MATCH (f:EntranceFee) DETACH DELETE f']);
+    const [query, params] = mockWrite.mock.calls[1] as [string, { rows: Array<Record<string, unknown>> }];
+    expect(query).toContain('MERGE (f:EntranceFee {id: row.id})');
+    expect(params.rows).toEqual([
+      {
+        id: 'yell:Entrance - Private Vehicle',
+        parkCode: 'yell',
+        title: 'Entrance - Private Vehicle',
+        cost: 35,
+        unit: 'vehicle',
+        description: 'Per car',
+      },
+    ]);
+    expect(count).toBe(1);
   });
 });
