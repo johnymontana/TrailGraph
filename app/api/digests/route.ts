@@ -24,6 +24,7 @@ export async function GET(req: Request) {
   if (!authorized(req)) return Response.json({ error: 'unauthorized' }, { status: 401 });
 
   const baseUrl = process.env.BETTER_AUTH_URL ?? 'https://trailgraph.app';
+  const emailFrom = process.env.EMAIL_FROM;
   const users = await usersWithWatches();
   let built = 0;
   let emailed = 0;
@@ -32,11 +33,11 @@ export async function GET(req: Request) {
     const digest = await buildDigest(u.userId);
     if (!digest.items.length) continue;
     built++;
-    if (u.emailDigest && u.email && u.unsubToken && resend) {
+    if (u.emailDigest && u.email && u.unsubToken && resend && emailFrom) {
       const unsubscribeUrl = `${baseUrl}/api/unsubscribe?token=${encodeURIComponent(u.unsubToken)}`;
       try {
         await resend.emails.send({
-          from: process.env.EMAIL_FROM ?? 'TrailGraph <ranger@trailgraph.app>',
+          from: emailFrom,
           to: u.email,
           subject: `Your TrailGraph ranger digest · ${digest.forDate}`,
           html: digestEmailHtml(digest.items, digest.forDate, unsubscribeUrl),

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { upcomingFeeFree, darkSkyDigestItem, roadClosureItems } from './digest';
+import { feeFreeDaysForYear, upcomingFeeFree, darkSkyDigestItem, roadClosureItems } from './digest';
 import { digestEmailHtml } from './digest-email';
 import type { AstroEvents, RoadEvent } from './datasources';
 
@@ -21,6 +21,23 @@ describe('upcomingFeeFree (ADR-052)', () => {
   });
   it('returns null when none fall inside the window', () => {
     expect(upcomingFeeFree('2026-06-23', 7)).toBeNull(); // next is Aug 4
+  });
+  it('works for future years without hard-coded annual updates', () => {
+    const ff = upcomingFeeFree('2027-01-10', 14);
+    expect(ff).toEqual({ date: '2027-01-18', name: 'Martin Luther King Jr. Day' });
+  });
+});
+
+describe('feeFreeDaysForYear', () => {
+  it('generates the known 2026 dates', () => {
+    expect(feeFreeDaysForYear(2026)).toEqual([
+      { date: '2026-01-19', name: 'Martin Luther King Jr. Day' },
+      { date: '2026-04-18', name: 'First day of National Park Week' },
+      { date: '2026-06-19', name: 'Juneteenth' },
+      { date: '2026-08-04', name: 'Great American Outdoors Act anniversary' },
+      { date: '2026-09-26', name: 'National Public Lands Day' },
+      { date: '2026-11-11', name: 'Veterans Day' },
+    ]);
   });
 });
 

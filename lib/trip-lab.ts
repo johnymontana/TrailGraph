@@ -54,7 +54,7 @@ export async function forkTrip(userId: string, tripId: string, name?: string): P
   await writeGraph(
     `
     MATCH (orig:Trip {id:$tripId, userId:$userId})
-    MATCH (u:User {userId:$userId})
+    MERGE (u:User {userId:$userId})
     CREATE (f:Trip {id:$newId, userId:$userId})
       SET f.name = $name, f.startDate = orig.startDate, f.endDate = orig.endDate,
           f.startPoint = orig.startPoint, f.endPoint = orig.endPoint,
