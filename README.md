@@ -1,8 +1,10 @@
 # 🏞️ TrailGraph
 
-**An AI trip planner for the U.S. National Parks — and a reference app for giving a [Vercel Eve](https://vercel.com/) agent a real, graph-native memory with the [Neo4j Agent Memory Service (NAMS)](https://neo4j.com/labs/).**
+**An AI trip planner for the U.S. National Parks — and a reference app for giving a [Vercel Eve](https://vercel.com/) agent a real, graph-native memory with the [Neo4j Agent Memory Service (NAMS)](https://memory.neo4jlabs.com).**
 
-TrailGraph turns the National Park Service's open data into a connected graph you can explore, plan
+[![TrailGraph.app](img/trail-graph.png)](https://trailgraph.app)
+
+[TrailGraph](https://trailgraph.app) turns the National Park Service's open data into a connected graph you can explore, plan
 trips on, and chat with — through an AI "ranger" that actually remembers what you love. The interesting
 part isn't the chatbot; it's *how the agent remembers*: **Eve** runs the agent, **NAMS** gives it
 memory, and both sit on a **single Neo4j** so the agent can traverse straight from *"this user loves
@@ -13,6 +15,8 @@ dark skies and quiet trails"* to the specific parks, campgrounds, and routes tha
 ---
 
 ## The big idea: a context graph
+
+![Context graphs and agent memory](img/3-memory-types.png)
 
 Most "agent memory" is a pile of embedded text snippets. TrailGraph uses the more complete idea — a
 **context graph**: a connected, queryable memory of the user *and* the world, in the same database as
@@ -32,28 +36,10 @@ your domain data.
 
 ---
 
-## Architecture
-
-```mermaid
-flowchart LR
-  User([User]) --> Next["Next.js App Router<br/>Explore · Map · Plan · Memory · Graph"]
-  Next <-->|"same-origin, durable session"| Eve["Eve agent<br/>Ranger · tools · hooks"]
-  Next -->|read queries| Neo[("Neo4j<br/>domain graph + context graph")]
-  Eve -->|"tools: Cypher reads"| Neo
-  Eve -->|"memory read / write"| NAMS["NAMS<br/>short · long · reasoning"]
-  NAMS -.->|external workspace DB| Neo
-  Eve -->|model calls| GW[AI Gateway]
-  Cron["Vercel Cron + Workflow"] -->|sync| NPS[NPS Data API]
-  Cron --> Neo
-```
-
-Volatile dependencies sit behind thin adapters so the app — and this reference pattern — stays clean:
-`lib/memory.ts` (NAMS), `agent/` + `agent/channels/eve.ts` (Eve), `lib/routing.ts`
-(OpenRouteService), `lib/neo4j.ts` (the single driver boundary).
-
----
 
 ## ✨ How Eve + NAMS fit together
+
+![Eve + NAMS fit together](img/5-memory-gateway.png)
 
 This is the part worth copying into your own Eve app. Each pattern is one small, real file.
 
@@ -66,6 +52,8 @@ Every memory call goes through a `MemoryGateway` interface; the only file that i
 Persistence is an **Eve hook** on `message.received` / `message.completed` / `reasoning.completed`, not
 a tool the model has to remember to call. Memory becomes a runtime guarantee instead of a hope, and a
 slow memory write never blocks the user's turn.
+
+![Persist every turn the right way](img/4-eve-turn.png)
 
 ### 3. Server-bound identity — [`lib/eve-auth.ts`](lib/eve-auth.ts) · [`agent/channels/eve.ts`](agent/channels/eve.ts) · [`lib/agent-ctx.ts`](lib/agent-ctx.ts)
 The signed-in [Better Auth](https://www.better-auth.com/) user flows from the request cookie → the Eve
@@ -86,16 +74,20 @@ traversal can satisfy *and explain* an accessibility- and pass-aware recommendat
 Because the context graph is just data in Neo4j, the homepage "For you," the map defaults, and the
 "because you liked…" rationale all read the same preferences the ranger does — not only the agent.
 
+![Persist every turn the right way](img/trail-graph-memory.png)
+
 ### 6. The graph, made visible — [`components/graph/NvlGraph.tsx`](components/graph/NvlGraph.tsx)
 The `/graph` constellation and an interactive one-hop graph on every park page are rendered with the
 **Neo4j Visualization Library (NVL)** — the engine behind Neo4j Bloom — so the product *looks* like the
 graph it is.
 
-A companion deep-dive on this integration is written up as a blog post ([lyonwj.com](https://lyonwj.com)).
+A companion deep-dive on this integration is written up as a blog post [here](https://lyonwj.com/blog/agent-memory-with-eve-and-nams).
 
 ---
 
 ## What you can do
+
+![What you can do](img/trail-graph-plan.png)
 
 - **Explore** 470+ NPS sites with full-text + faceted search (activity, topic, **amenity**, state,
   dark-sky), and a personalized **"For you"** rail.
@@ -123,12 +115,13 @@ A companion deep-dive on this integration is written up as a blog post ([lyonwj.
   or on-demand behind swappable adapters.
 - **Dark mode** (system-aware, with a toggle in the nav) across the whole app, including the map basemap.
 
-> Builds use the **webpack** bundler (`next dev/build --webpack`) — Chakra v3 + next-themes hit a
-> hydration-ordering bug under Next 16's default Turbopack; webpack is the documented fix.
+![TrailGraph trails](img/trail-graph-trails.png)
 
 ---
 
 ## Tech stack
+
+![Architecture diagram](img/architecture.png)
 
 | | |
 |---|---|
@@ -270,6 +263,8 @@ trip-building flow — run against a **production build** (`pnpm build && pnpm s
 Emotion SSR only yields a trustworthy hydration signal in prod (dev emits class-hash false positives).
 
 ---
+
+![](img/trail-graph-search.png)
 
 > ⚠️ TrailGraph is a demo, **not** an official NPS safety source — always defer to NPS.gov and rangers
 > for life-safety decisions.
