@@ -21,5 +21,6 @@ export function isRenderableToolOutput(kind: string, data: unknown): boolean {
   if (kind === 'watch_list') return Array.isArray(d.watches); // render even when empty (confirms state)
   if (kind === 'digest_card') return Array.isArray(d.items); // render even when empty ("all clear")
   if (kind === 'why_this') return ((d.prefPaths as unknown[])?.length ?? 0) > 0 || ((d.constraints as unknown[])?.length ?? 0) > 0 || !!d.park;
+  if (kind === 'question_card') return typeof d.prompt === 'string' && ((d.options as unknown[])?.length ?? 0) > 0;
   return false;
 }
