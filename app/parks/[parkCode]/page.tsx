@@ -27,6 +27,21 @@ import { ParkCard } from '../../../components/ParkCard';
 import { ParkHero } from '../../../components/parks/ParkHero';
 import { VisitationChart } from '../../../components/parks/VisitationChart';
 import { SkyReadingForm } from '../../../components/collective/SkyReadingForm';
+import {
+  parkFingerprint,
+  trailDifficultyBreakdown,
+  trailScatterData,
+  darkSkyGaugeData,
+  weatherRangeData,
+  crowdHeatmap,
+} from '../../../lib/park-charts';
+import { VISITATION_YEARS } from '../../../lib/datasources/visitation-data';
+import { ParkFingerprintRadar } from '../../../components/parks/charts/ParkFingerprintRadar';
+import { DarkSkyGauge } from '../../../components/parks/charts/DarkSkyGauge';
+import { TrailDifficultyDonut } from '../../../components/parks/charts/TrailDifficultyDonut';
+import { TrailScatter } from '../../../components/parks/charts/TrailScatter';
+import { WeatherRangeChart } from '../../../components/parks/charts/WeatherRangeChart';
+import { CrowdCalendar } from '../../../components/parks/charts/CrowdCalendar';
 import { ParkGraph } from '../../../components/parks/ParkGraph';
 import { TourList } from '../../../components/parks/TourList';
 import { StampList } from '../../../components/parks/StampList';
@@ -105,6 +120,19 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
   const astro = park.lat != null && park.lng != null ? getAstro(park.lat as number, park.lng as number) : null;
   const sqm = park.bortleScale != null ? sqmFromBortle(park.bortleScale as number) : null;
   const fees = park.entranceFees as { cost: string; title: string; description: string }[];
+  // Park-detail chart data (ADR — data-viz): pure shapers run server-side; the chart islands get plain props.
+  const fingerprint = parkFingerprint({
+    activities: park.activities as string[],
+    topics: park.topics as string[],
+    thingsToDo,
+    bortleScale: park.bortleScale as number | null,
+    crowdLevel: park.crowdLevel as string | null,
+  });
+  const difficultySlices = trailDifficultyBreakdown(thingsToDo);
+  const scatterTrails = trailScatterData(thingsToDo);
+  const darkGauge = darkSkyGaugeData(park.bortleScale as number | null);
+  const weatherRange = weather ? weatherRangeData(weather.daily) : [];
+  const heatmap = crowdHeatmap(monthlyVisits);
   // "At a glance" strip data (R4 §3): dark-sky, difficulty range, fee.
   const diffOrder: Record<string, number> = { easy: 0, moderate: 1, strenuous: 2 };
   const difficulties = [...new Set(thingsToDo.map((n) => n.difficulty).filter(Boolean) as Difficulty[])].sort(
@@ -284,8 +312,9 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                   </Box>
                 ) : null}
                 {monthlyVisits.length === 12 ? (
-                  <VisitationChart monthly={monthlyVisits} bestMonths={bestMonths} parkName={park.name as string} />
+                  <VisitationChart monthly={monthlyVisits} bestMonths={bestMonths} parkName={park.name as string} years={VISITATION_YEARS} />
                 ) : null}
+                {heatmap.length ? <CrowdCalendar cells={heatmap} /> : null}
                 {/* Collective Intelligence v2 (ADR-053): let visitors log their own sky-darkness reading. */}
                 <SkyReadingForm parkCode={park.parkCode as string} parkName={park.name as string} />
               </Stack>
@@ -384,6 +413,22 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
           </Text>
         </Stack>
       </SimpleGrid>
+
+      {/* By the numbers — quantitative visualizations (ADR — park data-viz). Each chart returns null
+          when its data is absent, so the grid collapses gracefully. The fingerprint is universal. */}
+      <Box mt={12}>
+        <Heading size="md" mb={1}>By the numbers</Heading>
+        <Text fontSize="sm" color="fg.muted" mb={4}>
+          A visual read on {park.name as string} — its character, trails, sky, and weather.
+        </Text>
+        <SimpleGrid minChildWidth="300px" gap={4}>
+          <ParkFingerprintRadar axes={fingerprint} parkName={park.name as string} />
+          {darkGauge ? <DarkSkyGauge gauge={darkGauge} /> : null}
+          {difficultySlices.length ? <TrailDifficultyDonut slices={difficultySlices} /> : null}
+          {scatterTrails.length ? <TrailScatter trails={scatterTrails} /> : null}
+          {weatherRange.length >= 2 ? <WeatherRangeChart points={weatherRange} /> : null}
+        </SimpleGrid>
+      </Box>
 
       {/* People & stories — historical figures associated with this park (NPS-expansion P0 #2). */}
       {people.length > 0 ? (

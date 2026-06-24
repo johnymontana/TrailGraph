@@ -24,6 +24,7 @@
     "build:basemap": "tsx scripts/build-basemap.ts",
     "basemap:upload": "tsx scripts/upload-basemap.ts",
     "datasources:sync": "tsx scripts/sync-datasources.ts",
+    "visitation:build": "tsx scripts/build-visitation-dataset.ts",
     "agent:dev": "eve dev",
     "agent:info": "eve info",
     "agent:link": "eve link",

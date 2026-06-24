@@ -1,10 +1,12 @@
 import { writeGraph } from '../neo4j';
+import { NPS_VISITATION } from './visitation-data';
 
 /**
- * Visitation / crowd data source (§5b). Models NPS Visitor Use Statistics (monthly recreation visits,
- * a public download) behind the AD-3 adapter. Stores the monthly array on `:Park` and derives
- * `bestMonths` (lowest-crowd) + a `crowdLevel` bucket. Pure derivations are unit-tested; swap
- * `VISITATION` for the real CSV import later.
+ * Visitation / crowd data source (§5b). Real NPS Visitor Use Statistics (monthly recreation visits)
+ * behind the AD-3 adapter: `NPS_VISITATION` (lib/datasources/visitation-data.ts) is generated from the
+ * public NPS data package by `scripts/build-visitation-dataset.ts` (3-year average per month, ~400
+ * parks). Stores the monthly array on `:Park` and derives `bestMonths` (lowest-crowd) + a `crowdLevel`
+ * bucket. Pure derivations are unit-tested. The small `VISITATION` constant below is a curated fallback.
  */
 export interface VisitationRecord {
   parkCode: string;
@@ -14,7 +16,7 @@ export interface VisitationRecord {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// Curated, representative monthly shapes (peak-summer parks vs shoulder-season parks).
+// Curated fallback shapes (used only if the generated NPS dataset is unavailable).
 export const VISITATION: VisitationRecord[] = [
   { parkCode: 'yell', monthly: [30, 35, 50, 110, 380, 760, 980, 920, 600, 250, 45, 30].map((k) => k * 1000) },
   { parkCode: 'glac', monthly: [12, 14, 22, 60, 210, 520, 720, 690, 380, 120, 25, 14].map((k) => k * 1000) },
@@ -67,7 +69,9 @@ export function normalizeCrowdCurve(monthly: number[]): CrowdCurvePoint[] {
   return monthly.map((v, i) => ({ month: i + 1, label: MONTHS[i], visits: Math.round(v), pct: Math.round((v / max) * 100) }));
 }
 
-export async function applyVisitation(records: VisitationRecord[] = VISITATION): Promise<number> {
+export async function applyVisitation(
+  records: VisitationRecord[] = NPS_VISITATION.length ? NPS_VISITATION : VISITATION,
+): Promise<number> {
   let applied = 0;
   for (const r of records) {
     const annual = r.monthly.reduce((a, b) => a + b, 0);

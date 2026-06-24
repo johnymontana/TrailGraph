@@ -37,7 +37,7 @@ export function CrowdCurve({ curves }: { curves: Curve[] }) {
         Crowd curve — each line is a park’s monthly visits as a share of its busiest month. Lower = quieter.
       </Text>
       <Chart.Root maxH="48" chart={chart} aria-label="Crowd curve for considered parks">
-        <LineChart data={chart.data}>
+        <LineChart data={chart.data} responsive>
           <CartesianGrid stroke={chart.color('border.muted')} vertical={false} />
           <XAxis dataKey={chart.key('month')} tickLine={false} axisLine={false} fontSize={11} />
           <YAxis width={32} tickLine={false} axisLine={false} fontSize={11} domain={[0, 100]} />
