@@ -1,4 +1,5 @@
 'use client';
+import { useState } from 'react';
 import { Badge, Box, Card, Icon, Text, Stack, HStack, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
 import { LuTriangleAlert } from 'react-icons/lu';
@@ -8,8 +9,10 @@ import { SkyLeaderboard, type LeaderboardEntry } from '../collective/SkyLeaderbo
 import { DigestItems, type DigestItemView } from '../inbox/DigestItems';
 import { ProvenanceEdges } from '../parks/ProvenanceEdges';
 
-/** Renders a tool's `{kind,data}` output as a structured card (ADR-013, D5). Graph-grounded only. */
-export function ToolCard({ kind, data: raw }: { kind: string; data: unknown }) {
+/** Renders a tool's `{kind,data}` output as a structured card (ADR-013, D5). Graph-grounded only.
+ * `onAnswer` is passed only for interactive cards (the `question_card`) and only on the latest turn — it
+ * sends the user's chosen option back to the ranger as their next message. */
+export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: unknown; onAnswer?: (text: string) => void }) {
   const data = (raw ?? {}) as Record<string, unknown>;
   // Surface tool errors instead of silently dropping them (R2 §3.1 — the blank "save as trip" turn).
   if (typeof data.error === 'string') {
@@ -54,6 +57,8 @@ export function ToolCard({ kind, data: raw }: { kind: string; data: unknown }) {
       return <LeaderboardCard data={data} />;
     case 'digest_card':
       return <DigestCard data={data} />;
+    case 'question_card':
+      return <QuestionCard data={data} onAnswer={onAnswer} />;
     case 'watch_list':
       return <WatchListCard data={data} />;
     case 'why_this':
@@ -158,6 +163,54 @@ function NodeResults({ data }: { data: Record<string, unknown> }) {
         </Card.Root>
       ))}
     </Stack>
+  );
+}
+
+/** Interactive clarifying question (ask_question tool). Tapping an option sends its label back to the
+ * ranger as the user's next message via `onAnswer`; chips disable after a pick so a question isn't
+ * answered twice. `onAnswer` is absent for stale (non-latest) turns, leaving the card read-only. */
+function QuestionCard({ data, onAnswer }: { data: Record<string, unknown>; onAnswer?: (text: string) => void }) {
+  const prompt = data.prompt as string | undefined;
+  const options = (data.options ?? []) as { id: string; label: string; description?: string }[];
+  const allowFreeform = !!data.allowFreeform;
+  const [answered, setAnswered] = useState(false);
+  if (!prompt || !options.length) return null;
+  const disabled = answered || !onAnswer;
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading" mb={2}>{prompt}</Text>
+        <Stack gap={2} align="stretch">
+          {options.map((o) => (
+            <Box
+              key={o.id}
+              as="button"
+              textAlign="start"
+              borderWidth="1px"
+              borderColor="border"
+              borderRadius="l2"
+              px={3}
+              py={2}
+              opacity={answered ? 0.55 : 1}
+              cursor={disabled ? 'default' : 'pointer'}
+              transition="background 0.15s, border-color 0.15s"
+              _hover={disabled ? undefined : { bg: 'brand.muted', borderColor: 'brand.solid' }}
+              onClick={() => {
+                if (disabled) return;
+                setAnswered(true);
+                onAnswer?.(o.label);
+              }}
+            >
+              <Text fontWeight="medium">{o.label}</Text>
+              {o.description ? <Text fontSize="xs" color="fg.muted" mt={0.5}>{o.description}</Text> : null}
+            </Box>
+          ))}
+        </Stack>
+        {allowFreeform && !answered ? (
+          <Text fontSize="xs" color="fg.muted" mt={2}>…or type your own answer below.</Text>
+        ) : null}
+      </Card.Body>
+    </Card.Root>
   );
 }
 

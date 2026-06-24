@@ -57,7 +57,11 @@ export function ChatPanel() {
     await agent.send({ message: msg });
   }
 
-  function renderAssistant(parts: { type: string; text?: string; state?: string; output?: unknown }[], streaming: boolean): ReactNode {
+  function renderAssistant(
+    parts: { type: string; text?: string; state?: string; output?: unknown }[],
+    streaming: boolean,
+    onAnswer?: (text: string) => void,
+  ): ReactNode {
     const seenParks = new Set<string>();
     const seenSig = new Set<string>();
     const nodes: ReactNode[] = [];
@@ -95,7 +99,7 @@ export function ChatPanel() {
         const sig = out.kind + JSON.stringify(data ?? {});
         if (seenSig.has(sig)) return;
         seenSig.add(sig);
-        nodes.push(<ToolCard key={j} kind={out.kind} data={data} />);
+        nodes.push(<ToolCard key={j} kind={out.kind} data={data} onAnswer={onAnswer} />);
       }
     });
 
@@ -169,7 +173,13 @@ export function ChatPanel() {
               <Box minW={0} flex="1">
                 <Text fontSize="xs" color="fg.muted" mb={1}>Ranger</Text>
                 <Box bg="bg.panel" borderWidth="1px" borderColor="border" borderRadius="l2" borderTopLeftRadius="xs" px={4} py={3}>
-                  {renderAssistant(m.parts as never[], streaming)}
+                  {renderAssistant(
+                    m.parts as never[],
+                    streaming,
+                    // Only the latest turn's question card is interactive — tapping sends the choice
+                    // back as the user's next message; stale cards stay read-only.
+                    i === messages.length - 1 ? (text: string) => void send(text) : undefined,
+                  )}
                 </Box>
               </Box>
             </HStack>

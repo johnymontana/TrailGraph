@@ -69,6 +69,13 @@ describe('isRenderableToolOutput', () => {
     expect(isRenderableToolOutput('leaderboard_card', { entries: [] })).toBe(false);
   });
 
+  it('question_card: needs a prompt and at least one option', () => {
+    expect(isRenderableToolOutput('question_card', { prompt: 'Pick one', options: [{}] })).toBe(true);
+    expect(isRenderableToolOutput('question_card', { prompt: 'Pick one', options: [] })).toBe(false);
+    expect(isRenderableToolOutput('question_card', { options: [{}] })).toBe(false);
+    expect(isRenderableToolOutput('question_card', {})).toBe(false);
+  });
+
   it('unknown kinds render nothing; null data is safe', () => {
     expect(isRenderableToolOutput('map_snippet', { foo: 1 })).toBe(false);
     expect(isRenderableToolOutput('park_card', null)).toBe(false);
