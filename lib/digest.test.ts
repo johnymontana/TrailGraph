@@ -42,8 +42,10 @@ describe('feeFreeDaysForYear', () => {
   it('includes a fee-free day that is exactly today', () => {
     expect(upcomingFeeFree('2026-06-19', 0)?.date).toBe('2026-06-19');
   });
-  it('returns null once all 2026 fee-free days are in the past', () => {
-    expect(upcomingFeeFree('2026-12-01', 60)).toBeNull();
+  it('returns null when no fee-free day falls inside the window (early Dec → next is mid-Jan)', () => {
+    // After Veterans Day (Nov 11) the next fee-free day is MLK Day (~mid-Jan), so a short December
+    // window has none. (A 60-day window WOULD reach next year's MLK Day, since days now generate per year.)
+    expect(upcomingFeeFree('2026-12-01', 10)).toBeNull();
   });
 });
 

@@ -16,7 +16,32 @@ export interface RankDefaults {
   requiredAmenities: string[];
 }
 
-export function RankPanel({ defaults }: { defaults: RankDefaults }) {
+/** The active /explore faceted filters — the live panel refines WITHIN these (ADR-046). */
+export interface RankFacets {
+  q?: string;
+  stateCode?: string;
+  activity?: string;
+  topic?: string;
+  amenity?: string;
+  designation?: string;
+  darkSky?: boolean;
+}
+
+/** Human summary of the active facets, e.g. "WY · Astronomy · dark-sky parks". */
+function summarizeFacets(f: RankFacets): string {
+  const parts = [
+    f.q ? `“${f.q}”` : null,
+    f.stateCode,
+    f.activity,
+    f.topic,
+    f.amenity,
+    f.designation,
+    f.darkSky ? 'dark-sky parks' : null,
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+export function RankPanel({ defaults, facets = {} }: { defaults: RankDefaults; facets?: RankFacets }) {
   const [mounted, setMounted] = useState(false);
   // Slider state. maxBortle: lower = darker; 9 = "any". crowd: 0..100 → 0..1.
   const [maxBortle, setMaxBortle] = useState(9);
@@ -48,6 +73,15 @@ export function RankPanel({ defaults }: { defaults: RankDefaults }) {
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
           body: JSON.stringify({
+            // Honor the active /explore facets so the live panel can't surface parks the faceted search
+            // excluded (e.g. a filtered-out state) — the bug this fixes.
+            q: facets.q || undefined,
+            stateCode: facets.stateCode || undefined,
+            activity: facets.activity || undefined,
+            topic: facets.topic || undefined,
+            amenity: facets.amenity || undefined,
+            designation: facets.designation || undefined,
+            darkSky: facets.darkSky || undefined,
             maxBortle: maxBortle < 9 ? maxBortle : undefined,
             crowdTolerance: crowd / 100,
             wheelchairAccessible: wheelchair || undefined,
@@ -70,18 +104,39 @@ export function RankPanel({ defaults }: { defaults: RankDefaults }) {
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [mounted, maxBortle, crowd, wheelchair, rvFt, defaults.requiredAmenities]);
+  }, [
+    mounted,
+    maxBortle,
+    crowd,
+    wheelchair,
+    rvFt,
+    defaults.requiredAmenities,
+    facets.q,
+    facets.stateCode,
+    facets.activity,
+    facets.topic,
+    facets.amenity,
+    facets.designation,
+    facets.darkSky,
+  ]);
 
   if (!mounted) return null; // SSR baseline is the GET form above; this is pure progressive enhancement.
+
+  const facetSummary = summarizeFacets(facets);
 
   return (
     <Box borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={{ base: 4, md: 5 }} mb={6}>
       <Text fontWeight="semibold" fontFamily="heading" mb={1}>
         Refine live
       </Text>
-      <Text fontSize="sm" color="fg.muted" mb={4}>
+      <Text fontSize="sm" color="fg.muted" mb={facetSummary ? 1 : 4}>
         Drag to re-rank instantly — the graph filters and scores in one query.
       </Text>
+      {facetSummary ? (
+        <Text fontSize="xs" color="brand.fg" mb={4}>
+          Refining within your filters: {facetSummary}
+        </Text>
+      ) : null}
       <SimpleGrid columns={{ base: 1, md: 2 }} gap={5}>
         <Slider.Root value={[maxBortle]} min={1} max={9} step={1} onValueChange={(d) => setMaxBortle(d.value[0])}>
           <Flex justify="space-between">

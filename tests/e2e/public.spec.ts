@@ -27,6 +27,25 @@ test('faceted search filters by activity', async ({ page }) => {
   await expect(page.getByText('Yellowstone National Park', { exact: true })).toHaveCount(0);
 });
 
+test('state facet scopes BOTH the grid and the live "Refine live" panel (regression)', async ({ page }) => {
+  await page.goto('/explore');
+  await page.selectOption('select[name="stateCode"]', 'MT');
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page).toHaveURL(/stateCode=MT/);
+
+  // Faceted grid: only the two MT parks (glac + yell), not grca (AZ).
+  await expect(page.getByText(/of 2 parks/)).toBeVisible();
+
+  // The live re-rank panel announces it's scoped to the active facet (the fix) …
+  await expect(page.getByText(/Refining within your filters:\s*MT/)).toBeVisible({ timeout: 15000 });
+
+  // … and the rank API it calls honors the facet — no out-of-state park (grca) comes back.
+  const res = await page.request.post('/api/parks/rank', { data: { stateCode: 'MT', limit: 50 } });
+  expect(res.ok()).toBeTruthy();
+  const codes = ((await res.json()).items as { parkCode: string }[]).map((p) => p.parkCode).sort();
+  expect(codes).toEqual(['glac', 'yell']);
+});
+
 test('park detail shows description, alert, related parks, and actions', async ({ page }) => {
   await page.goto('/parks/yell');
   // `exact` so the h1 matches but not the "How Yellowstone National Park connects" graph h2.
