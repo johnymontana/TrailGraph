@@ -13,6 +13,7 @@ import {
 } from '../../../../lib/trips';
 import { suggestDays } from '../../../../lib/itinerary';
 import { nearestNeighborOrder } from '../../../../lib/route-order';
+import { forkTrip, tripDiff } from '../../../../lib/trip-lab';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,14 +42,26 @@ export async function POST(req: Request, { params }: Ctx) {
   if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
   const { id } = await params;
   const body = (await req.json()) as {
-    op: 'addStop' | 'removeStop' | 'reorder' | 'alerts' | 'cost' | 'conditions' | 'suggestDays' | 'optimize' | 'rename';
+    op: 'addStop' | 'removeStop' | 'reorder' | 'alerts' | 'cost' | 'conditions' | 'suggestDays' | 'optimize' | 'rename' | 'fork' | 'diff';
     stop?: NewStop;
     stopId?: string;
     orderedStopIds?: string[];
     name?: string;
+    otherTripId?: string;
   };
 
   switch (body.op) {
+    case 'fork': {
+      const newId = await forkTrip(userId, id, body.name);
+      if (!newId) return Response.json({ error: 'not found' }, { status: 404 });
+      return Response.json({ tripId: newId, trip: await getTrip(userId, newId) });
+    }
+    case 'diff': {
+      if (!body.otherTripId) return Response.json({ error: 'otherTripId required' }, { status: 400 });
+      const diff = await tripDiff(userId, id, body.otherTripId);
+      if (!diff) return Response.json({ error: 'not found' }, { status: 404 });
+      return Response.json({ diff });
+    }
     case 'rename': {
       const name = body.name?.trim();
       if (!name) return Response.json({ error: 'name required' }, { status: 400 });

@@ -49,6 +49,24 @@ export function monthNames(months: number[]): string {
   return months.map((m) => MONTHS[m - 1]).filter(Boolean).join(', ');
 }
 
+export interface CrowdCurvePoint {
+  month: number; // 1-indexed
+  label: string; // 'Jan'…'Dec'
+  visits: number;
+  pct: number; // 0..100 of the busiest month — the normalized "crowd curve"
+}
+
+/**
+ * Normalize a 12-month visitation array into a 0–100 crowd curve (Collective Intelligence v2, ADR-053).
+ * Each month becomes a percentage of the busiest month, so different-sized parks overlay on one axis
+ * ("when is each park least crowded?"). Pure (unit-tested). Returns [] unless given 12 months.
+ */
+export function normalizeCrowdCurve(monthly: number[]): CrowdCurvePoint[] {
+  if (monthly.length !== 12) return [];
+  const max = Math.max(...monthly, 1);
+  return monthly.map((v, i) => ({ month: i + 1, label: MONTHS[i], visits: Math.round(v), pct: Math.round((v / max) * 100) }));
+}
+
 export async function applyVisitation(records: VisitationRecord[] = VISITATION): Promise<number> {
   let applied = 0;
   for (const r of records) {

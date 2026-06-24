@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Box, Flex, SimpleGrid, Slider, Spinner, Stack, Switch, Text } from '@chakra-ui/react';
+import { Box, Flex, SimpleGrid, Skeleton, Slider, Spinner, Stack, Switch, Text } from '@chakra-ui/react';
 import { ParkCard } from '../ParkCard';
 import type { RankedPark } from '../../lib/recommend';
 
@@ -23,8 +23,11 @@ export function RankPanel({ defaults }: { defaults: RankDefaults }) {
   const [crowd, setCrowd] = useState(0);
   const [wheelchair, setWheelchair] = useState(defaults.wheelchairAccessible);
   const [rvFt, setRvFt] = useState(defaults.rvMaxLengthFt ?? 0);
-  const [items, setItems] = useState<RankedPark[]>([]);
-  const [total, setTotal] = useState(0);
+  // `null` = not loaded yet (first paint, before the initial fetch resolves) vs `[]` = loaded, no
+  // matches. Distinguishing them kills the one-frame "0 matches" flash the test report flagged (§5.2):
+  // we show a skeleton until the first response, never "no parks match".
+  const [items, setItems] = useState<RankedPark[] | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -136,11 +139,19 @@ export function RankPanel({ defaults }: { defaults: RankDefaults }) {
 
       <Flex align="center" gap={2} mt={4} mb={2}>
         <Text fontSize="sm" color="fg.muted">
-          Ranked by your preferences + filters · {total} match{total === 1 ? '' : 'es'}
+          {total == null
+            ? 'Ranked by your preferences + filters · finding matches…'
+            : `Ranked by your preferences + filters · ${total} match${total === 1 ? '' : 'es'}`}
         </Text>
         {loading ? <Spinner size="xs" /> : null}
       </Flex>
-      {items.length ? (
+      {items == null ? (
+        <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={5}>
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} h="220px" borderRadius="l2" />
+          ))}
+        </SimpleGrid>
+      ) : items.length ? (
         <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={5}>
           {items.map((p) => (
             <Stack key={p.parkCode} gap={1}>

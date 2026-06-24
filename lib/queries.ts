@@ -1,6 +1,7 @@
 import { readGraph } from './neo4j';
 import { embed } from './embeddings';
 import { labelColor, type ParkNodeNav } from './graph-nvl';
+import { normalizeCrowdCurve, type CrowdCurvePoint } from './datasources/visitation';
 import type { Node as NvlNode, Relationship as NvlRel } from '@neo4j-nvl/base';
 
 /**
@@ -706,4 +707,48 @@ export async function vibeSearch(
       maxBortle,
     },
   );
+}
+
+export interface LandingStats {
+  parks: number;
+  darkSky: number;
+  activities: number;
+  topics: number;
+}
+
+/** Headline graph counts for the landing stats band — parks, dark-sky sites, activities, topics. */
+export async function landingStats(): Promise<LandingStats> {
+  const rows = await readGraph<LandingStats>(
+    `CALL { MATCH (p:Park) RETURN count(p) AS parks }
+     CALL { MATCH (d:Park) WHERE d.darkSkyCertified = true RETURN count(d) AS darkSky }
+     CALL { MATCH (a:Activity) RETURN count(a) AS activities }
+     CALL { MATCH (t:Topic) RETURN count(t) AS topics }
+     RETURN parks, darkSky, activities, topics`,
+    {},
+  );
+  return rows[0] ?? { parks: 0, darkSky: 0, activities: 0, topics: 0 };
+}
+
+export interface CrowdCurve {
+  parkCode: string;
+  name: string;
+  crowdLevel: string | null;
+  points: CrowdCurvePoint[];
+}
+
+/**
+ * A park's normalized crowd curve (Collective Intelligence v2, ADR-053) — the synced monthly visitation
+ * scaled to 0–100, for the "when is it least crowded?" seasonality line. Returns null for unknown parks
+ * or parks with no visitation data.
+ */
+export async function crowdCurve(parkCode: string): Promise<CrowdCurve | null> {
+  const rows = await readGraph<{ name: string; monthly: number[]; crowdLevel: string | null }>(
+    `MATCH (p:Park {parkCode:$parkCode})
+     RETURN p.fullName AS name, coalesce(p.monthlyVisits, []) AS monthly, p.crowdLevel AS crowdLevel`,
+    { parkCode },
+  );
+  if (!rows.length) return null;
+  const points = normalizeCrowdCurve(rows[0].monthly ?? []);
+  if (!points.length) return null;
+  return { parkCode, name: rows[0].name, crowdLevel: rows[0].crowdLevel, points };
 }

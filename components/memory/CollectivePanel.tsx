@@ -2,8 +2,10 @@
 import { useEffect, useState } from 'react';
 import { Box, Heading, Text, Stack, HStack, Switch, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
+import { SkyLeaderboard, type LeaderboardEntry } from '../collective/SkyLeaderboard';
+import { CrowdCurve, type Curve } from '../collective/CrowdCurve';
 
-/** Opt-in collective intelligence (E5): "travelers like you also loved…". Anonymized counts only. */
+/** Opt-in collective intelligence (E5 + v2 ADR-053): peer picks, SQM leaderboard, crowd curves. */
 interface Pick {
   parkCode: string;
   name: string;
@@ -13,6 +15,8 @@ interface Pick {
 export function CollectivePanel() {
   const [optIn, setOptIn] = useState(false);
   const [picks, setPicks] = useState<Pick[]>([]);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [crowdCurves, setCrowdCurves] = useState<Curve[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -21,6 +25,8 @@ export function CollectivePanel() {
       .then((d) => {
         setOptIn(d.optIn);
         setPicks(d.picks ?? []);
+        setLeaderboard(d.leaderboard ?? []);
+        setCrowdCurves(d.crowdCurves ?? []);
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
@@ -67,6 +73,24 @@ export function CollectivePanel() {
           </Stack>
         )
       ) : null}
+
+      {crowdCurves.length ? (
+        <Box mt={8}>
+          <Heading size="sm" mb={1}>When your wishlist is quietest</Heading>
+          <Text fontSize="xs" color="fg.muted" mb={3}>
+            Crowd curves for your considered parks — overlaid so you can spot a shared low-crowd window.
+          </Text>
+          <CrowdCurve curves={crowdCurves} />
+        </Box>
+      ) : null}
+
+      <Box mt={8}>
+        <Heading size="sm" mb={1}>Community dark-sky leaderboard</Heading>
+        <Text fontSize="xs" color="fg.muted" mb={3}>
+          Parks ranked by travelers’ median SQM readings (higher = darker). Log your own from any park page.
+        </Text>
+        <SkyLeaderboard entries={leaderboard} />
+      </Box>
     </Box>
   );
 }

@@ -60,6 +60,15 @@ describe('isRenderableToolOutput', () => {
     expect(isRenderableToolOutput('why_this', {})).toBe(false);
   });
 
+  it('trip_diff: needs both sides; leaderboard_card: entries or a submission', () => {
+    expect(isRenderableToolOutput('trip_diff', { a: {}, b: {} })).toBe(true);
+    expect(isRenderableToolOutput('trip_diff', { a: {} })).toBe(false);
+    expect(isRenderableToolOutput('trip_diff', {})).toBe(false);
+    expect(isRenderableToolOutput('leaderboard_card', { entries: [{}] })).toBe(true);
+    expect(isRenderableToolOutput('leaderboard_card', { submitted: { sqm: 21 } })).toBe(true);
+    expect(isRenderableToolOutput('leaderboard_card', { entries: [] })).toBe(false);
+  });
+
   it('unknown kinds render nothing; null data is safe', () => {
     expect(isRenderableToolOutput('map_snippet', { foo: 1 })).toBe(false);
     expect(isRenderableToolOutput('park_card', null)).toBe(false);
