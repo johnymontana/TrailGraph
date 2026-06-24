@@ -1,6 +1,7 @@
 import { getUserId } from '../../../lib/session';
 import { getUserMemory } from '../../../lib/memory-graph';
 import { deletePreference, deleteConsidered, deleteAllConsidered, setPreferenceFeedback, setPreferenceWeight, recordPreference, setTravelConstraints, clearTravelConstraints, recordPass, clearPass, collectStamp, uncollectStamp, setAvailability, clearAvailability } from '../../../lib/bridges';
+import { parseBody, MemoryActionSchema } from '../../../lib/validation';
 
 /** "Your memory" API (E3/E4). All actions userId-scoped from the session (R4). */
 export const dynamic = 'force-dynamic';
@@ -14,37 +15,9 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const userId = await getUserId(req);
   if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
-  const body = (await req.json()) as {
-    op:
-      | 'deletePreference'
-      | 'deleteConsidered'
-      | 'clearConsidered'
-      | 'feedback'
-      | 'addPreference'
-      | 'setWeight'
-      | 'setTravelConstraints'
-      | 'clearTravelConstraints'
-      | 'recordPass'
-      | 'clearPass'
-      | 'collectStamp'
-      | 'uncollectStamp'
-      | 'setAvailability'
-      | 'clearAvailability';
-    kind?: 'activity' | 'topic';
-    name?: string;
-    parkCode?: string;
-    vote?: 'up' | 'down';
-    category?: string;
-    value?: string;
-    weight?: number;
-    wheelchair?: boolean;
-    rvMaxLengthFt?: number | null;
-    requiredAmenities?: string[];
-    passId?: string;
-    stampId?: string;
-    start?: string | null;
-    end?: string | null;
-  };
+  const parsed = await parseBody(req, MemoryActionSchema);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
 
   switch (body.op) {
     case 'setTravelConstraints':

@@ -1,3 +1,4 @@
+import './server-guard'; // reads process.env secrets; block accidental client-bundle import (S9)
 /**
  * Typed, lazy environment access. We don't validate everything at import time because
  * different surfaces need different subsets (the marketing page needs none of it; the

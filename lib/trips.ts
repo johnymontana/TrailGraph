@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readGraph, writeGraph } from './neo4j';
-import { routing, type LatLng } from './routing';
+import { type LatLng } from './routing';
+import { cachedDriveSegments } from './drive-cache';
 import { considerPark } from './bridges';
 import { buildParkConditions, type ConditionsCardData, type TripDashboard } from './conditions';
 import { decodeEntities } from './html-entities';
@@ -267,7 +268,7 @@ export async function recomputeSegments(userId: string, tripId: string): Promise
 
   const located = stops.filter((s) => s.lat != null && s.lng != null);
   if (located.length < 2) return;
-  const segments = await routing.driveSegments(
+  const segments = await cachedDriveSegments(
     located.map((s) => ({ latitude: s.lat as number, longitude: s.lng as number })),
   );
   for (const seg of segments) {

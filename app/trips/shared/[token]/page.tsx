@@ -11,7 +11,7 @@ export default async function SharedTripPage({ params }: { params: Promise<{ tok
   const shared = await getSharedTrip(token);
   if (!shared) notFound();
 
-  const { trip, role } = shared;
+  const { trip } = shared;
   const stops = ((trip.stops ?? []).filter(Boolean) as {
     id: string;
     order: number;
@@ -25,7 +25,7 @@ export default async function SharedTripPage({ params }: { params: Promise<{ tok
   return (
     <Container maxW="3xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 12 }}>
       <Badge colorPalette="pine" variant="subtle" mb={3}>
-        Shared itinerary · read-only{role === 'edit' ? ' (edit link)' : ''}
+        Shared itinerary · read-only
       </Badge>
       <Heading as="h1" size="2xl" mb={6}>{trip.name}</Heading>
 

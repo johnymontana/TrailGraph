@@ -27,7 +27,8 @@ export default defineTool({
       if (!parkCode) return { kind: 'watch_list', data: { error: 'parkCode required to watch a park.' } };
       const park = await parkDetail(parkCode);
       if (!park) return { kind: 'watch_list', data: { error: `No such park: ${parkCode}.` } };
-      await createWatch(userId, 'park', parkCode, park.name as string);
+      const res = await createWatch(userId, 'park', parkCode, park.name as string);
+      if ('error' in res) return { kind: 'watch_list', data: { error: res.error } };
     } else {
       const trips = (await listTrips(userId)) as { id: string; name: string }[];
       let id = tripId && trips.some((t) => t.id === tripId) ? tripId : undefined;
@@ -37,7 +38,8 @@ export default defineTool({
       }
       if (!id) return { kind: 'watch_list', data: { error: "Couldn't find that trip — recall the user's trips first." } };
       const label = trips.find((t) => t.id === id)?.name;
-      await createWatch(userId, 'trip', id, label);
+      const res = await createWatch(userId, 'trip', id, label);
+      if ('error' in res) return { kind: 'watch_list', data: { error: res.error } };
     }
     return { kind: 'watch_list', data: { watches: await listWatches(userId) } };
   },

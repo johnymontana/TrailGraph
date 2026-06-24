@@ -9,6 +9,8 @@ import {
   alertParksInBBox,
   type BBox,
 } from '../../../lib/queries';
+import { rateLimit, rlIp, clientIp } from '../../../lib/rate-limit';
+import { serverError } from '../../../lib/http';
 
 /**
  * Domain read BFF (AD-4). Client map/explore widgets call this; RSC pages call the lib directly.
@@ -51,7 +53,17 @@ export async function GET(req: Request) {
       }
       case 'vibe': {
         const q = url.searchParams.get('q');
-        if (!q) return Response.json({ error: 'q required' }, { status: 400 });
+        // op=vibe runs an AI-Gateway embedding per request and is anonymous (audit C5): guard input
+        // and cap per IP. The cheap bbox/near/search ops stay unthrottled at the app layer (the map
+        // fires them on every pan); a coarse Vercel WAF rule backstops the whole route.
+        if (!q || q.trim().length < 3) return Response.json({ error: 'q required (min 3 chars)' }, { status: 400 });
+        const rl = await rateLimit(rlIp(clientIp(req), 'vibe'), 20, 60);
+        if (!rl.ok) {
+          return Response.json(
+            { error: 'rate_limited' },
+            { status: 429, headers: { 'Retry-After': String(Math.max(1, Math.ceil((rl.resetAt - Date.now()) / 1000))) } },
+          );
+        }
         return Response.json({ parks: await vibeSearch(q) });
       }
       default: {
@@ -67,6 +79,6 @@ export async function GET(req: Request) {
       }
     }
   } catch (err) {
-    return Response.json({ error: (err as Error).message }, { status: 500 });
+    return serverError('graph', err);
   }
 }
