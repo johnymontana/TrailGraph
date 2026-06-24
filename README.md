@@ -96,8 +96,10 @@ A companion deep-dive on this integration is written up as a blog post [here](ht
 - **Map** every site on a clustered MapLibre map with layer toggles (campgrounds, visitor centers,
   things-to-do, active alerts) loaded by viewport, plus real **park boundary** overlays on detail maps.
 - **Plan** multi-park, multi-day trips with drive segments, day-by-day pacing, graph-aware route
-  optimization, per-trip alert checks, a **fees/passes cost estimate** (with America-the-Beautiful
-  break-even), shareable read-only links, and `.ics` export — or **seed a trip from an official NPS tour**.
+  optimization, per-trip alert checks, **date-aware open/closed validation** (`check_open` flags a road
+  or facility that's closed on your travel dates), a **real fees/passes budget** (per-vehicle/person/
+  motorcycle entrance fees summed from NPS data, with the America-the-Beautiful break-even and fee-free-day
+  nudges), shareable read-only links, and `.ics` export — or **seed a trip from an official NPS tour**.
 - **Trails** (`/trails`) — cross-park **thematic trails** connected by a historical figure or a shared
   topic, highlighted on the graph constellation.
 - **Chat** with the **ranger**, which recalls your preferences, recommends parks with reasons, builds
@@ -111,8 +113,12 @@ A companion deep-dive on this integration is written up as a blog post [here](ht
   preferences, considered parks, trips, travel constraints, passes, stamps, and dates — with durable
   deletes (tombstones) so extraction won't resurrect them.
 - **Conditions** on each park: dark-sky/Bortle rating, best months + a monthly-visitation chart, trail
-  difficulty/length, current weather, timed-entry, and live **webcams + road events** — graph-native
+  difficulty/length, current weather, timed-entry, **operating hours + seasonal closures**, an
+  **accessibility scorecard** (reported features across places/campgrounds/trails/parking), **parking +
+  EV charging**, the **latest NPS news releases**, and live **webcams + road events** — graph-native
   or on-demand behind swappable adapters.
+- **Nearby & regional** discovery: a materialized `NEAR` proximity graph and curated geographic
+  `:Region`s seed tighter multi-park trips ("what else is within range of Mesa Verde?").
 - **Dark mode** (system-aware, with a toggle in the nav) across the whole app, including the map basemap.
 
 ![TrailGraph trails](img/trail-graph-trails.png)
@@ -155,7 +161,11 @@ Then populate the domain graph from the NPS API: `curl "http://localhost:3000/ap
 **resumable and rate-limit-tolerant** — large resources page-and-checkpoint, so a `429` pauses (saving
 a cursor) and the next run continues; the response reports `{paused:[…]}`. It also embeds `:Place`/
 `:Person` for semantic search (content-hash gated); add `EMBED_ARTICLES=1` to also embed the ~19k
-articles. `pnpm sync:reset <resource>…` clears specific checkpoints to force a re-sync.
+articles. The sync also promotes the rich NPS payloads it already downloads into queryable nodes —
+operating hours + seasonal closures, structured entrance fees, campground inventory, event recurrence,
+accessibility, news releases, and a `NEAR`/region graph (see [`docs/DECISIONS.md`](docs/DECISIONS.md)
+ADR-059). Self-guided audio + multimedia is opt-in behind `SYNC_MULTIMEDIA=1` (large, off by default).
+`pnpm sync:reset <resource>…` clears specific checkpoints to force a re-sync.
 
 > `pnpm dev` auto-starts the Eve agent behind the app via Eve's `withEve`. To run the app **without** the
 > agent (just Explore / Map / Plan UI): `DISABLE_EVE=1 pnpm dev`.
@@ -256,11 +266,17 @@ pnpm test:e2e                           # Playwright — builds + serves a prod 
 ```
 
 Unit tests cover the pure logic (recommendation ranking, canonicalization, route ordering, ICS, the
-data-source derivations, NVL data mapping, brand-color resolution, server-bound identity). Integration
-tests exercise the real graph (domain queries, the trip service, cross-graph recommendations, the Better
-Auth adapter, memory delete + tombstones, sharing). E2E covers the public surface and an authenticated
-trip-building flow — run against a **production build** (`pnpm build && pnpm start`), because Chakra's
-Emotion SSR only yields a trustworthy hydration signal in prod (dev emits class-hash false positives).
+data-source derivations, **the NPS data-feature parsers** — operating-hours/open-closed, fee units,
+campsite inventory, event-date expansion, accessibility/region derivation, contacts, trail metrics —
+NVL data mapping, brand-color resolution, server-bound identity). Integration tests exercise the real
+graph (domain queries, the trip service, cross-graph recommendations, the Better Auth adapter, memory
+delete + tombstones, sharing, and **the data features end-to-end** in
+`tests/integration/nps-data-features.itest.ts`: `check_open`, the fee budget, the fixed campground
+`HAS_AMENITY` edge, the accessibility scorecard, news/article search, regions + `NEAR`). E2E covers the
+public surface (incl. the new park-page hours/accessibility/news/parking blocks in
+`tests/e2e/nps-data-features.spec.ts`) and an authenticated trip-building flow — run against a
+**production build** (`pnpm build && pnpm start`), because Chakra's Emotion SSR only yields a trustworthy
+hydration signal in prod (dev emits class-hash false positives).
 
 ---
 

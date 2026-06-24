@@ -116,6 +116,39 @@ describe('dateInException / scheduleStateOn', () => {
   });
 });
 
+describe('scheduleStateOn — unknown days & partial-open exceptions', () => {
+  it('returns unknown for a day the park does not report', () => {
+    const [sched] = parseOperatingHours(
+      [{ name: 'Park Hours', standardHours: { monday: '', tuesday: 'All Day' }, exceptions: [] }],
+      'x',
+    );
+    expect(scheduleStateOn(sched, '2026-06-22')).toBe('unknown'); // 2026-06-22 is a Monday (empty → unknown)
+    expect(scheduleStateOn(sched, '2026-06-23')).toBe('open'); // Tuesday → All Day
+  });
+
+  it('an exception can re-open a specific day inside a closure window', () => {
+    const [sched] = parseOperatingHours(
+      [
+        {
+          name: 'Park Hours',
+          standardHours: { monday: 'All Day', tuesday: 'All Day', wednesday: 'All Day', thursday: 'All Day', friday: 'All Day', saturday: 'All Day', sunday: 'All Day' },
+          exceptions: [
+            {
+              name: 'Holiday week',
+              startDate: '2026-12-24',
+              endDate: '2026-12-26',
+              exceptionHours: { thursday: 'Closed', friday: '9:00AM - 1:00PM' },
+            },
+          ],
+        },
+      ],
+      'x',
+    );
+    expect(scheduleStateOn(sched, '2026-12-24')).toBe('closed'); // Thursday → Closed
+    expect(scheduleStateOn(sched, '2026-12-25')).toBe('open'); // Friday → has a time range
+  });
+});
+
 describe('openStateOn (park-level uses Park Hours, not road closures)', () => {
   it('park stays open in winter even when the road is closed', () => {
     const schedules = parseOperatingHours(GTSR, 'glac');
@@ -151,6 +184,20 @@ describe('seasons', () => {
       ['fall', 'spring', 'summer', 'winter'].sort(),
     );
   });
+  it('a fully-closed standard week with no exceptions has no open seasons', () => {
+    const closed = [
+      {
+        name: 'Park Hours',
+        standardHours: {
+          monday: 'Closed', tuesday: 'Closed', wednesday: 'Closed', thursday: 'Closed',
+          friday: 'Closed', saturday: 'Closed', sunday: 'Closed',
+        },
+        exceptions: [],
+      },
+    ];
+    expect(deriveOpenSeasons(parseOperatingHours(closed, 'x'))).toEqual([]);
+  });
+
   it('a park-hours winter closure removes winter', () => {
     const northRim = [
       {
