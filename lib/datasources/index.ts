@@ -24,7 +24,7 @@ export { classifyDifficulty, difficultyDot, type Difficulty } from './trails';
 export { recreationUrl, parseRidbId } from './recreation';
 export { getWeather, weatherCodeLabel, type ParkWeather } from './weather';
 export { getConditions, roadEventSeverity, type ParkConditions, type Webcam, type RoadEvent } from './conditions';
-export { getAstro, moonPhaseName, sqmFromBortle, sunTimesFor, type AstroEvents, type SqmEstimate, type SunTimes } from './astro';
+export { getAstro, moonPhaseName, sqmFromBortle, sunTimesFor, darkestNight, type AstroEvents, type SqmEstimate, type SunTimes, type DarkestNight } from './astro';
 export {
   meteorShowers,
   satellitePasses,

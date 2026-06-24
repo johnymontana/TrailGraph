@@ -7,7 +7,7 @@ vi.mock('./neo4j', () => ({
   ]),
 }));
 
-import { canonicalizeValue, extractCanonicalTerms, resetAliasCache } from './canonicalize';
+import { canonicalizeValue, extractCanonicalTerms, isParksRelevant, resetAliasCache } from './canonicalize';
 
 describe('canonicalizeValue', () => {
   beforeEach(() => resetAliasCache());
@@ -48,5 +48,22 @@ describe('extractCanonicalTerms (deterministic recall, R2 §3.2)', () => {
 
   it('returns nothing for text with no known terms', async () => {
     expect(await extractCanonicalTerms('the weather was pleasant today')).toEqual([]);
+  });
+});
+
+describe('isParksRelevant (R5 §2.6 — off-topic gate for preference extraction)', () => {
+  beforeEach(() => resetAliasCache());
+
+  it('is false for clearly off-topic turns', async () => {
+    expect(await isParksRelevant('write me a Python function for the Fibonacci sequence')).toBe(false);
+    expect(await isParksRelevant('what is a good carbonara recipe?')).toBe(false);
+    expect(await isParksRelevant('explain Big-O notation')).toBe(false);
+    expect(await isParksRelevant('')).toBe(false);
+  });
+
+  it('is true for parks/trip talk (domain term or park keyword)', async () => {
+    expect(await isParksRelevant('I love dark skies and stargazing')).toBe(true); // synonym vocab
+    expect(await isParksRelevant('plan a trip to a national park with easy hikes')).toBe(true); // keywords
+    expect(await isParksRelevant('any waterfalls near a campground?')).toBe(true);
   });
 });

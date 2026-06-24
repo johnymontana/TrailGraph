@@ -11,7 +11,7 @@ import type { CrowdHeatCell } from '../../../lib/park-charts';
 export function CrowdCalendar({ cells }: { cells: CrowdHeatCell[] }) {
   if (!cells.length) return null;
   return (
-    <ChartCard title="Best time to visit" caption="Relative crowds by month — lighter is quieter; ringed months are calmest.">
+    <ChartCard title="Quietest months" caption="Relative crowds by month — lighter is quieter; ringed months are the calmest by crowds.">
       <SimpleGrid columns={{ base: 4, sm: 6 }} gap={1.5}>
         {cells.map((c) => {
           const mix = Math.round(12 + 0.78 * c.pct); // quiet ≈ 12%, busiest ≈ 90%

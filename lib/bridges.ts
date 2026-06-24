@@ -146,6 +146,23 @@ export interface TravelConstraints {
 }
 
 /**
+ * Merge the user's durable (saved) constraints with per-query / trip-scoped overrides (R5 §2.2). Used by
+ * `find_parks` to honor a one-trip or companion need (e.g. "my mom uses a wheelchair") for a single
+ * search WITHOUT persisting it as a durable global filter. Per-query scalars take precedence when
+ * provided; required amenities are a union (a one-trip need *adds* to the user's standing needs). Pure.
+ */
+export function mergeConstraints(
+  saved: TravelConstraints,
+  overrides: { wheelchair?: boolean; rvMaxLengthFt?: number | null; requiredAmenities?: string[] },
+): TravelConstraints {
+  return {
+    wheelchair: overrides.wheelchair ?? saved.wheelchair,
+    rvMaxLengthFt: overrides.rvMaxLengthFt ?? saved.rvMaxLengthFt,
+    requiredAmenities: [...new Set([...saved.requiredAmenities, ...(overrides.requiredAmenities ?? [])])],
+  };
+}
+
+/**
  * Accessibility / travel constraints (NPS-expansion P0 #1). Scalar constraints live on a single
  * per-user `(:User)-[:TRAVELS_WITH]->(:Constraint {userId})`; categorical needs are
  * `(:User)-[:REQUIRES]->(:Amenity)`. The ranger sets these once; recommend/explain honor them on every

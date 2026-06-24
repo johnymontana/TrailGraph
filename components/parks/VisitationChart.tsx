@@ -35,7 +35,7 @@ export function VisitationChart({
     <Box>
       <Text fontSize="xs" color="fg.muted" mb={2}>
         Typical monthly recreation visits{years ? ` · NPS avg ${years[0]}–${years[1]}` : ''} —{' '}
-        <Text as="span" color="accent.fg" fontWeight="medium">orange</Text> months are the lowest-crowd times to visit.
+        <Text as="span" color="accent.fg" fontWeight="medium">orange</Text> months are the quietest by crowds.
       </Text>
       <Chart.Root maxH="52" chart={chart} aria-label={`Monthly visitation for ${parkName}`}>
         <AreaChart data={chart.data} responsive>
