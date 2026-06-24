@@ -12,11 +12,11 @@ import {
   Separator,
 } from '@chakra-ui/react';
 import NextImage from 'next/image';
-import { LuCalendar, LuFootprints, LuStar, LuTicket, LuUsers } from 'react-icons/lu';
+import { LuCalendar, LuFootprints, LuMoon, LuStar, LuTicket, LuUsers } from 'react-icons/lu';
 import { StatCard } from '../../../components/ui/stat-card';
 import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph, peopleForPark, toursForPark, stampsForPark, eventsForPark, placesForPark, articlesForPark, parkingForPark } from '../../../lib/queries';
 import { getAvailability } from '../../../lib/bridges';
-import { darkSkyRating, monthNames, difficultyDot, getWeather, getConditions, type Difficulty } from '../../../lib/datasources';
+import { darkSkyRating, monthNames, difficultyDot, getWeather, getConditions, getAstro, sqmFromBortle, type Difficulty } from '../../../lib/datasources';
 import { explainForParks } from '../../../lib/explain';
 import { getServerUserId } from '../../../lib/session';
 import { MiniMap } from '../../../components/MiniMap';
@@ -24,6 +24,7 @@ import { RecordView } from '../../../components/RecordView';
 import { ChipList } from '../../../components/ChipList';
 import { ParkActions } from '../../../components/ParkActions';
 import { ParkCard } from '../../../components/ParkCard';
+import { ParkHero } from '../../../components/parks/ParkHero';
 import { VisitationChart } from '../../../components/parks/VisitationChart';
 import { ParkGraph } from '../../../components/parks/ParkGraph';
 import { TourList } from '../../../components/parks/TourList';
@@ -97,6 +98,11 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
   const bestMonths = park.bestMonths as number[];
   const monthlyVisits = park.monthlyVisits as number[];
   const dark = park.bortleScale != null ? darkSkyRating(park.bortleScale as number) : null;
+  // Tonight's sky — deterministic ephemeris (ADR-043), no API. We surface only the tz-independent
+  // fields here (phase, illumination %, dark hours); rise/set clock times need a park-local tz
+  // (deferred to the Phase-2 astro-planner).
+  const astro = park.lat != null && park.lng != null ? getAstro(park.lat as number, park.lng as number) : null;
+  const sqm = park.bortleScale != null ? sqmFromBortle(park.bortleScale as number) : null;
   const fees = park.entranceFees as { cost: string; title: string; description: string }[];
   // "At a glance" strip data (R4 §3): dark-sky, difficulty range, fee.
   const diffOrder: Record<string, number> = { easy: 0, moderate: 1, strenuous: 2 };
@@ -116,58 +122,35 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
   return (
     <Box maxW="5xl" mx="auto" px={{ base: 4, md: 8 }} py={6}>
       <RecordView parkCode={parkCode} />
-      {/* Hero — image with a scrim and the park name overlaid (magazine-style). */}
-      <Box
-        position="relative"
-        h={{ base: '280px', md: '400px' }}
-        w="100%"
-        mb={6}
-        borderRadius="l3"
-        overflow="hidden"
-      >
-        {images[0]?.url ? (
-          <NextImage
-            src={images[0].url}
-            alt={images[0].altText ?? String(park.name)}
-            fill
-            priority
-            sizes="(max-width: 1024px) 100vw, 1024px"
-            style={{ objectFit: 'cover' }}
-          />
-        ) : (
-          <Placeholder name={String(park.parkCode)} label={String(park.name)} />
-        )}
-        <Box
-          position="absolute"
-          inset={0}
-          style={{ background: 'linear-gradient(to top, rgba(11,46,30,0.92) 0%, rgba(11,46,30,0.30) 50%, transparent 78%)' }}
-        />
-        <Stack position="absolute" bottom={0} left={0} right={0} p={{ base: 5, md: 8 }} gap={2}>
-          {park.designation ? (
-            <Badge colorPalette="trail" variant="solid" alignSelf="start">
-              {park.designation as string}
-            </Badge>
-          ) : null}
-          <Heading
-            as="h1"
-            size={{ base: '2xl', md: '4xl' }}
-            color="white"
-            lineHeight="1.05"
-            textShadow="0 2px 14px rgba(0,0,0,0.5)"
-          >
-            {park.name as string}
-          </Heading>
-          {statesLabel ? (
-            <Text color="whiteAlpha.900" fontSize="sm" textShadow="0 1px 8px rgba(0,0,0,0.6)">
-              {statesLabel}
-            </Text>
-          ) : null}
-        </Stack>
-      </Box>
+      {/* Hero — client island so it can settle in + carry the cross-route layoutId (ADR-044 §7.1). */}
+      <ParkHero
+        parkCode={String(park.parkCode)}
+        name={String(park.name)}
+        designation={(park.designation as string) ?? null}
+        statesLabel={statesLabel}
+        image={images[0] ?? null}
+      />
 
       {/* "At a glance" stat row (R4 §3). */}
       <SimpleGrid minChildWidth="150px" gap={3} mb={6}>
-        {dark ? <StatCard label="Dark sky" value={dark.label} icon={LuStar} tone="accent" /> : null}
+        {dark ? (
+          <StatCard
+            label="Dark sky"
+            value={dark.label}
+            hint={sqm ? `Bortle ${park.bortleScale} · SQM ~${sqm.sqm} (est.)` : undefined}
+            icon={LuStar}
+            tone="accent"
+          />
+        ) : null}
+        {astro ? (
+          <StatCard
+            label="Tonight"
+            value={`${astro.moon.emoji} ${astro.moon.illuminationPct}% moon`}
+            hint={astro.darkHours.hours != null ? `${astro.darkHours.hours} h fully dark` : `${astro.moon.phaseName}`}
+            icon={LuMoon}
+            tone="accent"
+          />
+        ) : null}
         {diffRange ? <StatCard label="Hikes" value={diffRange} hint={`${difficulties.map(difficultyDot).join(' ')}`} icon={LuFootprints} /> : null}
         {park.crowdLevel ? <StatCard label="Crowds" value={park.crowdLevel as string} icon={LuUsers} /> : null}
         <StatCard label="Entrance" value={feeLabel} icon={LuTicket} tone="brand" />
@@ -185,7 +168,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
       </SimpleGrid>
 
       <Box mb={6}>
-        <ParkActions parkCode={parkCode} />
+        <ParkActions parkCode={parkCode} parkName={park.name as string} />
       </Box>
 
       {/* Active alerts — color-coded; we surface but defer to NPS for safety (NG2) */}

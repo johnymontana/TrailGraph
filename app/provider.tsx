@@ -1,5 +1,6 @@
 'use client';
 import { ChakraProvider } from '@chakra-ui/react';
+import { MotionConfig } from 'motion/react';
 import type { ReactNode } from 'react';
 import { system } from '../theme';
 import { ColorModeProvider } from '../components/ui/color-mode';
@@ -19,7 +20,12 @@ export function Provider({ children }: { children: ReactNode }) {
   return (
     <EmotionRegistry>
       <ChakraProvider value={system}>
-        <ColorModeProvider>{children}</ColorModeProvider>
+        <ColorModeProvider>
+          {/* Global motion (ADR-044). Innermost wrapper: MotionConfig renders no DOM/<style>, so it can't
+              disturb Emotion's SSR flush order (ADR-022) or the next-themes mounted gate (ADR-027/028).
+              `reducedMotion="user"` makes every descendant motion component honor prefers-reduced-motion. */}
+          <MotionConfig reducedMotion="user">{children}</MotionConfig>
+        </ColorModeProvider>
       </ChakraProvider>
     </EmotionRegistry>
   );

@@ -13,10 +13,10 @@ export default defineTool({
   async execute({ parkCode }) {
     const park = await parkDetail(parkCode);
     if (!park || park.lat == null || park.lng == null) {
-      return { kind: 'map_snippet', data: { error: `No coordinates for ${parkCode}` } };
+      return { kind: 'weather_card', data: { error: `No coordinates for ${parkCode}` } };
     }
     const weather = await getWeather(park.lat as number, park.lng as number);
-    if (!weather) return { kind: 'map_snippet', data: { error: 'Weather unavailable right now.' } };
-    return { kind: 'map_snippet', data: { park: park.name, ...weather } };
+    if (!weather) return { kind: 'weather_card', data: { error: 'Weather unavailable right now.' } };
+    return { kind: 'weather_card', data: { park: park.name, parkCode, ...weather } };
   },
 });

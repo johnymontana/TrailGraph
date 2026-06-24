@@ -1,4 +1,5 @@
 import { readGraph } from './neo4j';
+import { contextToNvl } from './graph-nvl';
 
 /**
  * "Your memory" reads (E3). Returns the user's context subgraph from the co-resident Neo4j (AD-1):
@@ -93,4 +94,13 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
     stamps: r?.stamps ?? [],
     availability: { start: r?.availStart ?? null, end: r?.availEnd ?? null },
   };
+}
+
+/**
+ * The user's context graph as NVL nodes/rels (ADR-047) — `/me` renders it as a living graph and `/graph`
+ * overlays it on the domain constellation. Reuses the tested `getUserMemory` read + the pure
+ * `contextToNvl` mapper (CONSIDERED parks keyed by bare parkCode so they merge with the domain graph).
+ */
+export async function userContextGraph(userId: string) {
+  return contextToNvl(await getUserMemory(userId));
 }

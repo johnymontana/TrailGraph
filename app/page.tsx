@@ -18,6 +18,7 @@ import { searchParks } from '../lib/queries';
 import { forYou } from '../lib/recommend';
 import { getServerUserId } from '../lib/session';
 import { ParkCard } from '../components/ParkCard';
+import { WhyThisPark } from '../components/parks/WhyThisPark';
 import { FirstRunBanner } from '../components/FirstRunBanner';
 import { SectionHeading } from '../components/ui/section-heading';
 import { heroContourTexture } from '../theme/textures';
@@ -135,9 +136,12 @@ export default async function Home() {
                 <Box key={p.parkCode} minW={0}>
                   <ParkCard park={p} />
                   {p.matched.length > 0 ? (
-                    <CLink href="/me" display="block" fontSize="xs" color="fg.muted" mt={1.5} title="See this in Your memory">
-                      Because you liked {p.matched.slice(0, 3).join(', ')}
-                    </CLink>
+                    <>
+                      <CLink href="/me" display="block" fontSize="xs" color="fg.muted" mt={1.5} title="See this in Your memory">
+                        Because you liked {p.matched.slice(0, 3).join(', ')}
+                      </CLink>
+                      <WhyThisPark parkCode={p.parkCode} parkName={p.name} />
+                    </>
                   ) : null}
                 </Box>
               ))}

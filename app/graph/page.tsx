@@ -1,7 +1,7 @@
 import { Box, Heading, Text } from '@chakra-ui/react';
 import { graphNeighborhood, thematicTrail } from '../../lib/queries';
 import { getServerUserId } from '../../lib/session';
-import { getUserMemory } from '../../lib/memory-graph';
+import { getUserMemory, userContextGraph } from '../../lib/memory-graph';
 import { GraphConstellation } from '../../components/graph/GraphConstellation';
 
 /** Signature graph view (R2 §P3, centerpiece §5e): National Parks linked by shared topics, with your
@@ -18,10 +18,11 @@ export default async function GraphPage({ searchParams }: { searchParams: Promis
   const person = sp.person?.trim() || undefined;
   const topic = sp.topic?.trim() || undefined;
   const trailTheme = person ?? topic;
-  const [data, mem, trail] = await Promise.all([
+  const [data, mem, trail, context] = await Promise.all([
     graphNeighborhood().catch(() => ({ nodes: [], links: [] })),
     userId ? getUserMemory(userId).catch(() => null) : Promise.resolve(null),
     trailTheme ? thematicTrail({ person, topic }).catch(() => []) : Promise.resolve([]),
+    userId ? userContextGraph(userId).catch(() => undefined) : Promise.resolve(undefined),
   ]);
   const highlight = trailTheme ? trail.map((p) => p.parkCode) : (mem?.considered.map((c) => c.parkCode) ?? []);
   return (
@@ -38,7 +39,7 @@ export default async function GraphPage({ searchParams }: { searchParams: Promis
               : ''}
         </Text>
       </Box>
-      <GraphConstellation data={data} highlight={highlight} />
+      <GraphConstellation data={data} highlight={highlight} context={context ?? undefined} />
     </Box>
   );
 }

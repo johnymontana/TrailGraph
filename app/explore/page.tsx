@@ -19,7 +19,10 @@ import { LuChevronLeft, LuChevronRight, LuSearch, LuTelescope } from 'react-icon
 import { searchParks, facets } from '../../lib/queries';
 import { forYou } from '../../lib/recommend';
 import { getServerUserId } from '../../lib/session';
+import { getTravelConstraints } from '../../lib/bridges';
 import { ParkCard } from '../../components/ParkCard';
+import { RankPanel } from '../../components/explore/RankPanel';
+import { WhyThisPark } from '../../components/parks/WhyThisPark';
 import { PageHeader } from '../../components/ui/page-header';
 import { SectionHeading } from '../../components/ui/section-heading';
 import { EmptyState } from '../../components/ui/empty-state';
@@ -56,6 +59,12 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
     cachedFacets(),
     userId ? forYou(userId, { limit: 4 }) : Promise.resolve(null),
   ]);
+  // Saved travel constraints pre-fill the live "Refine live" sliders (ADR-046).
+  const rankDefaults = userId
+    ? await getTravelConstraints(userId)
+        .then((c) => ({ rvMaxLengthFt: c.rvMaxLengthFt, wheelchairAccessible: c.wheelchair, requiredAmenities: c.requiredAmenities }))
+        .catch(() => ({ rvMaxLengthFt: null, wheelchairAccessible: false, requiredAmenities: [] }))
+    : { rvMaxLengthFt: null, wheelchairAccessible: false, requiredAmenities: [] };
   const results = search.items;
   const total = search.total;
   const firstIdx = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -93,9 +102,12 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
                 <Box key={p.parkCode}>
                   <ParkCard park={p} />
                   {recs.source === 'personalized' && p.matched.length > 0 ? (
-                    <CLink href="/me" display="block" fontSize="xs" color="fg.muted" mt={1.5} title="See this in Your memory">
-                      Because you liked {p.matched.slice(0, 3).join(', ')}
-                    </CLink>
+                    <>
+                      <CLink href="/me" display="block" fontSize="xs" color="fg.muted" mt={1.5} title="See this in Your memory">
+                        Because you liked {p.matched.slice(0, 3).join(', ')}
+                      </CLink>
+                      <WhyThisPark parkCode={p.parkCode} parkName={p.name} />
+                    </>
                   ) : null}
                 </Box>
               ))}
@@ -134,6 +146,9 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
             </Flex>
           </form>
         </Box>
+
+        {/* Live constraint re-ranking (ADR-046) — progressive enhancement below the no-JS form. */}
+        <RankPanel defaults={rankDefaults} />
 
         <Text color="fg.muted" mb={4} fontSize="sm">
           {total === 0 ? '0 parks' : `Showing ${firstIdx}–${lastIdx} of ${total} park${total === 1 ? '' : 's'}`}

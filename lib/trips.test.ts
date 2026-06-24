@@ -6,8 +6,10 @@ const readGraph = vi.fn();
 vi.mock('./neo4j', () => ({ readGraph: (...a: unknown[]) => readGraph(...a), writeGraph: vi.fn() }));
 vi.mock('./routing', () => ({ routing: {} }));
 vi.mock('./bridges', () => ({ considerPark: vi.fn() }));
+vi.mock('./conditions', () => ({ buildParkConditions: vi.fn() }));
 
-import { tripCost } from './trips';
+import { tripCost, tripConditions } from './trips';
+import { buildParkConditions } from './conditions';
 
 beforeEach(() => readGraph.mockReset());
 
@@ -59,5 +61,49 @@ describe('tripCost (P2 fees / break-even cost model)', () => {
     const c = await tripCost('u1', 't1');
     expect(c.perPark[0].fee).toBe(0);
     expect(c.total).toBe(0);
+  });
+});
+
+describe('tripConditions (Trip Dashboard aggregation, ADR-042)', () => {
+  beforeEach(() => vi.mocked(buildParkConditions).mockReset());
+
+  it('returns null when the trip does not exist', async () => {
+    readGraph.mockResolvedValueOnce([]); // getTrip → no rows
+    expect(await tripConditions('u1', 'nope')).toBeNull();
+  });
+
+  it('aggregates only park stops, in order, ignoring non-park stops', async () => {
+    readGraph.mockResolvedValueOnce([
+      {
+        id: 't1', name: 'Loop', startDate: null, endDate: null,
+        stops: [
+          { id: 's1', order: 0, kind: 'park', parkCode: 'yell', parkName: 'Yellowstone', lat: 1, lng: 2 },
+          { id: 's2', order: 1, kind: 'custom', name: 'Hotel', lat: 3, lng: 4 }, // not a park → skipped
+          { id: 's3', order: 2, kind: 'park', parkCode: 'grca', parkName: 'Grand Canyon', lat: 5, lng: 6 },
+        ],
+      },
+    ]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(buildParkConditions).mockImplementation(async (code: string, order?: number) => ({ parkCode: code, parkName: code, order } as any));
+    const dash = await tripConditions('u1', 't1');
+    expect(dash!.tripId).toBe('t1');
+    expect(dash!.stops.map((s) => s.parkCode)).toEqual(['yell', 'grca']);
+    expect(buildParkConditions).toHaveBeenCalledTimes(2);
+  });
+
+  it('filters out stops whose conditions could not be built (e.g. a since-deleted park)', async () => {
+    readGraph.mockResolvedValueOnce([
+      {
+        id: 't1', name: 'Loop', startDate: null, endDate: null,
+        stops: [
+          { id: 's1', order: 0, kind: 'park', parkCode: 'yell', parkName: 'Y', lat: 1, lng: 2 },
+          { id: 's2', order: 1, kind: 'park', parkCode: 'gone', parkName: 'G', lat: 3, lng: 4 },
+        ],
+      },
+    ]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(buildParkConditions).mockImplementation(async (code: string) => (code === 'gone' ? null : ({ parkCode: code } as any)));
+    const dash = await tripConditions('u1', 't1');
+    expect(dash!.stops.map((s) => s.parkCode)).toEqual(['yell']);
   });
 });

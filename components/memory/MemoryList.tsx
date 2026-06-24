@@ -4,6 +4,7 @@ import { Box, Heading, Stack, HStack, Text, Badge, Button, IconButton, Link as C
 import NextLink from 'next/link';
 import { LuThumbsDown, LuThumbsUp } from 'react-icons/lu';
 import type { UserMemory } from '../../lib/memory-graph';
+import { emitMemoryFormed } from './MemoryFormingLayer';
 
 /**
  * "Your memory" surface (E3/E4). Users view, give feedback on, and DELETE remembered facts. Deletes
@@ -40,11 +41,19 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
     fetch('/api/memory/reconcile', { method: 'POST' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d?.memory) setMem(d.memory);
+        if (d?.memory) {
+          // Animate any preference the reconcile just surfaced (chat-learned prefs forming into the
+          // graph) in lockstep with the persisted bridge — the "memory forming" thesis (ADR-044 §7.2).
+          const had = new Set(initial.preferences.map((p) => `${p.kind}:${p.name}`));
+          for (const p of (d.memory as UserMemory).preferences) {
+            if (!had.has(`${p.kind}:${p.name}`)) emitMemoryFormed({ label: p.name, relation: 'prefers' });
+          }
+          setMem(d.memory);
+        }
       })
       .catch(() => {})
       .finally(() => setLearning(false));
-  }, []);
+  }, [initial.preferences]);
 
   async function act(body: Record<string, unknown>) {
     setBusy(true);

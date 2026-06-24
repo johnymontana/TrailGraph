@@ -51,4 +51,27 @@ describe('tripToIcs', () => {
     expect((ics.match(/BEGIN:VEVENT/g) ?? []).length).toBe(1);
     expect(ics).toContain('SUMMARY:Stop');
   });
+
+  it('stays pure with no `sun` opt (existing behavior unchanged)', () => {
+    const ics = tripToIcs(trip(), { baseDate: '20260601', stamp: STAMP });
+    expect(ics).toContain('DESCRIPTION:TrailGraph itinerary');
+    expect(ics).not.toContain('Moon');
+  });
+
+  it('bakes the night\'s dark-sky facts into the DESCRIPTION when `sun` is injected (ADR-048)', () => {
+    const ics = tripToIcs(
+      trip({ stops: [{ id: 's1', day: 1, parkName: 'Yellowstone', lat: 44.6, lng: -110.5 }] }),
+      { baseDate: '20260601', stamp: STAMP, sun: () => ({ moonIllumination: 12, darkHours: 8.1 }) },
+    );
+    expect(ics).toContain('Moon 12% illuminated');
+    expect(ics).toContain('8.1h of astronomical darkness');
+  });
+
+  it('skips the sky line for stops without coordinates', () => {
+    const ics = tripToIcs(
+      trip({ stops: [{ id: 's1', day: 1, parkName: 'Yellowstone' }] }),
+      { baseDate: '20260601', stamp: STAMP, sun: () => ({ moonIllumination: 12, darkHours: 8.1 }) },
+    );
+    expect(ics).not.toContain('Moon');
+  });
 });

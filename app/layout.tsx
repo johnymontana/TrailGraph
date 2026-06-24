@@ -5,6 +5,7 @@ import { Provider } from './provider';
 import { SiteNav } from '../components/SiteNav';
 import { SiteFooter } from '../components/SiteFooter';
 import { Toaster } from '../components/ui/toaster';
+import { MemoryFormingLayer } from '../components/memory/MemoryFormingLayer';
 
 // Display font (headings, wordmark) + body/UI font, exposed as CSS variables that the Chakra `fonts`
 // tokens reference (theme/tokens.ts). `display: 'swap'` avoids a blocking font fetch.
@@ -40,6 +41,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               global rule (theme/index.ts) — no client gate, so no SSR/CSR hydration drift. */}
           <SiteFooter />
           <Toaster />
+          {/* Plays the "memory forming" animation when a bridge is persisted (ADR-044 §7.2). Renders
+              nothing until a `trailgraph:memory-formed` event fires, so it never affects first paint. */}
+          <MemoryFormingLayer />
         </Provider>
       </body>
     </html>

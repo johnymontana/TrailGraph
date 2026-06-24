@@ -14,7 +14,9 @@ import { heroContourTexture } from '../../theme/textures';
 const CHOICES: { category: string; value: string; label: string }[] = [
   { category: 'topic', value: 'Lakes', label: 'Alpine lakes' },
   { category: 'activity', value: 'stargazing', label: 'Dark skies' },
-  { category: 'crowd', value: 'fewer crowds', label: 'Fewer crowds' },
+  // 'Fewer crowds' was a silent no-op: it canonicalizes to no Activity/Topic, so no PREFERS bridge
+  // is written and it never affects recommendations (ADR-045). Crowd tolerance now lives as a real
+  // soft-ranker slider on /explore (ADR-046), so the dead chip is removed rather than faking a save.
   { category: 'topic', value: 'history', label: 'History' },
   { category: 'activity', value: 'birding', label: 'Wildlife & birding' },
   { category: 'activity', value: 'Hiking', label: 'Easy hikes' },
