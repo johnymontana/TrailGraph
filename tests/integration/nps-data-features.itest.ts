@@ -13,6 +13,8 @@ import {
   parksWithEventOn,
   eventsForPark,
   searchParks,
+  closureWarningsForTrip,
+  parksInRegion,
 } from '../../lib/queries';
 import {
   upsertCampgrounds,
@@ -20,7 +22,7 @@ import {
   upsertParks,
   extractCampsiteInventory,
 } from '../../lib/sync/upserts';
-import { setAccessibilityNeeds, getTravelConstraints, clearTravelConstraints } from '../../lib/bridges';
+import { setAccessibilityNeeds, clearAccessibilityNeeds, getTravelConstraints, clearTravelConstraints } from '../../lib/bridges';
 import { applyRegions } from '../../lib/datasources/regions';
 import { applyAccessibilityTaxonomy } from '../../lib/datasources/accessibility';
 import { deriveNear } from '../../lib/sync/derive-near';
@@ -34,7 +36,7 @@ import { deriveSharedEdges } from '../../lib/sync/derive-shared';
  * + a reachable Neo4j (safety rail in db.ts).
  */
 describeIntegration('NPS data features (Neo4j)', () => {
-  const TEMP_PARKS = ['itest-np-1', 'itest-np-2'];
+  const TEMP_PARKS = ['itest-np-1', 'itest-np-2', 'itest-edge'];
   const TEMP_IDS = ['itest-cg-1'];
   const TEMP_USER = 'itest-user-a11y';
 
@@ -145,10 +147,15 @@ describeIntegration('NPS data features (Neo4j)', () => {
     expect(sc!.audioDescribedPlaces).toBeGreaterThanOrEqual(1); // Artist Point has an audio description
   });
 
-  it('setAccessibilityNeeds writes REQUIRES->(:Amenity) read back by getTravelConstraints', async () => {
+  it('setAccessibilityNeeds writes REQUIRES->(:Amenity) read back by getTravelConstraints; clear removes them', async () => {
     await setAccessibilityNeeds(TEMP_USER, ['amen:wheelchair-accessible', 'amen:braille']);
     const c = await getTravelConstraints(TEMP_USER);
     expect(c.requiredAmenities).toEqual(expect.arrayContaining(['Wheelchair Accessible', 'Braille']));
+    // P2-2: clearing accessibility needs removes those REQUIRES edges.
+    await clearAccessibilityNeeds(TEMP_USER);
+    const after = await getTravelConstraints(TEMP_USER);
+    expect(after.requiredAmenities).not.toContain('Braille');
+    expect(after.requiredAmenities).not.toContain('Wheelchair Accessible');
   });
 
   // ── F7: thing-to-do facets ───────────────────────────────────────────────
@@ -206,6 +213,43 @@ describeIntegration('NPS data features (Neo4j)', () => {
     const lot = lots.find((l) => l.id === 'lot-canyon');
     expect(lot!.accessibleSpaces).toBe(12);
     expect(lot!.hasEvCharging).toBe(true);
+  });
+
+  // ── Negative / edge cases + extra round-trips (plan P2-3) ────────────────
+  it('checkOpen returns "unknown" (never a false "closed") when a park reports no hours', async () => {
+    await writeGraph(`MERGE (p:Park {parkCode:'itest-edge'}) SET p.fullName='Edge NP', p.operatingHours='[]', p.feeFree=false`);
+    const res = await checkOpen('itest-edge', '2026-12-15');
+    expect(res!.state).toBe('unknown');
+  });
+
+  it('tripBudget([]) is empty/zero; accessibilityScorecard is empty for a park with no amenities', async () => {
+    const b = await tripBudget([], 'vehicle');
+    expect(b.total).toBe(0);
+    expect(b.parks).toEqual([]);
+    const sc = await accessibilityScorecard('itest-edge');
+    expect(sc!.features).toEqual([]);
+    expect(sc!.accessibleCampgrounds).toBe(0);
+  });
+
+  it('closureWarningsForTrip surfaces the seeded road closure for a trip', async () => {
+    const w = await closureWarningsForTrip(['yell'], '2026-12-15');
+    expect(w.some((x) => /North Entrance Road/.test(x.summary ?? ''))).toBe(true);
+  });
+
+  it('parksInRegion returns parks for a curated region (after applyRegions)', async () => {
+    await applyRegions();
+    const parks = await parksInRegion('Rocky Mountains', 60);
+    expect(parks.map((p) => p.parkCode)).toContain('yell'); // MT/WY → Rocky Mountains
+  });
+
+  it('ThingToDo edges: BEST_IN Season + RELATES_TO_TOPIC are written (F7)', async () => {
+    const rows = await readGraph<{ season: boolean; topic: boolean }>(
+      `MATCH (n:ThingToDo {id:'ttd-rim'})
+       RETURN EXISTS { (n)-[:BEST_IN]->(:Season {name:'summer'}) } AS season,
+              EXISTS { (n)-[:RELATES_TO_TOPIC]->(:Topic) } AS topic`,
+    );
+    expect(rows[0].season).toBe(true);
+    expect(rows[0].topic).toBe(true);
   });
 
   it('bonus: queryable contacts + webcam/lesson-plan nodes attach to the park', async () => {

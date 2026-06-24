@@ -43,10 +43,17 @@ export async function searchParks(opts: {
   amenity?: string;
   designation?: string;
   darkSky?: boolean;
+  // F2/F3/F9/F10 discovery facets (plan P0-3) — each is a no-op when falsy.
+  feeFree?: boolean;
+  evParking?: boolean;
+  hookups?: boolean;
+  firstCome?: boolean;
+  groupSites?: boolean;
+  region?: string;
   limit?: number;
   offset?: number;
 }): Promise<{ items: ParkSummary[]; total: number }> {
-  const { q, stateCode, activity, topic, amenity, designation, darkSky, limit = 24, offset = 0 } = opts;
+  const { q, stateCode, activity, topic, amenity, designation, darkSky, feeFree, evParking, hookups, firstCome, groupSites, region, limit = 24, offset = 0 } = opts;
   const where: string[] = [];
   if (stateCode) where.push('(p)-[:LOCATED_IN]->(:State {code:$stateCode})');
   if (activity) where.push('(p)-[:OFFERS]->(:Activity {name:$activity})');
@@ -61,6 +68,12 @@ export async function searchParks(opts: {
     );
   if (designation) where.push('p.designation = $designation');
   if (darkSky) where.push('p.darkSkyCertified = true');
+  if (feeFree) where.push('coalesce(p.feeFree, false) = true'); // F2
+  if (evParking) where.push('EXISTS { (p)<-[:IN_PARK]-(pl:ParkingLot) WHERE pl.hasEvCharging = true }'); // F10
+  if (hookups) where.push('EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.hasHookups = true }'); // F3
+  if (firstCome) where.push('EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.sitesFirstCome > 0 }'); // F3
+  if (groupSites) where.push('EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.groupSites > 0 }'); // F3
+  if (region) where.push('(p)-[:IN_REGION]->(:Region {name:$region})'); // F9
   const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const source = q
     ? `CALL db.index.fulltext.queryNodes('park_fulltext', $q) YIELD node AS p, score ${whereClause}`
@@ -74,6 +87,7 @@ export async function searchParks(opts: {
     topic: topic ?? null,
     amenity: amenity ?? null,
     designation: designation ?? null,
+    region: region ?? null,
     limit,
     offset,
   };
@@ -244,6 +258,41 @@ export async function checkOpen(parkCode: string, isoDate: string): Promise<Open
   };
 }
 
+export interface ClosureWarning {
+  parkCode: string;
+  name: string;
+  state: DayState; // open/closed/unknown on the checked date
+  summary: string | null; // dated seasonal closures (date-independent)
+}
+
+/**
+ * F1 (plan P0-1): for a set of trip parks + a travel date, return the parks that are closed on that date
+ * or carry a dated seasonal closure — so the planner can flag "this stop's road is closed in winter."
+ * One query (operatingHours JSON) + the pure `lib/sync/hours.ts` logic, reused from `checkOpen`.
+ */
+export async function closureWarningsForTrip(parkCodes: string[], isoDate: string): Promise<ClosureWarning[]> {
+  if (!parkCodes.length) return [];
+  const rows = await readGraph<{ parkCode: string; name: string; hours: string | null; summary: string | null }>(
+    `UNWIND $parkCodes AS pc MATCH (p:Park {parkCode: pc})
+     RETURN p.parkCode AS parkCode, p.fullName AS name, p.operatingHours AS hours, p.seasonalClosureSummary AS summary`,
+    { parkCodes },
+  );
+  const out: ClosureWarning[] = [];
+  for (const r of rows) {
+    let raw: unknown = [];
+    try {
+      raw = r.hours ? JSON.parse(r.hours) : [];
+    } catch {
+      raw = [];
+    }
+    const schedules = parseOperatingHours(raw, r.parkCode);
+    const state = openStateOn(schedules, isoDate);
+    const summary = r.summary ?? summarizeClosures(schedules);
+    if (state === 'closed' || summary) out.push({ parkCode: r.parkCode, name: r.name, state, summary });
+  }
+  return out;
+}
+
 export interface TripBudget {
   unit: string;
   parks: { parkCode: string; name: string; fee: number | null; feeFree: boolean }[];
@@ -399,18 +448,23 @@ export async function facets() {
     amenities: string[];
     designations: string[];
     states: { code: string; name: string }[];
+    regions: string[];
   }>(
     `
     CALL { MATCH (a:Activity) RETURN collect(DISTINCT a.name) AS activities }
     CALL { MATCH (t:Topic) RETURN collect(DISTINCT t.name) AS topics }
-    // Only amenities actually wired to a child node are useful as park filters.
-    CALL { MATCH (am:Amenity) WHERE EXISTS { ()-[:HAS_AMENITY]->(am) } RETURN collect(DISTINCT am.name) AS amenities }
+    // Only amenities actually wired to a child node are useful as park filters. Exclude the synthetic
+    // accessibility/campground amenities (id 'amen:*') — those are surfaced by dedicated facets, not the
+    // generic Amenity dropdown (plan P0-4).
+    CALL { MATCH (am:Amenity) WHERE EXISTS { ()-[:HAS_AMENITY]->(am) } AND NOT coalesce(am.id, '') STARTS WITH 'amen:'
+           RETURN collect(DISTINCT am.name) AS amenities }
     CALL { MATCH (p:Park) WHERE p.designation <> '' RETURN collect(DISTINCT p.designation) AS designations }
     CALL { MATCH (s:State) RETURN collect(DISTINCT {code: s.code, name: s.name}) AS states }
-    RETURN activities, topics, amenities, designations, states
+    CALL { MATCH (r:Region) RETURN collect(DISTINCT r.name) AS regions } // F9
+    RETURN activities, topics, amenities, designations, states, regions
     `,
   );
-  return rows[0] ?? { activities: [], topics: [], amenities: [], designations: [], states: [] };
+  return rows[0] ?? { activities: [], topics: [], amenities: [], designations: [], states: [], regions: [] };
 }
 
 /**
@@ -748,14 +802,14 @@ export async function eventsForPark(
  */
 export async function parksWithEventOn(
   isoDate: string,
-  eventType?: string,
+  eventType: string | null = null,
   limit = 25,
 ): Promise<{ parkCode: string; name: string; title: string; type: string | null }[]> {
+  // Fixed query shape (plan P1-5) — eventType is a parameter, never interpolated into the structure.
   return readGraph(
     `MATCH (e:Event)-[:OCCURS_ON]->(:CalendarDate {date: date($isoDate)})
-     WHERE e.active = true
+     WHERE e.active = true AND ($eventType IS NULL OR EXISTS { (e)-[:OF_TYPE]->(:EventType {name: $eventType}) })
      MATCH (e)-[:HELD_AT]->(p:Park)
-     ${eventType ? 'WHERE EXISTS { (e)-[:OF_TYPE]->(:EventType {name: $eventType}) }' : ''}
      OPTIONAL MATCH (e)-[:OF_TYPE]->(et:EventType)
      RETURN p.parkCode AS parkCode, p.fullName AS name, e.title AS title, head(collect(et.name)) AS type
      ORDER BY name ASC LIMIT toInteger($limit)`,
@@ -913,6 +967,32 @@ export async function semanticSearch(
             coalesce(n.isStamp, false) AS isStamp, coalesce(n.tags, []) AS tags, score
      ORDER BY score DESC LIMIT toInteger($limit)`,
     { index, k: limit, vector: v, limit },
+  );
+}
+
+export interface ArticleHit {
+  id: string;
+  title: string;
+  url: string | null;
+  image: string | null;
+  parks: { parkCode: string; parkName: string }[];
+  score: number;
+}
+
+/**
+ * F8: semantic search over articles via the `article_embedding` vector index (now populated from the
+ * full `Article.body`). Returns the matched article + up to 3 related parks (the navigable target).
+ * Empty until the `EMBED_ARTICLES=1` pass runs — degrades to [] gracefully.
+ */
+export async function semanticArticles(query: string, limit = 8, vector?: number[]): Promise<ArticleHit[]> {
+  const v = vector ?? (await embedQuery(query));
+  return readGraph(
+    `CALL db.index.vector.queryNodes('article_embedding', toInteger($k), $vector) YIELD node AS ar, score
+     OPTIONAL MATCH (ar)-[:ABOUT]->(p:Park)
+     WITH ar, score, [x IN collect(DISTINCT {parkCode: p.parkCode, parkName: p.fullName}) WHERE x.parkCode IS NOT NULL][0..3] AS parks
+     RETURN ar.id AS id, ar.title AS title, ar.url AS url, ar.image AS image, parks, score
+     ORDER BY score DESC LIMIT toInteger($limit)`,
+    { index: 'article_embedding', k: limit, vector: v, limit },
   );
 }
 

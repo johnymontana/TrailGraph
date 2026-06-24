@@ -69,6 +69,8 @@ export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: un
       return <AccessibilityCard data={data} />;
     case 'news_card':
       return <NewsCard data={data} />;
+    case 'media_card':
+      return <MediaCard data={data} />;
     case 'why_this':
       return (
         <Card.Root variant="subtle" size="sm" my={2}>
@@ -237,12 +239,45 @@ function ItineraryCard({ data, onAnswer }: { data: Record<string, unknown>; onAn
   // action so the user always has a predictable way to keep it (R5 §2.8). onAnswer is present only on the
   // latest turn, so stale drafts stay read-only.
   const isDraft = !!data.draft;
+  // F1 (plan P0-1): date-aware closure flags for stops whose road/facility is closed on the travel dates.
+  const closures = (data.closureWarnings ?? []) as { parkCode: string; name: string; state: string; summary: string | null }[];
   return (
     <Card.Root variant="subtle" size="sm" my={2}>
       <Card.Body p={3}>
         <Text fontWeight="semibold" fontFamily="heading" mb={2}>
           {trip.name}
         </Text>
+        {closures.length ? (
+          <Stack gap={1} mb={3} borderWidth="1px" borderColor="orange.emphasized" bg="orange.subtle" borderRadius="l2" p={2}>
+            <HStack gap={1.5}>
+              <Icon as={LuTriangleAlert} color="orange.fg" boxSize={3.5} />
+              <Text fontSize="xs" fontWeight="medium" color="orange.fg">Heads up for your dates</Text>
+            </HStack>
+            {closures.map((c) => (
+              <Text key={c.parkCode} fontSize="xs" color="orange.fg">
+                <b>{c.name}</b>{c.state === 'closed' ? ' — closed on your start date.' : ''} {c.summary ?? ''}
+              </Text>
+            ))}
+            <Text fontSize="2xs" color="fg.muted">Hours are reported by the park — verify before you go.</Text>
+          </Stack>
+        ) : null}
+        {(() => {
+          // F2 (plan P0-2): entrance-fee budget + fee-free-day nudge.
+          const budget = data.budget as { total: number; atbCost: number; atbSaves: boolean } | null;
+          const feeFreeDay = data.feeFreeDay as { name: string } | null;
+          if (!budget && !feeFreeDay) return null;
+          return (
+            <Stack gap={0.5} mb={3} fontSize="xs" color="fg.muted">
+              {budget ? (
+                <Text>
+                  Est. entrance fees: <b>${budget.total.toFixed(0)}</b> per vehicle
+                  {budget.atbSaves ? ` — the $${budget.atbCost.toFixed(0)} annual pass is cheaper.` : ''}
+                </Text>
+              ) : null}
+              {feeFreeDay ? <Text color="brand.fg">🎉 Your start date is a fee-free day ({feeFreeDay.name}) — entrance is free.</Text> : null}
+            </Stack>
+          );
+        })()}
         <Stack gap={1}>
           {stops.map((s, i) => (
             <Box key={i}>
@@ -443,6 +478,36 @@ function AccessibilityCard({ data }: { data: Record<string, unknown> }) {
   );
 }
 
+/** Self-guided audio / galleries / videos for a park (F6, get_media). */
+function MediaCard({ data }: { data: Record<string, unknown> }) {
+  const audio = (data.audio ?? []) as { id: string; title: string; durationMs: number | null; url: string | null; hasTranscript: boolean }[];
+  const videos = (data.videos ?? []) as { id: string; title: string; durationMs: number | null; url: string | null }[];
+  const galleries = (data.galleries ?? []) as { id: string; title: string; assetCount: number | null; url: string | null }[];
+  if (!audio.length && !videos.length && !galleries.length) return null;
+  const mins = (ms: number | null) => (ms ? ` · ${Math.round(ms / 60000)} min` : '');
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading" mb={2}>Audio &amp; media</Text>
+        <Stack gap={1}>
+          {audio.map((a) => (
+            <Text key={a.id} fontSize="sm">
+              🎧 {a.url ? <CLink href={a.url} color="brand.fg">{a.title} ↗</CLink> : a.title}{mins(a.durationMs)}
+              {a.hasTranscript ? <Badge ml={2} colorPalette="pine">transcript</Badge> : null}
+            </Text>
+          ))}
+          {videos.map((v) => (
+            <Text key={v.id} fontSize="sm">🎬 {v.url ? <CLink href={v.url} color="brand.fg">{v.title} ↗</CLink> : v.title}{mins(v.durationMs)}</Text>
+          ))}
+          {galleries.map((g) => (
+            <Text key={g.id} fontSize="sm">🖼 {g.url ? <CLink href={g.url} color="brand.fg">{g.title} ↗</CLink> : g.title}{g.assetCount ? ` · ${g.assetCount} photos` : ''}</Text>
+          ))}
+        </Stack>
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
 /** Latest news releases for a park (F8, find_news). */
 function NewsCard({ data }: { data: Record<string, unknown> }) {
   const news = (data.news ?? []) as { id: string; title: string; abstract: string | null; url: string | null; releaseDate: string | null }[];
@@ -450,7 +515,7 @@ function NewsCard({ data }: { data: Record<string, unknown> }) {
   return (
     <Stack gap={2} my={2}>
       {news.map((n) => (
-        <Box key={n.id} borderLeftWidth="4px" borderColor="blue.solid" pl={3}>
+        <Box key={n.id} borderLeftWidth="4px" borderColor="trail.solid" pl={3}>
           {n.url ? (
             <CLink href={n.url} color="brand.fg" fontWeight="medium" fontSize="sm">{n.title} ↗</CLink>
           ) : (

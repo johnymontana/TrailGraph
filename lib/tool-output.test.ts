@@ -80,6 +80,10 @@ describe('isRenderableToolOutput', () => {
     expect(isRenderableToolOutput('accessibility_card', {})).toBe(false);
     expect(isRenderableToolOutput('news_card', { news: [] })).toBe(true); // renders "no recent news"
     expect(isRenderableToolOutput('news_card', {})).toBe(false);
+    expect(isRenderableToolOutput('media_card', { audio: [{}] })).toBe(true); // F6
+    expect(isRenderableToolOutput('media_card', { videos: [{}] })).toBe(true);
+    expect(isRenderableToolOutput('media_card', { audio: [], videos: [], galleries: [] })).toBe(false);
+    expect(isRenderableToolOutput('media_card', { error: 'none' })).toBe(true); // error always renders
   });
 
   it('question_card: needs a prompt and at least one option', () => {

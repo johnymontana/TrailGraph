@@ -41,7 +41,7 @@ async function embedLabeledNodes<R extends { key: string; hash: string | null }>
 }
 
 type TextRow = { key: string; hash: string | null; title: string | null; bodyText: string | null; tags: string[] | null };
-type ArticleRow = { key: string; hash: string | null; title: string | null; description: string | null };
+type ArticleRow = { key: string; hash: string | null; title: string | null; description: string | null; body: string | null };
 
 export const embedPlaces = (): Promise<{ embedded: number; skipped: number }> =>
   embedLabeledNodes<TextRow>(
@@ -60,6 +60,6 @@ export const embedPeople = (): Promise<{ embedded: number; skipped: number }> =>
 export const embedArticles = (): Promise<{ embedded: number; skipped: number }> =>
   embedLabeledNodes<ArticleRow>(
     'Article',
-    `MATCH (n:Article) RETURN n.id AS key, n.title AS title, n.description AS description, n.embeddingHash AS hash`,
-    (r) => composeArticleText({ title: r.title ?? undefined, description: r.description ?? undefined }),
+    `MATCH (n:Article) RETURN n.id AS key, n.title AS title, n.description AS description, n.body AS body, n.embeddingHash AS hash`,
+    (r) => composeArticleText({ title: r.title ?? undefined, description: r.description ?? undefined, body: r.body ?? undefined }),
   );

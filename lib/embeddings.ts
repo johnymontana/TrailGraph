@@ -46,9 +46,10 @@ export function composePersonText(p: { title?: string; bodyText?: string; tags?:
   return [p.title, p.bodyText, (p.tags ?? []).join(', ')].filter(Boolean).join('\n');
 }
 
-/** Embedding document for an Article — title + listing description. */
-export function composeArticleText(a: { title?: string; description?: string }): string {
-  return [a.title, a.description].filter(Boolean).join('\n');
+/** Embedding document for an Article — title + listing description + full body (F8). Body is the rich
+ * content semantic search should match; `clampForEmbedding` guards against over-long bodies. */
+export function composeArticleText(a: { title?: string; description?: string; body?: string }): string {
+  return [a.title, a.description, a.body].filter(Boolean).join('\n');
 }
 
 /**

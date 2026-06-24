@@ -23,10 +23,12 @@ export async function deriveNear(
        WITH q, point.distance(p.location, q.location) / 1609.344 AS miles
        ORDER BY miles ASC
        LIMIT toInteger($cap)
-       RETURN collect({q: q, miles: miles}) AS nearest
+       // collect the neighbor's KEY (+ miles), not the node — a node pattern target can't be a map prop.
+       RETURN collect({code: q.parkCode, miles: miles}) AS nearest
      }
      UNWIND nearest AS n
-     MERGE (p)-[r:NEAR]->(n.q)
+     MATCH (q2:Park {parkCode: n.code})
+     MERGE (p)-[r:NEAR]->(q2)
        SET r.miles = round(n.miles * 10) / 10.0
      RETURN count(r) AS edges`,
     { meters: radiusMiles * 1609.344, cap: capPerPark },

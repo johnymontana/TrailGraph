@@ -10,9 +10,12 @@ import { test, expect } from '@playwright/test';
 
 test('park page shows hours & seasons with a dated closure and open seasons (F1)', async ({ page }) => {
   await page.goto('/parks/yell');
-  await expect(page.getByRole('heading', { name: 'Hours & seasons' })).toBeVisible();
-  await expect(page.getByText(/North Entrance Road: closed/)).toBeVisible();
-  await expect(page.getByText(/Generally open/)).toBeVisible();
+  // Prefer a stable test id over text regexes for the section + the at-a-glance stat (plan P2-3).
+  const section = page.getByTestId('park-hours-section');
+  await expect(section).toBeVisible();
+  await expect(section.getByText(/North Entrance Road/)).toBeVisible();
+  await expect(section.getByText(/Generally open/)).toBeVisible();
+  await expect(page.getByTestId('park-hours-stat')).toBeVisible(); // "Open today?" StatCard (P0-5)
 });
 
 test('park page shows an accessibility scorecard, framed as reported (F5)', async ({ page }) => {

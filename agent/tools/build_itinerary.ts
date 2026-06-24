@@ -2,6 +2,8 @@ import { defineTool } from 'eve/tools';
 import { z } from 'zod';
 import { createTrip, addStop, getTrip, deleteTrip } from '../../lib/trips';
 import { resolveParkRefs } from '../../lib/park-resolve';
+import { closureWarningsForTrip, tripBudget } from '../../lib/queries';
+import { isFeeFreeDay } from '../../lib/datasources';
 import { callerId } from '../../lib/agent-ctx';
 
 /**
@@ -39,6 +41,12 @@ export default defineTool({
       await deleteTrip(userId, tripId);
       return { kind: 'itinerary_preview', data: { error: 'Could not add any valid stops to the trip.' } };
     }
-    return { kind: 'itinerary_preview', data: { trip, unresolved } };
+    // F1 (plan P0-1): when the trip has dates, flag stops whose road/facility is closed then.
+    const codes = resolved.map((p) => p.code);
+    const closureWarnings = startDate ? await closureWarningsForTrip(codes, startDate).catch(() => []) : [];
+    // F2 (plan P0-2): real entrance-fee budget (per vehicle) + fee-free-day awareness on the start date.
+    const budget = await tripBudget(codes, 'vehicle').catch(() => null);
+    const feeFreeDay = startDate ? isFeeFreeDay(startDate) : null;
+    return { kind: 'itinerary_preview', data: { trip, unresolved, closureWarnings, budget, feeFreeDay } };
   },
 });

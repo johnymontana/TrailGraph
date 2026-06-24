@@ -53,6 +53,13 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
       amenity: sp.amenity,
       designation: sp.designation,
       darkSky: sp.darkSky === '1',
+      // F2/F3/F9/F10 discovery facets (plan P0-3).
+      feeFree: sp.feeFree === '1',
+      evParking: sp.evParking === '1',
+      hookups: sp.hookups === '1',
+      firstCome: sp.firstCome === '1',
+      groupSites: sp.groupSites === '1',
+      region: sp.region,
       limit: pageSize,
       offset: (page - 1) * pageSize,
     }),
@@ -135,14 +142,21 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
               ) : null}
               <FacetSelect name="designation" label="Designation" value={sp.designation} options={f.designations} />
               <FacetSelect name="stateCode" label="State" value={sp.stateCode} options={f.states.map((s) => s.code)} />
-              <Checkbox.Root name="darkSky" value="1" defaultChecked={sp.darkSky === '1'} colorPalette="pine" pb={2}>
-                <Checkbox.HiddenInput />
-                <Checkbox.Control />
-                <Checkbox.Label fontSize="sm">Dark-sky parks</Checkbox.Label>
-              </Checkbox.Root>
+              {f.regions.length > 0 ? (
+                <FacetSelect name="region" label="Region" value={sp.region} options={f.regions} />
+              ) : null}
               <Button type="submit" colorPalette="pine">
                 Apply
               </Button>
+            </Flex>
+            {/* Boolean facets over the new F2/F3/F9/F10 data (GET form, no-JS) (plan P0-3). */}
+            <Flex gap={4} wrap="wrap" mt={3} pt={3} borderTopWidth="1px" borderColor="border">
+              <FacetCheck name="darkSky" label="Dark-sky parks" checked={sp.darkSky === '1'} />
+              <FacetCheck name="feeFree" label="Free entry" checked={sp.feeFree === '1'} />
+              <FacetCheck name="evParking" label="EV charging" checked={sp.evParking === '1'} />
+              <FacetCheck name="hookups" label="RV hookups" checked={sp.hookups === '1'} />
+              <FacetCheck name="firstCome" label="First-come camping" checked={sp.firstCome === '1'} />
+              <FacetCheck name="groupSites" label="Group sites" checked={sp.groupSites === '1'} />
             </Flex>
           </form>
         </Box>
@@ -215,6 +229,17 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
         )}
       </Container>
     </Box>
+  );
+}
+
+/** A GET-form checkbox facet (value '1' when checked), works without client JS. */
+function FacetCheck({ name, label, checked }: { name: string; label: string; checked: boolean }) {
+  return (
+    <Checkbox.Root name={name} value="1" defaultChecked={checked} colorPalette="pine">
+      <Checkbox.HiddenInput />
+      <Checkbox.Control />
+      <Checkbox.Label fontSize="sm">{label}</Checkbox.Label>
+    </Checkbox.Root>
   );
 }
 

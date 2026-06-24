@@ -279,14 +279,25 @@ export async function fetchPage<T>(
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const res = await fetch(url, { headers: { 'X-Api-Key': env.nps.apiKey } });
-    if (res.ok) return (await res.json()) as NpsPage<T>;
+    if (res.ok) {
+      // A truncated/malformed body (seen on large /multimedia pages — the server cuts the response
+      // mid-string) makes res.json() throw. That's almost always transient, so retry like a 5xx rather
+      // than letting one bad page abort the whole resource. The final NpsRateLimitError below makes a
+      // *persistently* bad page PAUSE the resource (resume next run) instead of hard-failing the sync.
+      try {
+        return (await res.json()) as NpsPage<T>;
+      } catch {
+        await sleep(500 * 2 ** attempt);
+        continue;
+      }
+    }
     if (res.status === 429 || res.status >= 500) {
       await sleep(500 * 2 ** attempt); // exponential backoff
       continue;
     }
     throw new Error(`NPS ${resource} ${res.status}: ${await res.text()}`);
   }
-  throw new NpsRateLimitError(`NPS ${resource} rate-limited (429/5xx) after retries`);
+  throw new NpsRateLimitError(`NPS ${resource} unavailable (429/5xx/parse error) after retries`);
 }
 
 /**

@@ -3,7 +3,7 @@ import NextLink from 'next/link';
 import NextImage from 'next/image';
 import { LuSearch, LuSparkles } from 'react-icons/lu';
 import { headers } from 'next/headers';
-import { vibeSearch, semanticSearch, type SemanticHit } from '../../lib/queries';
+import { vibeSearch, semanticSearch, semanticArticles, type SemanticHit, type ArticleHit } from '../../lib/queries';
 import { embedQuery } from '../../lib/embed-cache';
 import { rateLimit, rlIp, clientIpFrom } from '../../lib/rate-limit';
 import { ParkCard } from '../../components/ParkCard';
@@ -38,6 +38,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   let parks: ParkHit[] = [];
   let places: SemanticHit[] = [];
   let people: SemanticHit[] = [];
+  let articles: ArticleHit[] = [];
   let throttled = false;
 
   if (q) {
@@ -50,10 +51,11 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     } else {
       const vec = await embedQuery(q).catch(() => null);
       if (vec) {
-        [parks, places, people] = await Promise.all([
+        [parks, places, people, articles] = await Promise.all([
           vibeSearch(q, { limit, vector: vec }).catch(() => [] as ParkHit[]),
           semanticSearch('place', q, limit, vec).catch(() => [] as SemanticHit[]),
           semanticSearch('person', q, limit, vec).catch(() => [] as SemanticHit[]),
+          semanticArticles(q, limit, vec).catch(() => [] as ArticleHit[]),
         ]);
       }
     }
@@ -64,7 +66,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       <PageHeader
         eyebrow="Vibe search"
         title="Search by meaning, not keywords"
-        subtitle="Describe a vibe, a feature, a theme — we rank parks, places, and people by what they're actually like."
+        subtitle="Describe a vibe, a feature, a theme — we rank parks, places, people, and articles by what they're actually like."
         contour
       >
         <Box mt={4} maxW="2xl">
@@ -100,7 +102,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
       <Container maxW="6xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 10 }}>
         {!q ? (
-          <Text color="fg.muted">Enter a description above to search across parks, places, and people.</Text>
+          <Text color="fg.muted">Enter a description above to search across parks, places, people, and articles.</Text>
         ) : throttled ? (
           <Text color="fg.muted">You&rsquo;re searching a lot right now — please wait a moment and try again.</Text>
         ) : (
@@ -136,6 +138,18 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={5}>
                   {people.map((per) => (
                     <NodeCard key={per.id} hit={per} type="person" />
+                  ))}
+                </SimpleGrid>
+              )}
+            </Section>
+
+            <Section title="Articles" count={articles.length}>
+              {articles.length === 0 ? (
+                <Empty />
+              ) : (
+                <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={5}>
+                  {articles.map((a) => (
+                    <ArticleCard key={a.id} hit={a} />
                   ))}
                 </SimpleGrid>
               )}
@@ -208,5 +222,36 @@ function NodeCard({ hit, type }: { hit: SemanticHit; type: 'place' | 'person' })
     </CLink>
   ) : (
     card
+  );
+}
+
+/** Article result card (F8) — links to the official NPS article; shows its related park. */
+function ArticleCard({ hit }: { hit: ArticleHit }) {
+  const park = hit.parks[0];
+  return (
+    <Card.Root variant="outline" overflow="hidden" w="full" h="100%">
+      {hit.image ? (
+        <Box h="120px" position="relative" overflow="hidden">
+          <NextImage src={hit.image} alt={hit.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
+        </Box>
+      ) : null}
+      <Card.Body p={3} gap={1}>
+        <HStack wrap="wrap" gap={2}>
+          <Badge colorPalette="sand">article</Badge>
+          {hit.url ? (
+            <CLink href={hit.url} color="brand.fg" fontWeight="semibold" fontFamily="heading" lineClamp={1} flex="1">
+              {hit.title} ↗
+            </CLink>
+          ) : (
+            <Text fontWeight="semibold" fontFamily="heading" lineClamp={1} flex="1">{hit.title}</Text>
+          )}
+        </HStack>
+        {park ? (
+          <CLink asChild fontSize="xs" color="fg.muted">
+            <NextLink href={`/parks/${park.parkCode}`}>at {park.parkName}</NextLink>
+          </CLink>
+        ) : null}
+      </Card.Body>
+    </Card.Root>
   );
 }

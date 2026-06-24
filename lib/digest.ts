@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readGraph, writeGraph } from './neo4j';
 import { listWatches } from './watches';
 import { getTrip } from './trips';
-import { parkDetail } from './queries';
+import { parkDetail, eventsForPark, newsForPark } from './queries';
 import { getAstro, getConditions, type AstroEvents, type RoadEvent } from './datasources';
 
 /**
@@ -13,7 +13,7 @@ import { getAstro, getConditions, type AstroEvents, type RoadEvent } from './dat
  * never an official safety source (defers to NPS, per the agent's hard rules).
  */
 
-export type DigestItemKind = 'closure' | 'alert' | 'darksky' | 'feefree';
+export type DigestItemKind = 'closure' | 'alert' | 'darksky' | 'feefree' | 'event' | 'news';
 
 export interface DigestItem {
   kind: DigestItemKind;
@@ -101,6 +101,43 @@ export function roadClosureItems(events: RoadEvent[], parkCode: string, parkName
     }));
 }
 
+/**
+ * Events become "info" digest items (F4/P1-1). When the watched park came from a trip with a date window,
+ * only events that fall inside it are surfaced ("3 ranger programs during your visit"); otherwise the
+ * next few upcoming events. Pure (unit-tested).
+ */
+export function eventDigestItems(
+  events: { id: string; title: string; dateStart: string | null; inWindow: boolean; isFree: boolean | null; types: string[] }[],
+  parkCode: string,
+  parkName: string,
+  hasWindow: boolean,
+): DigestItem[] {
+  const picked = hasWindow ? events.filter((e) => e.inWindow) : events;
+  return picked.slice(0, 3).map((e) => ({
+    kind: 'event' as const,
+    parkCode,
+    parkName,
+    title: `Event at ${parkName}: ${e.title}`,
+    detail: [e.dateStart, e.types?.[0], e.isFree ? 'free' : null].filter(Boolean).join(' · '),
+    tone: 'info' as const,
+  }));
+}
+
+/** Recent news releases (within `withinDays` of `asOf`) become "info" digest items (F8/P1-1). Pure. */
+export function newsDigestItems(
+  news: { id: string; title: string; releaseDate: string | null }[],
+  parkCode: string,
+  parkName: string,
+  asOf: string,
+  withinDays = 14,
+): DigestItem[] {
+  const cutoff = Date.parse(`${asOf}T00:00:00Z`) - withinDays * 86_400_000;
+  return news
+    .filter((n) => n.releaseDate && Date.parse(`${n.releaseDate}T00:00:00Z`) >= cutoff)
+    .slice(0, 2)
+    .map((n) => ({ kind: 'news' as const, parkCode, parkName, title: `News from ${parkName}`, detail: n.title, tone: 'info' as const }));
+}
+
 // ---- orchestration -------------------------------------------------------------------------------
 
 interface WatchedPark {
@@ -108,6 +145,7 @@ interface WatchedPark {
   name: string;
   lat: number | null;
   lng: number | null;
+  window: { start: string | null; end: string | null } | null; // trip travel window (P1-1), if any
 }
 
 /** Resolve the distinct parks behind a user's watches (trip stops + watched parks). */
@@ -117,12 +155,18 @@ async function watchedParks(userId: string): Promise<WatchedPark[]> {
   for (const w of watches) {
     if (w.kind === 'park') {
       const p = await parkDetail(w.refId);
-      if (p) parks.set(w.refId, { parkCode: w.refId, name: (p.name as string) ?? w.refId, lat: p.lat as number | null, lng: p.lng as number | null });
+      if (p) {
+        const prev = parks.get(w.refId);
+        parks.set(w.refId, { parkCode: w.refId, name: (p.name as string) ?? w.refId, lat: p.lat as number | null, lng: p.lng as number | null, window: prev?.window ?? null });
+      }
     } else {
       const t = await getTrip(userId, w.refId);
+      // Carry the trip's travel window so events/news can be filtered to "during your visit" (P1-1).
+      const window = t?.startDate ? { start: t.startDate, end: t.endDate ?? t.startDate } : null;
       for (const s of (t?.stops ?? []).filter(Boolean)) {
         if (s.kind === 'park' && s.parkCode) {
-          parks.set(s.parkCode, { parkCode: s.parkCode, name: s.parkName ?? s.parkCode, lat: s.lat, lng: s.lng });
+          const prev = parks.get(s.parkCode);
+          parks.set(s.parkCode, { parkCode: s.parkCode, name: s.parkName ?? s.parkCode, lat: s.lat, lng: s.lng, window: window ?? prev?.window ?? null });
         }
       }
     }
@@ -164,6 +208,11 @@ export async function buildDigest(userId: string, forDate?: string): Promise<Dig
       const item = darkSkyDigestItem(getAstro(p.lat, p.lng, date), p.parkCode, p.name);
       if (item) items.push(item);
     }
+    // F4 events during the trip window + F8 recent news for the park (P1-1).
+    const events = await eventsForPark(p.parkCode, p.window ?? { start: null, end: null }).catch(() => []);
+    items.push(...eventDigestItems(events, p.parkCode, p.name, !!p.window));
+    const news = await newsForPark(p.parkCode, 3).catch(() => []);
+    items.push(...newsDigestItems(news, p.parkCode, p.name, date));
   }
 
   if (!parks.length) {

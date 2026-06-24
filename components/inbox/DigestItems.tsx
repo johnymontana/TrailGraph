@@ -1,13 +1,14 @@
 'use client';
 import { Box, HStack, Stack, Text } from '@chakra-ui/react';
-import { LuCalendarCheck, LuMoonStar, LuTriangleAlert } from 'react-icons/lu';
+import { LuCalendar, LuCalendarCheck, LuMoonStar, LuNewspaper, LuTriangleAlert } from 'react-icons/lu';
 
 /**
  * Presentational digest item list (Proactive Ranger, ADR-052) — reused by the chat `digest_card` and the
- * /me inbox. Tone drives the accent: warn = closures/alerts, good = dark-sky/fee-free windows.
+ * /me inbox. Tone drives the accent: warn = closures/alerts, good = dark-sky/fee-free windows, info =
+ * events/news (Proactive Ranger P1-1).
  */
 export interface DigestItemView {
-  kind: 'closure' | 'alert' | 'darksky' | 'feefree';
+  kind: 'closure' | 'alert' | 'darksky' | 'feefree' | 'event' | 'news';
   parkName?: string;
   title: string;
   detail: string;
@@ -19,6 +20,8 @@ const TONE_BORDER: Record<DigestItemView['tone'], string> = { good: 'trail.solid
 function ItemIcon({ kind }: { kind: DigestItemView['kind'] }) {
   if (kind === 'darksky') return <LuMoonStar />;
   if (kind === 'feefree') return <LuCalendarCheck />;
+  if (kind === 'event') return <LuCalendar />;
+  if (kind === 'news') return <LuNewspaper />;
   return <LuTriangleAlert />;
 }
 

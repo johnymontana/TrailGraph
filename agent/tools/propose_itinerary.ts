@@ -1,6 +1,8 @@
 import { defineTool } from 'eve/tools';
 import { z } from 'zod';
 import { resolveParkRefs } from '../../lib/park-resolve';
+import { closureWarningsForTrip, tripBudget } from '../../lib/queries';
+import { isFeeFreeDay } from '../../lib/datasources';
 import { decodeEntities } from '../../lib/html-entities';
 
 /**
@@ -24,6 +26,12 @@ export default defineTool({
     if (resolved.length === 0) {
       return { kind: 'itinerary_preview', data: { error: `I couldn't match any of those parks: ${parkCodes.join(', ')}. Try searching first.` } };
     }
+    // F1 (plan P0-1): date-aware closure flags when the proposal has dates.
+    const codes = resolved.map((p) => p.code);
+    const closureWarnings = startDate ? await closureWarningsForTrip(codes, startDate).catch(() => []) : [];
+    // F2 (plan P0-2): real entrance-fee budget + fee-free-day awareness.
+    const budget = await tripBudget(codes, 'vehicle').catch(() => null);
+    const feeFreeDay = startDate ? isFeeFreeDay(startDate) : null;
     // Same name-cleaning as build_itinerary (no stale day count), and decode model entities so the draft
     // card shows "&", not "&amp;" (R5 §2.1).
     const cleanName = decodeEntities(name).replace(/\s*\((?:[^()]*\b\d+\s*-?\s*days?\b[^()]*)\)\s*$/i, '').trim() || decodeEntities(name);
@@ -37,6 +45,9 @@ export default defineTool({
         startDate: startDate ?? null,
         endDate: endDate ?? null,
         unresolved,
+        closureWarnings,
+        budget,
+        feeFreeDay,
         trip: { name: cleanName, stops: resolved.map((p) => ({ parkName: p.name })) },
       },
     };

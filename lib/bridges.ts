@@ -212,6 +212,17 @@ export async function setAccessibilityNeeds(userId: string, featureIds: string[]
   return valid;
 }
 
+/** Clear only the user's accessibility REQUIRES edges (P2-2) — leaves non-accessibility amenity needs +
+ * the wheelchair/RV scalar constraints intact (unlike `clearTravelConstraints`). */
+export async function clearAccessibilityNeeds(userId: string): Promise<void> {
+  await writeGraph(
+    `MATCH (u:User {userId:$userId})-[r:REQUIRES]->(am:Amenity)
+     WHERE coalesce(am.accessibility, false) = true OR am.id IN $ids
+     DELETE r`,
+    { userId, ids: ACCESSIBILITY_FEATURE_IDS },
+  );
+}
+
 export async function getTravelConstraints(userId: string): Promise<TravelConstraints> {
   const rows = await readGraph<{ wheelchair: boolean | null; rvMaxLengthFt: number | null; required: string[] }>(
     `MATCH (u:User {userId:$userId})

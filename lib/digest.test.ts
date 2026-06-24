@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { feeFreeDaysForYear, upcomingFeeFree, darkSkyDigestItem, roadClosureItems } from './digest';
+import { feeFreeDaysForYear, upcomingFeeFree, darkSkyDigestItem, roadClosureItems, eventDigestItems, newsDigestItems } from './digest';
 import { digestEmailHtml } from './digest-email';
 import type { AstroEvents, RoadEvent } from './datasources';
 
@@ -91,5 +91,37 @@ describe('digestEmailHtml (ADR-052)', () => {
     expect(html).toContain('ranger digest');
     expect(html).toContain('https://trailgraph.app/api/unsubscribe?token=abc');
     expect(html).toContain('Unsubscribe');
+  });
+});
+
+describe('eventDigestItems (F4 → digest, P1-1)', () => {
+  const events = [
+    { id: 'e1', title: 'Ranger Astronomy Night', dateStart: '2026-08-12', inWindow: true, isFree: true, types: ['Astronomy'] },
+    { id: 'e2', title: 'Off-window Talk', dateStart: '2026-10-01', inWindow: false, isFree: false, types: ['Ranger Programs'] },
+  ];
+  it('keeps only in-window events when the park came from a dated trip', () => {
+    const items = eventDigestItems(events, 'yell', 'Yellowstone', true);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'event', tone: 'info' });
+    expect(items[0].detail).toContain('Astronomy');
+    expect(items[0].detail).toContain('free');
+  });
+  it('shows upcoming events (capped) when there is no window', () => {
+    expect(eventDigestItems(events, 'yell', 'Yellowstone', false)).toHaveLength(2);
+  });
+});
+
+describe('newsDigestItems (F8 → digest, P1-1)', () => {
+  const news = [
+    { id: 'n1', title: 'New road work', releaseDate: '2026-06-20' },
+    { id: 'n2', title: 'Old news', releaseDate: '2026-01-01' },
+  ];
+  it('surfaces only releases within the recency window of the digest date', () => {
+    const items = newsDigestItems(news, 'yell', 'Yellowstone', '2026-06-24', 14);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'news', tone: 'info', detail: 'New road work' });
+  });
+  it('drops releases with no date', () => {
+    expect(newsDigestItems([{ id: 'x', title: 't', releaseDate: null }], 'yell', 'Y', '2026-06-24')).toEqual([]);
   });
 });

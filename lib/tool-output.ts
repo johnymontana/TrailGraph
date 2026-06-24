@@ -23,6 +23,7 @@ export function isRenderableToolOutput(kind: string, data: unknown): boolean {
   if (kind === 'budget_card') return ((d.parks as unknown[])?.length ?? 0) > 0; // F2: trip fee budget
   if (kind === 'accessibility_card') return Array.isArray(d.features) || !!d.name; // F5: a11y scorecard
   if (kind === 'news_card') return Array.isArray(d.news); // F8: render even when empty ("no recent news")
+  if (kind === 'media_card') return ((d.audio as unknown[])?.length ?? 0) + ((d.videos as unknown[])?.length ?? 0) + ((d.galleries as unknown[])?.length ?? 0) > 0; // F6
   if (kind === 'digest_card') return Array.isArray(d.items); // render even when empty ("all clear")
   if (kind === 'why_this') return ((d.prefPaths as unknown[])?.length ?? 0) > 0 || ((d.constraints as unknown[])?.length ?? 0) > 0 || !!d.park;
   if (kind === 'question_card') return typeof d.prompt === 'string' && ((d.options as unknown[])?.length ?? 0) > 0;

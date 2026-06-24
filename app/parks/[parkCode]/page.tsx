@@ -12,9 +12,9 @@ import {
   Separator,
 } from '@chakra-ui/react';
 import NextImage from 'next/image';
-import { LuCalendar, LuFootprints, LuMoon, LuStar, LuTicket, LuUsers } from 'react-icons/lu';
+import { LuCalendar, LuClock, LuFootprints, LuMoon, LuStar, LuTicket, LuUsers } from 'react-icons/lu';
 import { StatCard } from '../../../components/ui/stat-card';
-import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph, peopleForPark, toursForPark, stampsForPark, eventsForPark, placesForPark, articlesForPark, parkingForPark, accessibilityScorecard, newsForPark, mediaForPark, type AccessibilityScorecard, type ParkMedia } from '../../../lib/queries';
+import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph, peopleForPark, toursForPark, stampsForPark, eventsForPark, placesForPark, articlesForPark, parkingForPark, accessibilityScorecard, newsForPark, mediaForPark, checkOpen, type AccessibilityScorecard, type ParkMedia } from '../../../lib/queries';
 import { getAvailability } from '../../../lib/bridges';
 import { darkSkyRating, monthNames, difficultyDot, getWeather, getConditions, getAstro, sqmFromBortle, type Difficulty } from '../../../lib/datasources';
 import { explainForParks } from '../../../lib/explain';
@@ -62,7 +62,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
   const park = await parkDetail(parkCode);
   if (!park) notFound();
 
-  const [similar, nearby, together, graph, weather, people, tours, conditions, places, articles, parking, accessibility, news, media] = await Promise.all([
+  const [similar, nearby, together, graph, weather, people, tours, conditions, places, articles, parking, accessibility, news, media, openToday] = await Promise.all([
     similarParks(parkCode).catch(() => []),
     nearbyParks(parkCode).catch(() => []),
     oftenPlannedTogether(parkCode).catch(() => []),
@@ -79,6 +79,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
     accessibilityScorecard(parkCode).catch(() => null as AccessibilityScorecard | null),
     newsForPark(parkCode).catch(() => [] as { id: string; title: string; abstract: string | null; url: string | null; releaseDate: string | null }[]),
     mediaForPark(parkCode).catch(() => ({ audio: [], galleries: [], videos: [] }) as ParkMedia),
+    checkOpen(parkCode, new Date().toISOString().slice(0, 10)).catch(() => null),
   ]);
 
   // Personalized rationale (§5f): "because you liked …" on related cards, for signed-in users.
@@ -209,6 +210,17 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
         ) : null}
         {diffRange ? <StatCard label="Hikes" value={diffRange} hint={`${difficulties.map(difficultyDot).join(' ')}`} icon={LuFootprints} /> : null}
         {park.crowdLevel ? <StatCard label="Crowds" value={park.crowdLevel as string} icon={LuUsers} /> : null}
+        {openToday && openToday.state !== 'unknown' ? (
+          <Box data-testid="park-hours-stat">
+            <StatCard
+              label="Open today"
+              value={openToday.state === 'open' ? 'Open' : 'Closed'}
+              hint={openToday.closureSummary ?? undefined}
+              icon={LuClock}
+              tone={openToday.state === 'open' ? 'accent' : 'neutral'}
+            />
+          </Box>
+        ) : null}
         <StatCard label="Entrance" value={feeLabel} icon={LuTicket} tone="brand" />
         {park.timedEntry ? (
           <StatCard
@@ -277,7 +289,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
           )}
 
           {hours[0]?.description || park.seasonalClosureSummary || openSeasons.length ? (
-            <Box>
+            <Box data-testid="park-hours-section">
               <Heading size="sm" mb={2}>Hours &amp; seasons</Heading>
               {hours[0]?.description ? <Text fontSize="sm" color="fg.muted">{hours[0].description}</Text> : null}
               {park.seasonalClosureSummary ? (
@@ -387,7 +399,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                   {conditions.webcams.slice(0, 6).map((c) => (
                     <Text key={c.id} fontSize="sm">
                       {c.url ? <CLink href={c.url} color="brand.fg">{c.title} ↗</CLink> : c.title}
-                      <Badge ml={2} colorPalette={c.isStreaming ? 'green' : c.status === 'Active' ? 'blue' : 'gray'}>
+                      <Badge ml={2} colorPalette={c.isStreaming ? 'pine' : c.status === 'Active' ? 'trail' : 'gray'}>
                         {c.isStreaming ? 'live' : c.status.toLowerCase()}
                       </Badge>
                     </Text>
@@ -474,9 +486,9 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                   <Text key={p.id} fontSize="sm">
                     {p.name}
                     {p.accessibleSpaces ? <Text as="span" color="fg.muted"> · {p.accessibleSpaces} accessible spaces</Text> : null}
-                    {p.wheelchairAccessible ? <Badge ml={2} colorPalette="green">accessible</Badge> : null}
+                    {p.wheelchairAccessible ? <Badge ml={2} colorPalette="pine">accessible</Badge> : null}
                     {p.hasEvCharging ? <Badge ml={2} colorPalette="trail">EV charging</Badge> : null}
-                    {p.hasLiveData ? <Badge ml={2} colorPalette="blue">live</Badge> : null}
+                    {p.hasLiveData ? <Badge ml={2} colorPalette="trail">live</Badge> : null}
                   </Text>
                 ))}
               </Stack>
@@ -545,7 +557,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
           <Stack gap={1}>
             {events.map((e) => (
               <Text key={e.id} fontSize="sm">
-                {e.inWindow ? <Badge mr={2} colorPalette="green">during your visit</Badge> : null}
+                {e.inWindow ? <Badge mr={2} colorPalette="pine">during your visit</Badge> : null}
                 {e.isFree ? <Badge mr={2} colorPalette="trail">free</Badge> : null}
                 {e.title}
                 {e.types?.length ? <Badge ml={2} colorPalette="pine">{e.types[0]}</Badge> : null}
@@ -619,7 +631,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
           <Heading size="md" mb={3}>Latest from this park</Heading>
           <Stack gap={2}>
             {news.map((n) => (
-              <Box key={n.id} borderLeftWidth="4px" borderColor="blue.solid" pl={3}>
+              <Box key={n.id} borderLeftWidth="4px" borderColor="trail.solid" pl={3}>
                 {n.url ? (
                   <CLink href={n.url} color="brand.fg" fontWeight="medium">{n.title} ↗</CLink>
                 ) : (
