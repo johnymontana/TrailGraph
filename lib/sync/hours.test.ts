@@ -232,4 +232,37 @@ describe('seasons', () => {
     expect(deriveOpenSeasons(parseOperatingHours(northRim, 'grca'))).not.toContain('winter');
     expect(deriveOpenSeasons(parseOperatingHours(northRim, 'grca'))).toContain('summer');
   });
+  it('unknown standard hours do not imply year-round opening', () => {
+    const seasonal = [
+      {
+        name: 'Park Hours',
+        standardHours: {
+          monday: '',
+          tuesday: '',
+          wednesday: '',
+          thursday: '',
+          friday: '',
+          saturday: '',
+          sunday: '',
+        },
+        exceptions: [
+          {
+            name: 'Summer season',
+            startDate: '2026-06-01',
+            endDate: '2026-08-31',
+            exceptionHours: {
+              monday: 'All Day',
+              tuesday: 'All Day',
+              wednesday: 'All Day',
+              thursday: 'All Day',
+              friday: 'All Day',
+              saturday: 'All Day',
+              sunday: 'All Day',
+            },
+          },
+        ],
+      },
+    ];
+    expect(deriveOpenSeasons(parseOperatingHours(seasonal, 'x'))).toEqual(['summer']);
+  });
 });

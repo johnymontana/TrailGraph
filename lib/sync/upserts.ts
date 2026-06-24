@@ -76,19 +76,28 @@ export function extractContacts(contacts: unknown): { phone: string | null; emai
  * Generic operating-hours writer (plan F1, Shared Primitive A; reused by F3 campgrounds / F10 parking):
  * `(:owner)-[:HAS_HOURS]->(:OperatingHours)-[:HAS_EXCEPTION]->(:HoursException)`. `ownerLabel`/
  * `ownerKeyProp` select the owner node (e.g. 'Park'/'parkCode', 'Campground'/'id'). Idempotent;
- * exception dates stored as real `date()`. Owners with no schedules are skipped.
+ * exception dates stored as real `date()`. Existing hours for each owner are rebuilt from the current
+ * schedules so stale schedules/exceptions are removed when upstream payloads shrink.
  */
 export async function upsertOperatingHoursForOwners(
   ownerLabel: 'Park' | 'Campground' | 'VisitorCenter' | 'ParkingLot',
   ownerKeyProp: 'parkCode' | 'id',
   rows: { ownerKey: string; schedules: HoursSchedule[] }[],
 ): Promise<number> {
-  const withHours = rows.filter((r) => r.schedules.length > 0);
-  if (!withHours.length) return 0;
+  if (!rows.length) return 0;
   const r = await writeGraph<{ c: number }>(
     `
     UNWIND $rows AS row
     MATCH (o:\`${ownerLabel}\` {\`${ownerKeyProp}\`: row.ownerKey})
+    CALL {
+      WITH o
+      OPTIONAL MATCH (o)-[:HAS_HOURS]->(oldH:OperatingHours)
+      OPTIONAL MATCH (oldH)-[:HAS_EXCEPTION]->(oldE:HoursException)
+      WITH collect(DISTINCT oldE) AS oldEs, collect(DISTINCT oldH) AS oldHs
+      FOREACH (e IN oldEs | DETACH DELETE e)
+      FOREACH (h IN oldHs | DETACH DELETE h)
+      RETURN 0 AS _
+    }
     CALL {
       WITH o, row
       UNWIND row.schedules AS sch
@@ -109,7 +118,7 @@ export async function upsertOperatingHoursForOwners(
     }
     RETURN count(DISTINCT o) AS c
     `,
-    { rows: withHours },
+    { rows },
   );
   return r[0]?.c ?? 0;
 }
@@ -1065,9 +1074,8 @@ export async function upsertEntranceFees(): Promise<number> {
       });
     }
   }
+  await writeGraph(`MATCH (f:EntranceFee) DETACH DELETE f`);
   if (!rows.length) return 0;
-  // Prune fees no longer present (price/title changes) before re-merging, in one pass.
-  await writeGraph(`MATCH (f:EntranceFee) WHERE NOT f.id IN $ids DETACH DELETE f`, { ids: rows.map((r) => r.id) });
   const r = await writeGraph<{ c: number }>(
     `UNWIND $rows AS row
      MATCH (p:Park {parkCode: row.parkCode})

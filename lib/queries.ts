@@ -264,7 +264,7 @@ export async function tripBudget(parkCodes: string[], unit = 'vehicle'): Promise
      OPTIONAL MATCH (p)-[:CHARGES]->(f:EntranceFee {unit: $unit})
      WITH p, min(f.cost) AS fee
      RETURN p.parkCode AS parkCode, p.fullName AS name,
-            CASE WHEN coalesce(p.feeFree, false) THEN 0.0 ELSE fee END AS fee,
+            CASE WHEN coalesce(p.feeFree, false) THEN 0.0 ELSE coalesce(fee, 0.0) END AS fee,
             coalesce(p.feeFree, false) AS feeFree
      ORDER BY name ASC`,
     { parkCodes, unit },
