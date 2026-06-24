@@ -34,21 +34,39 @@ export interface Digest {
 
 // ---- pure helpers (unit-tested) ------------------------------------------------------------------
 
-/** Curated NPS fee-free entrance days for 2026 (~6/yr; refresh annually). Dates are year-specific. */
-export const FEE_FREE_DAYS: { date: string; name: string }[] = [
-  { date: '2026-01-19', name: 'Martin Luther King Jr. Day' },
-  { date: '2026-04-18', name: 'First day of National Park Week' },
-  { date: '2026-06-19', name: 'Juneteenth' },
-  { date: '2026-08-04', name: 'Great American Outdoors Act anniversary' },
-  { date: '2026-09-26', name: 'National Public Lands Day' },
-  { date: '2026-11-11', name: 'Veterans Day' },
-];
+function nthWeekdayOfMonth(year: number, monthIndex: number, weekday: number, nth: number): string {
+  const d = new Date(Date.UTC(year, monthIndex, 1));
+  const firstOffset = (weekday - d.getUTCDay() + 7) % 7;
+  d.setUTCDate(1 + firstOffset + (nth - 1) * 7);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Curated NPS fee-free entrance days (~6/yr), generated per year to avoid annual hard-coded refreshes. */
+export function feeFreeDaysForYear(year: number): { date: string; name: string }[] {
+  return [
+    { date: nthWeekdayOfMonth(year, 0, 1, 3), name: 'Martin Luther King Jr. Day' }, // 3rd Monday in Jan
+    { date: nthWeekdayOfMonth(year, 3, 6, 3), name: 'First day of National Park Week' }, // 3rd Saturday in Apr
+    { date: `${year}-06-19`, name: 'Juneteenth' },
+    { date: `${year}-08-04`, name: 'Great American Outdoors Act anniversary' },
+    { date: nthWeekdayOfMonth(year, 8, 6, 4), name: 'National Public Lands Day' }, // 4th Saturday in Sep
+    { date: `${year}-11-11`, name: 'Veterans Day' },
+  ];
+}
+
+/** Backward-compatible export retained for tests/imports. */
+export const FEE_FREE_DAYS = feeFreeDaysForYear(2026);
 
 /** The next fee-free day on/after `ymd` within `windowDays`, else null. Pure. */
 export function upcomingFeeFree(ymd: string, windowDays = 21): { date: string; name: string } | null {
-  const base = Date.parse(`${ymd}T00:00:00Z`);
+  const start = new Date(`${ymd}T00:00:00Z`);
+  const base = start.getTime();
   const horizon = base + windowDays * 86_400_000;
-  const upcoming = FEE_FREE_DAYS.map((f) => ({ ...f, ms: Date.parse(`${f.date}T00:00:00Z`) }))
+  const horizonDate = new Date(horizon);
+  const years: number[] = [];
+  for (let year = start.getUTCFullYear(); year <= horizonDate.getUTCFullYear(); year++) years.push(year);
+  const upcoming = years
+    .flatMap((year) => feeFreeDaysForYear(year))
+    .map((f) => ({ ...f, ms: Date.parse(`${f.date}T00:00:00Z`) }))
     .filter((f) => f.ms >= base && f.ms <= horizon)
     .sort((a, b) => a.ms - b.ms);
   return upcoming.length ? { date: upcoming[0].date, name: upcoming[0].name } : null;

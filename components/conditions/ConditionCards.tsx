@@ -322,7 +322,7 @@ export function AstroCard({ data }: { data: Record<string, unknown> }) {
   const d = data as AstroCardData;
   const showers = d.meteorShowers ?? [];
   const passes = d.satellitePasses ?? [];
-  const hasPasses = passes.length > 0 || d.satellitesAvailable === false;
+  const hasPasses = typeof d.satellitesAvailable === 'boolean';
   const hasShot = !!d.shot;
   const defaultTab = hasShot ? 'shot' : 'tonight';
   return (
