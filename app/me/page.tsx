@@ -6,6 +6,7 @@ import { getUserMemory, userContextGraph } from '../../lib/memory-graph';
 import { MemoryList } from '../../components/memory/MemoryList';
 import { ContextGraph } from '../../components/memory/ContextGraph';
 import { CollectivePanel } from '../../components/memory/CollectivePanel';
+import { DigestInbox } from '../../components/inbox/DigestInbox';
 import { PageHeader } from '../../components/ui/page-header';
 import { EmptyState } from '../../components/ui/empty-state';
 
@@ -41,6 +42,7 @@ export default async function MePage() {
       <Container maxW="3xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 10 }}>
         {context ? <ContextGraph nodes={context.nodes} rels={context.rels} /> : null}
         <MemoryList initial={memory} />
+        <DigestInbox />
         <CollectivePanel />
       </Container>
     </Box>

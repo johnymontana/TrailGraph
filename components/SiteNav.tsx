@@ -18,6 +18,7 @@ import NextLink from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { LuMenu, LuMountainSnow, LuX } from 'react-icons/lu';
 import { ColorModeButton } from './ui/color-mode-button';
+import { InboxBadge } from './inbox/InboxBadge';
 import { useSession, signOut } from '../lib/auth-client';
 
 // Public browse links shown to everyone. Account/memory surfaces live in the account control (signed
@@ -124,6 +125,8 @@ export function SiteNav() {
           <Box ml={2}>
             <ColorModeButton />
           </Box>
+          {/* Ranger inbox badge — only when signed in (ADR-052). */}
+          {ready && user ? <InboxBadge /> : null}
           {/* Neutral avatar-sized placeholder until auth resolves, so SSR === first CSR (no flash of
               the wrong state). */}
           {!ready ? (

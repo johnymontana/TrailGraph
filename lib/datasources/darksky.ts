@@ -25,6 +25,11 @@ export const DARK_SKY: DarkSkyRecord[] = [
   { parkCode: 'jotr', certified: true, bortle: 4 },
   { parkCode: 'grsm', certified: false, bortle: 4 },
   { parkCode: 'olym', certified: false, bortle: 3 },
+  // Flagship dark-sky backfill (test report §5.1) — among the darkest in the lower 48; all certified
+  // International Dark Sky Parks. Their scorecards were leading with only Moon + Dark Hours before this.
+  { parkCode: 'grba', certified: true, bortle: 2 }, // Great Basin (DSP 2016)
+  { parkCode: 'bibe', certified: true, bortle: 2 }, // Big Bend (Gold Tier 2012) — least light pollution in lower 48
+  { parkCode: 'deva', certified: true, bortle: 2 }, // Death Valley (Gold Tier 2013)
 ];
 
 /** Bortle scale → a friendly 1–5 star rating + label. Pure (unit-tested). */

@@ -14,8 +14,9 @@ import {
 import NextLink from 'next/link';
 import { LuArrowRight, LuCompass, LuNetwork, LuRoute, LuSparkles } from 'react-icons/lu';
 import type { IconType } from 'react-icons';
-import { searchParks } from '../lib/queries';
+import { searchParks, landingStats } from '../lib/queries';
 import { forYou } from '../lib/recommend';
+import { StatsBand } from '../components/marketing/StatsBand';
 import { getServerUserId } from '../lib/session';
 import { ParkCard } from '../components/ParkCard';
 import { WhyThisPark } from '../components/parks/WhyThisPark';
@@ -46,9 +47,10 @@ const FEATURES: { icon: IconType; title: string; body: string }[] = [
 
 export default async function Home() {
   const userId = await getServerUserId();
-  const [featured, recs] = await Promise.all([
+  const [featured, recs, stats] = await Promise.all([
     searchParks({ designation: 'National Park', limit: 4 }).catch(() => ({ items: [], total: 0 })),
     userId ? forYou(userId, { limit: 4 }).catch(() => null) : Promise.resolve(null),
+    landingStats().catch(() => ({ parks: 0, darkSky: 0, activities: 0, topics: 0 })),
   ]);
   const personalized = recs && recs.source === 'personalized' && recs.parks.length > 0 ? recs : null;
 
@@ -94,6 +96,9 @@ export default async function Home() {
           </Stack>
         </Container>
       </Box>
+
+      {/* Graph-scale stats band (Chakra UI Pro, ADR-054). */}
+      <StatsBand stats={stats} />
 
       <Container maxW="6xl" px={{ base: 4, md: 8 }} py={{ base: 12, md: 16 }}>
         {/* Signed in but nothing learned yet → nudge toward seeding preferences (ADR-038). */}

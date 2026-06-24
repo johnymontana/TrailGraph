@@ -235,6 +235,32 @@ export function TripBuilder() {
       setCostErr(null);
     }
   }
+  // Trip Lab (ADR-056): fork the open trip into a copy and switch to it, leaving the original untouched.
+  async function fork() {
+    if (!trip) return;
+    const res = await fetch(`/api/trips/${trip.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op: 'fork' }),
+    });
+    if (!res.ok) {
+      toast.error("Couldn't fork this trip", 'Please try again in a moment.');
+      return;
+    }
+    const { tripId, trip: forked } = await res.json();
+    await loadTrips();
+    if (forked) {
+      setTrip(forked);
+      setAlerts(null);
+      setCost(null);
+      setCostErr(null);
+      setDashboard(null);
+      setDayMap({});
+    } else if (tripId) {
+      await openTrip(tripId);
+    }
+    toast.success('Trip forked', 'Editing the copy — your original is untouched.');
+  }
   async function suggestDayPlan() {
     if (!trip) return;
     const res = await fetch(`/api/trips/${trip.id}`, {
@@ -352,6 +378,15 @@ export function TripBuilder() {
                 </Button>
                 <Button size="sm" variant="outline" onClick={share}>
                   Share
+                </Button>
+                <Button size="sm" variant="outline" onClick={fork}>
+                  Fork
+                </Button>
+                <Button size="sm" variant="outline" asChild>
+                  <a href={`/api/trips/${trip.id}/brief`} target="_blank" rel="noopener noreferrer">Field brief</a>
+                </Button>
+                <Button size="sm" variant="outline" asChild>
+                  <a href={`/api/trips/${trip.id}/offline`}>Offline pack</a>
                 </Button>
                 <Button size="sm" variant="outline" asChild>
                   <a href={`/api/trips/${trip.id}/ics`}>Export .ics</a>

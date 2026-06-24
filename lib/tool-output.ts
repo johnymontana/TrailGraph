@@ -16,6 +16,10 @@ export function isRenderableToolOutput(kind: string, data: unknown): boolean {
   if (kind === 'astro_card') return !!d.moon || !!d.date;
   if (kind === 'conditions_card') return !!d.parkCode;
   if (kind === 'trip_dashboard') return ((d.stops as unknown[])?.length ?? 0) > 0;
+  if (kind === 'trip_diff') return !!(d.a && d.b);
+  if (kind === 'leaderboard_card') return ((d.entries as unknown[])?.length ?? 0) > 0 || !!d.submitted;
+  if (kind === 'watch_list') return Array.isArray(d.watches); // render even when empty (confirms state)
+  if (kind === 'digest_card') return Array.isArray(d.items); // render even when empty ("all clear")
   if (kind === 'why_this') return ((d.prefPaths as unknown[])?.length ?? 0) > 0 || ((d.constraints as unknown[])?.length ?? 0) > 0 || !!d.park;
   return false;
 }

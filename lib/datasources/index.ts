@@ -19,9 +19,21 @@ export async function syncDataSources(): Promise<Record<string, number>> {
 }
 
 export { darkSkyRating } from './darksky';
-export { deriveBestMonths, crowdLevel, monthNames } from './visitation';
+export { deriveBestMonths, crowdLevel, monthNames, normalizeCrowdCurve, type CrowdCurvePoint } from './visitation';
 export { classifyDifficulty, difficultyDot, type Difficulty } from './trails';
 export { recreationUrl, parseRidbId } from './recreation';
 export { getWeather, weatherCodeLabel, type ParkWeather } from './weather';
 export { getConditions, roadEventSeverity, type ParkConditions, type Webcam, type RoadEvent } from './conditions';
 export { getAstro, moonPhaseName, sqmFromBortle, sunTimesFor, type AstroEvents, type SqmEstimate, type SunTimes } from './astro';
+export {
+  meteorShowers,
+  satellitePasses,
+  shotPlan,
+  METEOR_SHOWERS,
+  type MeteorShower,
+  type ActiveMeteorShower,
+  type SatellitePass,
+  type ShotPlan,
+  type ShotAlignment,
+} from './astro';
+export { fetchVisibleSatellites, parseTle, SAMPLE_ISS_TLE, type Tle } from './tle';

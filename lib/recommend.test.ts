@@ -54,6 +54,46 @@ describe('rankParks (live constraint re-ranking, ADR-046)', () => {
     });
   });
 
+  it('honors the FULL /explore facet set so the live panel matches the faceted search', async () => {
+    await rankParks({
+      stateCode: 'MT',
+      activity: 'Astronomy',
+      topic: 'Geology',
+      amenity: 'Accessible Restrooms',
+      designation: 'National Park',
+      darkSky: true,
+    });
+    const [q, params] = mockRead.mock.calls[0] as [string, Record<string, unknown>];
+    expect(q).toContain('(p)-[:LOCATED_IN]->(:State {code:$stateCode})');
+    expect(q).toContain('(p)-[:OFFERS]->(:Activity {name:$activity})');
+    expect(q).toContain('(p)-[:HAS_TOPIC]->(:Topic {name:$topic})');
+    expect(q).toContain(':Amenity {name:$amenity}');
+    expect(q).toContain('p.designation = $designation');
+    expect(q).toContain('p.darkSkyCertified = true');
+    expect(params).toMatchObject({
+      stateCode: 'MT',
+      activity: 'Astronomy',
+      topic: 'Geology',
+      amenity: 'Accessible Restrooms',
+      designation: 'National Park',
+    });
+  });
+
+  it('draws candidates from the SAME fulltext index as searchParks when q is present', async () => {
+    await rankParks({ q: 'glacier', stateCode: 'MT' });
+    const [q, params] = mockRead.mock.calls[0] as [string, Record<string, unknown>];
+    expect(q).toContain("db.index.fulltext.queryNodes('park_fulltext', $q)");
+    expect(q).toContain('(p)-[:LOCATED_IN]->(:State {code:$stateCode})'); // facet still applied after YIELD
+    expect(params).toMatchObject({ q: 'glacier', stateCode: 'MT' });
+  });
+
+  it('uses a plain MATCH (no fulltext) when q is absent', async () => {
+    await rankParks({ stateCode: 'MT' });
+    const [q] = mockRead.mock.calls[0] as [string, Record<string, unknown>];
+    expect(q).toContain('MATCH (p:Park)');
+    expect(q).not.toContain('db.index.fulltext.queryNodes');
+  });
+
   it('passes null filters and supports anonymous cold-start (no userId)', async () => {
     await rankParks({});
     const [, params] = mockRead.mock.calls[0] as [string, Record<string, unknown>];
@@ -121,5 +161,28 @@ describe('resolveRankParams (rank API merge + clamps)', () => {
 
   it('carries an anonymous (null) userId through', () => {
     expect(resolveRankParams({}, cons, null).userId).toBeNull();
+  });
+
+  it('passes the full facet set through so the live panel refines within the faceted search', () => {
+    const p = resolveRankParams(
+      { q: 'lakes', stateCode: 'MT', activity: 'Astronomy', topic: 'Geology', amenity: 'Accessible Restrooms', designation: 'National Park', darkSky: true },
+      cons,
+      'u1',
+    );
+    expect(p).toMatchObject({
+      q: 'lakes',
+      stateCode: 'MT',
+      activity: 'Astronomy',
+      topic: 'Geology',
+      amenity: 'Accessible Restrooms',
+      designation: 'National Park',
+      darkSky: true,
+    });
+  });
+
+  it('treats an empty q as absent (no fulltext branch) and darkSky defaults to false', () => {
+    const p = resolveRankParams({ q: '' }, cons, null);
+    expect(p.q).toBeUndefined();
+    expect(p.darkSky).toBe(false);
   });
 });

@@ -88,9 +88,13 @@ export async function forYou(
  */
 export interface RankParams {
   userId?: string | null;
+  q?: string;
   stateCode?: string;
   activity?: string;
   topic?: string;
+  amenity?: string;
+  designation?: string;
+  darkSky?: boolean;
   rvMaxLengthFt?: number | null;
   wheelchairAccessible?: boolean;
   requiredAmenities?: string[];
@@ -113,9 +117,13 @@ export interface RankedPark extends ParkSummary {
 export async function rankParks(params: RankParams): Promise<{ items: RankedPark[]; total: number }> {
   const {
     userId = null,
+    q,
     stateCode,
     activity,
     topic,
+    amenity,
+    designation,
+    darkSky = false,
     rvMaxLengthFt = null,
     wheelchairAccessible = false,
     requiredAmenities = [],
@@ -125,10 +133,21 @@ export async function rankParks(params: RankParams): Promise<{ items: RankedPark
     offset = 0,
   } = params;
 
+  // The live "Refine live" panel layers its sliders on TOP of the active /explore facets (ADR-046), so
+  // it must apply the SAME filters as searchParks — otherwise it shows parks the faceted search excluded
+  // (e.g. a state the user filtered out). q reuses the same full-text index for an identical result set.
   const where: string[] = [];
   if (stateCode) where.push('(p)-[:LOCATED_IN]->(:State {code:$stateCode})');
   if (activity) where.push('(p)-[:OFFERS]->(:Activity {name:$activity})');
   if (topic) where.push('(p)-[:HAS_TOPIC]->(:Topic {name:$topic})');
+  if (amenity)
+    where.push(
+      `(EXISTS { (p)-[:HAS_PLACE]->(:Place)-[:HAS_AMENITY]->(:Amenity {name:$amenity}) }
+        OR EXISTS { (vc:VisitorCenter)-[:IN_PARK]->(p) WHERE (vc)-[:HAS_AMENITY]->(:Amenity {name:$amenity}) }
+        OR EXISTS { (cg:Campground)-[:IN_PARK]->(p) WHERE (cg)-[:HAS_AMENITY]->(:Amenity {name:$amenity}) })`,
+    );
+  if (designation) where.push('p.designation = $designation');
+  if (darkSky) where.push('p.darkSkyCertified = true');
   where.push('($rv IS NULL OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.rvMaxLengthFt >= $rv })');
   where.push('(NOT $wheelchair OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.wheelchairAccessible = true })');
   where.push(`ALL(req IN $required WHERE
@@ -136,12 +155,20 @@ export async function rankParks(params: RankParams): Promise<{ items: RankedPark
         OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) })`);
   where.push('($maxBortle IS NULL OR coalesce(p.bortleScale, 99) <= $maxBortle)');
   const whereClause = 'WHERE ' + where.join('\n      AND ');
+  // With a free-text query, draw the candidate set from the same fulltext index searchParks uses (then
+  // apply the facet WHERE), so the live panel and the main grid agree on which parks qualify.
+  const source = q
+    ? `CALL db.index.fulltext.queryNodes('park_fulltext', $q) YIELD node AS p ${whereClause}`
+    : `MATCH (p:Park) ${whereClause}`;
 
   const queryParams = {
     userId,
+    q: q ?? null,
     stateCode: stateCode ?? null,
     activity: activity ?? null,
     topic: topic ?? null,
+    amenity: amenity ?? null,
+    designation: designation ?? null,
     rv: rvMaxLengthFt,
     wheelchair: wheelchairAccessible,
     required: requiredAmenities,
@@ -153,8 +180,7 @@ export async function rankParks(params: RankParams): Promise<{ items: RankedPark
 
   const items = await readGraph<RankedPark>(
     `
-    MATCH (p:Park)
-    ${whereClause}
+    ${source}
     OPTIONAL MATCH (u:User {userId:$userId})-[pr:PREFERS]->(d)
       WHERE coalesce(pr.weight, 1.0) > 0 AND ((p)-[:OFFERS]->(d) OR (p)-[:HAS_TOPIC]->(d))
     WITH p, sum(coalesce(pr.weight, 0.0)) AS prefScore, count(DISTINCT d) AS matches, collect(DISTINCT d.name) AS matched
@@ -171,7 +197,7 @@ export async function rankParks(params: RankParams): Promise<{ items: RankedPark
     queryParams,
   );
   const totalRows = await readGraph<{ total: number }>(
-    `MATCH (p:Park) ${whereClause} RETURN count(p) AS total`,
+    `${source} RETURN count(p) AS total`,
     queryParams,
   );
   return { items, total: totalRows[0]?.total ?? items.length };
@@ -190,9 +216,13 @@ export interface RankRequestBody {
   requiredAmenities?: string[];
   rvMaxLengthFt?: number | null;
   wheelchairAccessible?: boolean;
+  q?: string;
   stateCode?: string;
   activity?: string;
   topic?: string;
+  amenity?: string;
+  designation?: string;
+  darkSky?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -211,9 +241,13 @@ export function resolveRankParams(body: RankRequestBody, cons: SavedConstraints,
   const rvRaw = body.rvMaxLengthFt !== undefined ? body.rvMaxLengthFt : cons.rvMaxLengthFt;
   return {
     userId,
+    q: body.q || undefined,
     stateCode: body.stateCode,
     activity: body.activity,
     topic: body.topic,
+    amenity: body.amenity,
+    designation: body.designation,
+    darkSky: body.darkSky ?? false,
     rvMaxLengthFt: rvRaw && rvRaw > 0 ? rvRaw : null,
     wheelchairAccessible: body.wheelchairAccessible ?? cons.wheelchair,
     requiredAmenities: body.requiredAmenities ?? cons.requiredAmenities,

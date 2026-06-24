@@ -26,6 +26,7 @@ import { ParkActions } from '../../../components/ParkActions';
 import { ParkCard } from '../../../components/ParkCard';
 import { ParkHero } from '../../../components/parks/ParkHero';
 import { VisitationChart } from '../../../components/parks/VisitationChart';
+import { SkyReadingForm } from '../../../components/collective/SkyReadingForm';
 import { ParkGraph } from '../../../components/parks/ParkGraph';
 import { TourList } from '../../../components/parks/TourList';
 import { StampList } from '../../../components/parks/StampList';
@@ -285,6 +286,8 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                 {monthlyVisits.length === 12 ? (
                   <VisitationChart monthly={monthlyVisits} bestMonths={bestMonths} parkName={park.name as string} />
                 ) : null}
+                {/* Collective Intelligence v2 (ADR-053): let visitors log their own sky-darkness reading. */}
+                <SkyReadingForm parkCode={park.parkCode as string} parkName={park.name as string} />
               </Stack>
             </Box>
           ) : null}

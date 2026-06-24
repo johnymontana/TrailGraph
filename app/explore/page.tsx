@@ -147,8 +147,20 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
           </form>
         </Box>
 
-        {/* Live constraint re-ranking (ADR-046) — progressive enhancement below the no-JS form. */}
-        <RankPanel defaults={rankDefaults} />
+        {/* Live constraint re-ranking (ADR-046) — progressive enhancement below the no-JS form. It refines
+            WITHIN the active facets so it can't surface parks the faceted search excluded. */}
+        <RankPanel
+          defaults={rankDefaults}
+          facets={{
+            q: sp.q,
+            stateCode: sp.stateCode,
+            activity: sp.activity,
+            topic: sp.topic,
+            amenity: sp.amenity,
+            designation: sp.designation,
+            darkSky: sp.darkSky === '1',
+          }}
+        />
 
         <Text color="fg.muted" mb={4} fontSize="sm">
           {total === 0 ? '0 parks' : `Showing ${firstIdx}–${lastIdx} of ${total} park${total === 1 ? '' : 's'}`}

@@ -3,6 +3,9 @@ import { Badge, Box, Card, Icon, Text, Stack, HStack, Link as CLink } from '@cha
 import NextLink from 'next/link';
 import { LuTriangleAlert } from 'react-icons/lu';
 import { DarkSkyCard, WeatherCard, AstroCard, ConditionsCard, TripDashboardCard } from '../conditions/ConditionCards';
+import { TripDiffCard } from '../plan/TripDiffCard';
+import { SkyLeaderboard, type LeaderboardEntry } from '../collective/SkyLeaderboard';
+import { DigestItems, type DigestItemView } from '../inbox/DigestItems';
 import { ProvenanceEdges } from '../parks/ProvenanceEdges';
 
 /** Renders a tool's `{kind,data}` output as a structured card (ADR-013, D5). Graph-grounded only. */
@@ -45,6 +48,14 @@ export function ToolCard({ kind, data: raw }: { kind: string; data: unknown }) {
       return <ConditionsCard data={data} />;
     case 'trip_dashboard':
       return <TripDashboardCard data={data} />;
+    case 'trip_diff':
+      return <TripDiffCard data={data} />;
+    case 'leaderboard_card':
+      return <LeaderboardCard data={data} />;
+    case 'digest_card':
+      return <DigestCard data={data} />;
+    case 'watch_list':
+      return <WatchListCard data={data} />;
     case 'why_this':
       return (
         <Card.Root variant="subtle" size="sm" my={2}>
@@ -208,5 +219,63 @@ function AlertList({ data }: { data: Record<string, unknown> }) {
         );
       })}
     </Stack>
+  );
+}
+
+/** Ranger digest (Proactive Ranger) — from the `digest_card` envelope (preview_digest). */
+function DigestCard({ data }: { data: Record<string, unknown> }) {
+  const items = (data.items ?? []) as DigestItemView[];
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading" mb={2}>
+          Your ranger digest{data.forDate ? ` · ${String(data.forDate)}` : ''}
+        </Text>
+        <DigestItems items={items} />
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+/** Standing watches (Proactive Ranger) — from the `watch_list` envelope (set_watch / list_watches). */
+function WatchListCard({ data }: { data: Record<string, unknown> }) {
+  const watches = (data.watches ?? []) as { id: string; kind: string; refId: string; label: string | null }[];
+  if (!watches.length) {
+    return (
+      <Text fontSize="sm" color="fg.muted" my={2}>
+        No active watches yet — watch a trip or park to get it in your morning digest.
+      </Text>
+    );
+  }
+  return (
+    <Stack gap={2} my={2}>
+      {watches.map((w) => (
+        <HStack key={w.id} borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2} gap={2}>
+          <Badge colorPalette={w.kind === 'trip' ? 'pine' : 'trail'}>{w.kind}</Badge>
+          <Text fontSize="sm" flex="1">{w.label ?? w.refId}</Text>
+        </HStack>
+      ))}
+    </Stack>
+  );
+}
+
+/** Community SQM leaderboard (Collective Intelligence v2) — from the `leaderboard_card` envelope. */
+function LeaderboardCard({ data }: { data: Record<string, unknown> }) {
+  const submitted = data.submitted as { parkName?: string; sqm?: number } | undefined;
+  const entries = (data.entries ?? []) as LeaderboardEntry[];
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading" mb={2}>
+          Community dark-sky leaderboard
+        </Text>
+        {submitted ? (
+          <Text fontSize="xs" color="brand.fg" mb={2}>
+            Logged SQM {submitted.sqm} at {submitted.parkName} — thanks for contributing!
+          </Text>
+        ) : null}
+        <SkyLeaderboard entries={entries} />
+      </Card.Body>
+    </Card.Root>
   );
 }
