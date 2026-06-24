@@ -41,4 +41,22 @@ describe('cleanTags', () => {
       'Wildlife',
     ]);
   });
+
+  it('splits run-together camelCase tags and preserves acronyms (R5 §2.9)', () => {
+    expect(cleanTags('Lillian Erickson Riggs', ['SWScience'])).toEqual(['SW Science']);
+    expect(cleanTags('Robert Limbert', ['NPSHistory'])).toEqual(['NPS History']);
+    expect(cleanTags('X', ['nps-history', 'state/parks', 'wildlife_watching'])).toEqual([
+      'NPS History',
+      'State Parks',
+      'Wildlife Watching',
+    ]);
+  });
+
+  it('leaves already-clean tags untouched (backward compatible)', () => {
+    expect(cleanTags('X', ['Botany', 'Conservation', 'Birdwatching'])).toEqual([
+      'Botany',
+      'Conservation',
+      'Birdwatching',
+    ]);
+  });
 });

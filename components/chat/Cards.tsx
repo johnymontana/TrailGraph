@@ -38,7 +38,7 @@ export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: un
     case 'node_results':
       return <NodeResults data={data} />;
     case 'itinerary_preview':
-      return <ItineraryCard data={data} />;
+      return <ItineraryCard data={data} onAnswer={onAnswer} />;
     case 'alert_list':
       return <AlertList data={data} />;
     case 'dark_sky_card':
@@ -214,7 +214,8 @@ function QuestionCard({ data, onAnswer }: { data: Record<string, unknown>; onAns
   );
 }
 
-function ItineraryCard({ data }: { data: Record<string, unknown> }) {
+function ItineraryCard({ data, onAnswer }: { data: Record<string, unknown>; onAnswer?: (text: string) => void }) {
+  const [saving, setSaving] = useState(false);
   const trip = data.trip as
     | { name: string; stops: ({ name?: string; parkName?: string; driveTo?: { miles: number; minutes: number } } | null)[] }
     | undefined;
@@ -224,6 +225,10 @@ function ItineraryCard({ data }: { data: Record<string, unknown> }) {
     name?: string;
     driveTo?: { miles: number; minutes: number };
   }[];
+  // A `draft` card is a *proposed* plan (propose_itinerary) that was NOT saved — show a one-tap save
+  // action so the user always has a predictable way to keep it (R5 §2.8). onAnswer is present only on the
+  // latest turn, so stale drafts stay read-only.
+  const isDraft = !!data.draft;
   return (
     <Card.Root variant="subtle" size="sm" my={2}>
       <Card.Body p={3}>
@@ -247,6 +252,31 @@ function ItineraryCard({ data }: { data: Record<string, unknown> }) {
             </Box>
           ))}
         </Stack>
+        {isDraft && onAnswer ? (
+          <Box
+            as="button"
+            mt={3}
+            w="full"
+            textAlign="center"
+            bg={saving ? 'brand.muted' : 'brand.solid'}
+            color="brand.contrast"
+            borderRadius="l2"
+            px={3}
+            py={2}
+            fontSize="sm"
+            fontWeight="medium"
+            cursor={saving ? 'default' : 'pointer'}
+            transition="background 0.15s"
+            _hover={saving ? undefined : { bg: 'brand.emphasized' }}
+            onClick={() => {
+              if (saving) return;
+              setSaving(true);
+              onAnswer('Yes, save this as a trip.');
+            }}
+          >
+            {saving ? 'Saving…' : '+ Save this as a trip'}
+          </Box>
+        ) : null}
       </Card.Body>
     </Card.Root>
   );

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getAstro, moonPhaseName, sqmFromBortle, meteorShowers, satellitePasses, shotPlan } from './astro';
+import { getAstro, moonPhaseName, sqmFromBortle, meteorShowers, satellitePasses, shotPlan, darkestNight } from './astro';
 import { SAMPLE_ISS_TLE, parseTle } from './tle';
 
 // Grand Canyon — a known dark-sky park with a stable lat/lng.
@@ -15,6 +15,33 @@ describe('moonPhaseName', () => {
   it('wraps negatives and >360', () => {
     expect(moonPhaseName(-10).name).toBe('New');
     expect(moonPhaseName(360).name).toBe('New');
+  });
+});
+
+describe('darkestNight (R5 §2.3 — best stargazing night in a trip window)', () => {
+  it('returns the lowest-illumination night within the window, with its date', () => {
+    // Sep 2026 new moon is ~Sep 10–11; scan a window straddling it.
+    const best = darkestNight(GC.lat, GC.lng, '2026-09-05', '2026-09-20');
+    expect(best.date >= '2026-09-05' && best.date <= '2026-09-20').toBe(true);
+    // It is genuinely the minimum over the window (matches a brute-force scan).
+    let minPct = 101;
+    for (let d = 5; d <= 20; d++) {
+      const ymd = `2026-09-${String(d).padStart(2, '0')}`;
+      minPct = Math.min(minPct, getAstro(GC.lat, GC.lng, ymd).moon.illuminationPct);
+    }
+    expect(best.astro.moon.illuminationPct).toBe(minPct);
+    expect(best.astro.date).toBe(best.date);
+  });
+
+  it('is deterministic and handles a single-day window', () => {
+    const a = darkestNight(GC.lat, GC.lng, '2026-09-21', '2026-09-21');
+    expect(a.date).toBe('2026-09-21');
+    expect(a.astro.moon.illuminationPct).toBe(getAstro(GC.lat, GC.lng, '2026-09-21').moon.illuminationPct);
+  });
+
+  it('falls back to the start date for a degenerate (start > end) window', () => {
+    const a = darkestNight(GC.lat, GC.lng, '2026-09-21', '2026-09-10');
+    expect(a.date).toBe('2026-09-21');
   });
 });
 

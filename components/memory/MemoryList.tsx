@@ -124,7 +124,8 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
           ) : null}
         </HStack>
         <Text fontSize="xs" color="fg.muted" mb={3}>
-          Constraints the ranger honors in every recommendation and itinerary.
+          Durable constraints that apply to <strong>every</strong> trip the ranger plans. A companion&apos;s
+          one-trip need isn&apos;t saved here — just tell the ranger it&apos;s only for that trip.
         </Text>
         <Stack gap={3}>
           <HStack borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2}>

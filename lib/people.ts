@@ -29,11 +29,31 @@ function normalize(s: string): string {
   return s.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-function titleCase(s: string): string {
-  // Lowercase, then capitalize each word — collapses ALL-CAPS / inconsistent casing to one style.
+// Regional/agency acronyms that should stay uppercase in a label (R5 §2.9). NPS person tags carry these
+// run together (e.g. "SWScience"); once we split them out we don't want "Sw"/"Nps".
+const ACRONYMS = new Set(['nps', 'sw', 'se', 'ne', 'nw', 'us', 'usa', 'usgs', 'ccc', 'tva', 'wwi', 'wwii']);
+
+/**
+ * Split a tag into words on whitespace, common delimiters (-, /, _), AND camelCase boundaries — including
+ * the "SWScience" → "SW Science" case (R5 §2.9). Boundaries are detected on the ORIGINAL casing FIRST,
+ * before any lowercasing, or the camelCase signal would be lost. Genuinely concatenated all-lowercase
+ * source tags ("swscience") have no recoverable boundary and are left as a single word.
+ */
+function splitWords(s: string): string[] {
   return s
-    .toLowerCase()
-    .split(/\s+/)
-    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2') // fooBar → foo Bar
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2') // SWScience → SW Science, NPSHistory → NPS History
+    .split(/[\s\-/_]+/)
+    .filter(Boolean);
+}
+
+function titleCase(s: string): string {
+  // Split on word boundaries, then normalize each word to one casing style — uppercasing known acronyms.
+  return splitWords(s)
+    .map((w) => {
+      const lower = w.toLowerCase();
+      if (ACRONYMS.has(lower)) return lower.toUpperCase();
+      return lower ? lower[0].toUpperCase() + lower.slice(1) : lower;
+    })
     .join(' ');
 }

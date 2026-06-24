@@ -27,6 +27,15 @@ function stars(n: number): string {
   return '★'.repeat(n) + '☆'.repeat(Math.max(0, 5 - n));
 }
 
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** Format a YYYY-MM-DD string as "Sep 25" deterministically (no locale/tz → SSR-hydration-safe). */
+function fmtYmd(ymd?: string | null): string | null {
+  if (!ymd) return null;
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return `${MONTH_ABBR[m - 1]} ${d}`;
+}
+
 /** Dark-Sky Scorecard — from the `dark_sky_card` tool envelope. Astro tiles render only when present. */
 export function DarkSkyCard({ data }: { data: Record<string, unknown> }) {
   const d = data as {
@@ -37,7 +46,19 @@ export function DarkSkyCard({ data }: { data: Record<string, unknown> }) {
     bestMonths?: string | null;
     crowdLevel?: string | null;
     astro?: { moonIllumination: number; moonPhase: string; moonEmoji: string; darkHours: number | null } | null;
+    astroContext?: 'best-night' | 'tonight';
+    astroDate?: string | null;
+    astroWindow?: { start?: string; end?: string } | null;
   };
+  // Label the astro tiles with the night they describe (R5 §2.3): the best night in the trip window, or
+  // tonight. Moon phase is the headline number for stargazing, so showing the wrong night reads as a bug.
+  const isBestNight = d.astroContext === 'best-night';
+  const astroDateLabel = fmtYmd(d.astroDate);
+  const moonLabel = d.astro ? (isBestNight ? 'Moon · best night' : 'Moon · tonight') : 'Moon';
+  const windowLabel =
+    isBestNight && d.astroWindow?.start
+      ? `darkest night in your ${fmtYmd(d.astroWindow.start)}–${fmtYmd(d.astroWindow.end) ?? ''} window`
+      : null;
   return (
     <Card.Root variant="subtle" size="sm" my={2}>
       <Card.Body p={3}>
@@ -64,17 +85,17 @@ export function DarkSkyCard({ data }: { data: Record<string, unknown> }) {
               tone="accent"
             />
           ) : null}
-          {d.bestMonths ? <StatCard label="Best months" value={d.bestMonths} /> : null}
+          {d.bestMonths ? <StatCard label="Quietest months" value={d.bestMonths} hint="fewest crowds" /> : null}
           {d.crowdLevel ? <StatCard label="Crowds" value={d.crowdLevel} /> : null}
           {d.astro ? (
             <StatCard
-              label="Moon"
+              label={moonLabel}
               value={
                 <>
                   {d.astro.moonEmoji} <CountUp to={d.astro.moonIllumination} suffix="%" />
                 </>
               }
-              hint={d.astro.moonPhase}
+              hint={astroDateLabel ? `${d.astro.moonPhase} · ${astroDateLabel}` : d.astro.moonPhase}
               icon={LuMoon}
               tone="accent"
             />
@@ -83,11 +104,20 @@ export function DarkSkyCard({ data }: { data: Record<string, unknown> }) {
             <StatCard
               label="Dark hours"
               value={<CountUp to={d.astro.darkHours} suffix=" h" />}
-              hint="astronomical night"
+              hint={isBestNight ? 'astronomical night, best night' : 'astronomical night'}
               tone="accent"
             />
           ) : null}
         </SimpleGrid>
+        {windowLabel ? (
+          <Text fontSize="xs" color="fg.muted" mt={2}>
+            🌑 Moon &amp; dark hours are the {windowLabel} — your best night for stars.
+          </Text>
+        ) : d.astro ? (
+          <Text fontSize="xs" color="fg.muted" mt={2}>
+            Showing tonight&apos;s sky — tell the ranger your trip dates for the best night.
+          </Text>
+        ) : null}
       </Card.Body>
     </Card.Root>
   );

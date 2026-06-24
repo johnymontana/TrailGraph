@@ -3,6 +3,7 @@ import { readGraph, writeGraph } from './neo4j';
 import { routing, type LatLng } from './routing';
 import { considerPark } from './bridges';
 import { buildParkConditions, type ConditionsCardData, type TripDashboard } from './conditions';
+import { decodeEntities } from './html-entities';
 
 /**
  * Trip service (ADR-002/003). Canonical trips are bolt-written graph nodes owned by the app and
@@ -49,7 +50,7 @@ export async function createTrip(userId: string, t: NewTrip): Promise<string> {
     {
       userId,
       id,
-      name: t.name,
+      name: decodeEntities(t.name),
       startDate: t.startDate ?? null,
       endDate: t.endDate ?? null,
       startPoint: t.startPoint ? point(t.startPoint) : null,
@@ -67,7 +68,7 @@ function point(p: LatLng) {
 export async function renameTrip(userId: string, tripId: string, name: string): Promise<void> {
   await writeGraph(
     `MATCH (t:Trip {id: $tripId, userId: $userId}) SET t.name = $name`,
-    { userId, tripId, name },
+    { userId, tripId, name: decodeEntities(name) },
   );
 }
 
@@ -200,7 +201,7 @@ export async function addStop(userId: string, tripId: string, stop: NewStop): Pr
       refId: stop.refId ?? null,
       lat: stop.lat ?? null,
       lng: stop.lng ?? null,
-      name: stop.name ?? null,
+      name: stop.name != null ? decodeEntities(stop.name) : null,
       day: stop.day ?? null,
       nights: stop.nights ?? null,
     },

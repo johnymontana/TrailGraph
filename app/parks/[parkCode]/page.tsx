@@ -285,7 +285,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                 ) : null}
                 {bestMonths.length > 0 ? (
                   <Text>
-                    <Text as="span" color="fg.muted">Best time to visit (fewer crowds): </Text>
+                    <Text as="span" color="fg.muted">Quietest months (fewer crowds): </Text>
                     {monthNames(bestMonths)}
                   </Text>
                 ) : null}

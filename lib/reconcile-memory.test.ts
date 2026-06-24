@@ -5,6 +5,7 @@ const searchEntities = vi.fn();
 const getConversationContext = vi.fn();
 const writePreferenceBridge = vi.fn();
 const extractCanonicalTerms = vi.fn();
+const isParksRelevant = vi.fn();
 
 vi.mock('./neo4j', () => ({ readGraph: (...a: unknown[]) => readGraph(...a) }));
 vi.mock('./memory', () => ({
@@ -14,7 +15,10 @@ vi.mock('./memory', () => ({
   },
 }));
 vi.mock('./bridges', () => ({ writePreferenceBridge: (...a: unknown[]) => writePreferenceBridge(...a) }));
-vi.mock('./canonicalize', () => ({ extractCanonicalTerms: (...a: unknown[]) => extractCanonicalTerms(...a) }));
+vi.mock('./canonicalize', () => ({
+  extractCanonicalTerms: (...a: unknown[]) => extractCanonicalTerms(...a),
+  isParksRelevant: (...a: unknown[]) => isParksRelevant(...a),
+}));
 
 import { reconcileUser, reconcileAll } from './reconcile-memory';
 
@@ -24,7 +28,9 @@ beforeEach(() => {
   getConversationContext.mockReset();
   writePreferenceBridge.mockReset();
   extractCanonicalTerms.mockReset();
+  isParksRelevant.mockReset();
   writePreferenceBridge.mockResolvedValue({ canonicalized: true });
+  isParksRelevant.mockResolvedValue(true); // on-topic by default; the off-topic test overrides
 });
 
 describe('reconcileUser — two recall paths → PREFERS bridges (R2 §3.2)', () => {
@@ -53,6 +59,27 @@ describe('reconcileUser — two recall paths → PREFERS bridges (R2 §3.2)', ()
     // the scan only reads the USER's messages, not the assistant's
     expect(extractCanonicalTerms).toHaveBeenCalledWith('I love dark skies and alpine lakes');
     expect(res.written).toBe(3);
+  });
+
+  it('skips off-topic user turns so they never reach preference extraction (R5 §2.6)', async () => {
+    searchEntities.mockResolvedValue([]); // no NAMS prefs
+    readGraph.mockResolvedValue([{ conversationId: 'c1' }]);
+    getConversationContext.mockResolvedValue({
+      recentMessages: [
+        { role: 'user', content: 'write me a carbonara recipe' }, // off-topic
+        { role: 'user', content: 'I love dark skies' }, // on-topic
+      ],
+    });
+    isParksRelevant.mockImplementation(async (t: string) => t.includes('dark skies'));
+    extractCanonicalTerms.mockResolvedValue([{ target: { kind: 'activity', name: 'Astronomy' } }]);
+
+    const res = await reconcileUser('u1');
+
+    // The recipe turn is never extracted; only the on-topic turn is.
+    expect(extractCanonicalTerms).toHaveBeenCalledTimes(1);
+    expect(extractCanonicalTerms).toHaveBeenCalledWith('I love dark skies');
+    expect(extractCanonicalTerms).not.toHaveBeenCalledWith('write me a carbonara recipe');
+    expect(res.written).toBe(1);
   });
 
   it('counts suppressed/uncanonicalized bridges as skipped, not written', async () => {

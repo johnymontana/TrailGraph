@@ -93,6 +93,35 @@ export function sunTimesFor(lat: number, lng: number, date: string): SunTimes {
   return { moonIllumination: a.moon.illuminationPct, darkHours: a.darkHours.hours };
 }
 
+export interface DarkestNight {
+  date: string; // YYYY-MM-DD of the best night in the window
+  astro: AstroEvents; // full astro for that night
+}
+
+/**
+ * Scan a date window [startYmd, endYmd] and return the best stargazing night — lowest moon illumination,
+ * tie-broken by most hours of astronomical darkness — with its full astro (R5 §2.3). Lets a dark-sky card
+ * for a *dated* trip reflect the trip's window instead of tonight. Inclusive of both ends; the loop is
+ * bounded to `capDays`. Pure/deterministic. Degenerate window (start > end) falls back to the start date.
+ */
+export function darkestNight(lat: number, lng: number, startYmd: string, endYmd: string, capDays = 62): DarkestNight {
+  const startMs = new Date(`${startYmd}T12:00:00Z`).getTime();
+  const endMs = new Date(`${endYmd}T12:00:00Z`).getTime();
+  const lastMs = Math.min(endMs, startMs + (capDays - 1) * 86_400_000);
+  let best: DarkestNight | null = null;
+  for (let ms = startMs; ms <= lastMs; ms += 86_400_000) {
+    const ymd = new Date(ms).toISOString().slice(0, 10);
+    const astro = getAstro(lat, lng, ymd);
+    const better =
+      !best ||
+      astro.moon.illuminationPct < best.astro.moon.illuminationPct ||
+      (astro.moon.illuminationPct === best.astro.moon.illuminationPct &&
+        (astro.darkHours.hours ?? 0) > (best.astro.darkHours.hours ?? 0));
+    if (better) best = { date: ymd, astro };
+  }
+  return best ?? { date: startYmd, astro: getAstro(lat, lng, startYmd) };
+}
+
 /** Moon ecliptic-longitude phase angle (0..360) → friendly name + emoji. Pure (unit-tested). */
 export function moonPhaseName(angleDeg: number): { name: string; emoji: string } {
   const a = ((angleDeg % 360) + 360) % 360;

@@ -109,6 +109,28 @@ export async function extractCanonicalTerms(text: string): Promise<{ value: stri
   return out;
 }
 
+// Obvious parks/trip signals that aren't in the activity/topic/amenity vocabulary but still mark a
+// message as on-topic. Kept broad on purpose — the gate favors inclusion (see isParksRelevant).
+const PARK_KEYWORDS = [
+  'park', 'parks', 'trail', 'trails', 'hike', 'hiking', 'camp', 'camping', 'campground', 'trip',
+  'trips', 'visit', 'national', 'nps', 'ranger', 'wilderness', 'canyon', 'mountain', 'mountains',
+  'lake', 'lakes', 'waterfall', 'waterfalls', 'monument', 'forest', 'desert', 'glacier', 'itinerary',
+];
+
+/**
+ * Relevance gate (R5 §2.6): is this message about parks/trips at all? True if it contains an obvious
+ * park keyword or any domain-vocabulary term. Used to keep off-topic turns (a recipe, a coding question)
+ * out of preference extraction so they don't pollute the memory graph. Conservative — favors inclusion
+ * when unsure (we'd rather over-extract a real preference than drop it); extraction is itself
+ * vocabulary-bounded, so this only filters wholesale off-topic turns.
+ */
+export async function isParksRelevant(text: string): Promise<boolean> {
+  if (!text?.trim()) return false;
+  const hay = ` ${text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ')} `;
+  if (PARK_KEYWORDS.some((kw) => hay.includes(` ${kw} `))) return true;
+  return (await extractCanonicalTerms(text)).length > 0;
+}
+
 /** For tests / refresh after a sync changes the vocabulary. */
 export function resetAliasCache() {
   cache = null;

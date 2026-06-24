@@ -66,6 +66,17 @@ export function ChatPanel() {
     const seenSig = new Set<string>();
     const nodes: ReactNode[] = [];
 
+    // Render only the LAST itinerary card per trip id (R5 §2.7): one trip build emits an itinerary_preview
+    // from build_itinerary, suggest_day_plan, add_stop, … — keep the most complete (last) one, drop the
+    // earlier near-duplicates. Draft proposals (no trip.id) are unaffected and fall through to seenSig.
+    const lastItinIdxByTrip = new Map<string, number>();
+    parts.forEach((part, j) => {
+      if (part.type !== 'dynamic-tool' || part.state !== 'output-available') return;
+      const out = part.output as { kind?: string; data?: { trip?: { id?: string } } } | undefined;
+      const tid = out?.kind === 'itinerary_preview' ? out?.data?.trip?.id : undefined;
+      if (tid) lastItinIdxByTrip.set(tid, j);
+    });
+
     // "How I worked" header (ADR §7.7): expose the tool calls as a disclosure pill, with reasoning
     // behind an optional nested toggle. Reasoning is NO LONGER rendered inline below — it lives in the
     // pill. Source = the stream parts, never model prose.
@@ -94,6 +105,11 @@ export function ChatPanel() {
           fresh.forEach((p) => seenParks.add(p.parkCode));
           if (fresh.length === 0) return;
           data = { ...data, parks: fresh, park: undefined };
+        }
+        // Skip all but the last itinerary card for a given trip id (R5 §2.7).
+        if (out.kind === 'itinerary_preview') {
+          const tid = (data as { trip?: { id?: string } } | undefined)?.trip?.id;
+          if (tid && lastItinIdxByTrip.get(tid) !== j) return;
         }
         if (!isRenderableToolOutput(out.kind, data)) return;
         const sig = out.kind + JSON.stringify(data ?? {});

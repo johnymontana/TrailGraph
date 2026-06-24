@@ -3,15 +3,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // tripCost is the pure-ish cost model on top of two readGraph calls; mock the I/O deps so the
 // fee-parsing + America-the-Beautiful break-even logic can be unit-tested without a DB.
 const readGraph = vi.fn();
-vi.mock('./neo4j', () => ({ readGraph: (...a: unknown[]) => readGraph(...a), writeGraph: vi.fn() }));
+const writeGraph = vi.fn().mockResolvedValue([]);
+vi.mock('./neo4j', () => ({
+  readGraph: (...a: unknown[]) => readGraph(...a),
+  writeGraph: (...a: unknown[]) => writeGraph(...a),
+}));
 vi.mock('./routing', () => ({ routing: {} }));
 vi.mock('./bridges', () => ({ considerPark: vi.fn() }));
 vi.mock('./conditions', () => ({ buildParkConditions: vi.fn() }));
 
-import { tripCost, tripConditions } from './trips';
+import { tripCost, tripConditions, createTrip } from './trips';
 import { buildParkConditions } from './conditions';
 
-beforeEach(() => readGraph.mockReset());
+beforeEach(() => {
+  readGraph.mockReset();
+  writeGraph.mockReset().mockResolvedValue([]);
+});
 
 describe('tripCost (P2 fees / break-even cost model)', () => {
   it('sums the max line per park and reports no AtB savings under $80', async () => {
@@ -61,6 +68,16 @@ describe('tripCost (P2 fees / break-even cost model)', () => {
     const c = await tripCost('u1', 't1');
     expect(c.perPark[0].fee).toBe(0);
     expect(c.total).toBe(0);
+  });
+});
+
+describe('createTrip (R5 §2.1 — decode model HTML entities at the write boundary)', () => {
+  it('stores a real ampersand, not the double-encoded entity', async () => {
+    await createTrip('u1', { name: 'Four Corners Ancestral Puebloan &amp; Dark Skies' });
+    // The name write is the writeGraph call whose params carry a `name`.
+    const nameCall = writeGraph.mock.calls.find((c) => (c[1] as { name?: string })?.name !== undefined);
+    expect(nameCall).toBeDefined();
+    expect((nameCall![1] as { name: string }).name).toBe('Four Corners Ancestral Puebloan & Dark Skies');
   });
 });
 

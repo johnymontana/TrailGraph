@@ -1,7 +1,7 @@
 import { readGraph } from './neo4j';
 import { memory } from './memory';
 import { writePreferenceBridge } from './bridges';
-import { extractCanonicalTerms } from './canonicalize';
+import { extractCanonicalTerms, isParksRelevant } from './canonicalize';
 
 /**
  * Async memory reconciliation (ADR-011 Path B + R2 §3.2). Two recall sources, both → canonical
@@ -32,10 +32,14 @@ export async function reconcileUser(userId: string): Promise<{ written: number; 
   ).catch(() => []);
   for (const { conversationId } of sessions) {
     const ctx = await memory.getConversationContext(userId, conversationId).catch(() => null);
-    const userText = (ctx?.recentMessages ?? []).filter((m) => m.role === 'user').map((m) => m.content).join('\n');
-    if (!userText) continue;
-    for (const { target } of await extractCanonicalTerms(userText)) {
-      await bridge(target.kind, target.name);
+    const userMessages = (ctx?.recentMessages ?? []).filter((m) => m.role === 'user');
+    for (const msg of userMessages) {
+      // Gate per message (R5 §2.6): skip off-topic turns (a recipe, a coding question) so they never
+      // pollute the preference graph — even if they coincidentally name a domain word.
+      if (!(await isParksRelevant(msg.content))) continue;
+      for (const { target } of await extractCanonicalTerms(msg.content)) {
+        await bridge(target.kind, target.name);
+      }
     }
   }
   return { written, skipped };
