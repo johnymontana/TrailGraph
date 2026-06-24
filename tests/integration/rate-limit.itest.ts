@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, it } from 'vitest';
 import { describeIntegration } from './db';
 import { rateLimit, peekRateLimit, isClamped, tripRunaway, pruneRateBuckets } from '../../lib/rate-limit';
-import { writeGraph, closeDriver } from '../../lib/neo4j';
+import { readGraph, writeGraph, closeDriver } from '../../lib/neo4j';
 
 /**
  * Real-Neo4j checks for the fixed-window limiter (audit C1/C5/C6). Needs the 007 migration applied
@@ -43,5 +43,19 @@ describeIntegration('rate limiter (Neo4j fixed-window)', () => {
     await pruneRateBuckets();
     const peeked = await peekRateLimit(key, 5, 60);
     expect(peeked.remaining).toBeLessThan(5);
+  });
+
+  it('pruneRateBuckets deletes expired buckets but keeps live ones', async () => {
+    // an already-expired bucket and a live one
+    await writeGraph(
+      `CREATE (:RateBucket {key:'itest:expired', widx: 1, count: 1, expiresAt: timestamp() - 1000})`,
+    );
+    await rateLimit('itest:livekey', 5, 60); // live bucket (expiresAt in the future)
+    const deleted = await pruneRateBuckets();
+    expect(deleted).toBeGreaterThanOrEqual(1);
+    const expired = await readGraph(`MATCH (b:RateBucket {key:'itest:expired'}) RETURN b`);
+    expect(expired.length).toBe(0); // gone
+    const live = await readGraph(`MATCH (b:RateBucket {key:'itest:livekey'}) RETURN b`);
+    expect(live.length).toBe(1); // survives
   });
 });

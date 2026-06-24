@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // exercised without a real DB (matches lib/queries.test.ts).
 vi.mock('./neo4j', () => ({ readGraph: vi.fn(), writeGraph: vi.fn() }));
 
-import { rateLimit, peekRateLimit, dailyQuota, rlUser, rlIp, clientIpFrom, isClamped } from './rate-limit';
+import { rateLimit, peekRateLimit, dailyQuota, rlUser, rlIp, clientIpFrom, isClamped, tripRunaway, pruneRateBuckets } from './rate-limit';
 import { readGraph, writeGraph } from './neo4j';
 
 const mockWrite = vi.mocked(writeGraph);
@@ -36,6 +36,22 @@ describe('rateLimit (Neo4j fixed-window)', () => {
     await rateLimit('k', 5, 60);
     const [, params] = mockWrite.mock.calls[0] as [string, Record<string, unknown>];
     expect(params).toMatchObject({ key: 'k', windowMs: 60_000 });
+  });
+
+  it('allows exactly `limit` hits then blocks (no off-by-one)', async () => {
+    for (let i = 1; i <= 6; i++) {
+      mockWrite.mockResolvedValueOnce([{ count: i, resetAt: 1000 }] as never);
+      const r = await rateLimit('k', 5, 60);
+      expect(r.ok).toBe(i <= 5); // counts 1..5 allowed, 6 blocked
+    }
+  });
+
+  it('peek and rateLimit agree at the boundary', async () => {
+    // After `limit` real hits the bucket count == limit; peek must report the NEXT hit as not allowed.
+    mockRead.mockResolvedValue([{ count: 5, resetAt: 1000 }] as never);
+    const peeked = await peekRateLimit('k', 5, 60);
+    expect(peeked.ok).toBe(false); // next (6th) hit would be blocked — matches rateLimit
+    expect(peeked.remaining).toBe(0);
   });
 });
 
@@ -78,5 +94,36 @@ describe('isClamped', () => {
     expect(await isClamped('u')).toBe(true);
     mockRead.mockResolvedValue([{ clamped: false }] as never);
     expect(await isClamped('u')).toBe(false);
+  });
+
+  it('defaults to not-clamped when the graph returns nothing', async () => {
+    mockRead.mockResolvedValue([] as never);
+    expect(await isClamped('u')).toBe(false);
+  });
+});
+
+describe('tripRunaway', () => {
+  it('upserts an :AgentClamp for the user with a future expiry', async () => {
+    mockWrite.mockResolvedValue([] as never);
+    await tripRunaway('user-1');
+    const [cypher, params] = mockWrite.mock.calls[0] as [string, Record<string, unknown>];
+    expect(cypher).toContain('AgentClamp');
+    expect(cypher).toContain('c.until = timestamp() + toInteger($ms)');
+    expect(params).toMatchObject({ userId: 'user-1' });
+    expect(params.ms).toBeGreaterThan(0);
+  });
+});
+
+describe('pruneRateBuckets', () => {
+  it('returns the number of expired buckets deleted', async () => {
+    mockWrite.mockResolvedValue([{ deleted: 7 }] as never);
+    expect(await pruneRateBuckets()).toBe(7);
+    const [cypher] = mockWrite.mock.calls[0] as [string];
+    expect(cypher).toContain('b.expiresAt < timestamp()');
+  });
+
+  it('returns 0 when nothing is expired', async () => {
+    mockWrite.mockResolvedValue([] as never);
+    expect(await pruneRateBuckets()).toBe(0);
   });
 });

@@ -26,6 +26,17 @@ describe('offTopicSteer (audit C4)', () => {
     }
   });
 
+  it('does not flag parks prompts that merely mention code-ish words casually', () => {
+    for (const m of [
+      'what is the dress code at the lodge?',
+      'is there cell service or a class II rapid on that river?',
+      'I want to write a journal about my trip',
+      'which park has the best programs for kids?',
+    ]) {
+      expect(offTopicSteer(m), m).toBeNull();
+    }
+  });
+
   it('ignores non-string / empty input', () => {
     expect(offTopicSteer(undefined)).toBeNull();
     expect(offTopicSteer('')).toBeNull();
