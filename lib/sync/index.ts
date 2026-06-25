@@ -47,6 +47,7 @@ import { embedPlaces, embedPeople, embedArticles } from './embed-nodes';
 import { deriveNear } from './derive-near';
 import { deriveSharedEdges } from './derive-shared';
 import { deriveLessonJoins } from './derive-lesson-joins';
+import { deriveLessonTopics } from './derive-lesson-topics';
 import { decomposeLessons } from './decompose-lessons';
 
 /**
@@ -349,6 +350,9 @@ export async function runSlowSync(): Promise<StepResult[]> {
   out.push(await step('derive-shared', 'slow', async () => deriveSharedEdges()));
   // Ranger School (F6 cross-feature join): (:LessonPlan)-[:CAN_USE_MEDIA]->(media ABOUT the same park).
   out.push(await step('derive-lesson-joins', 'slow', async () => deriveLessonJoins()));
+  // Ranger School: ground lesson plans + quizzes in their park's topics (NPS lessonplans carry none), so
+  // per-topic mastery/struggle tracking works across the catalog. Runs after decompose (needs the quizzes).
+  out.push(await step('derive-lesson-topics', 'slow', async () => deriveLessonTopics()));
 
   return out;
 }

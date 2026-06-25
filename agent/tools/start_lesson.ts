@@ -2,6 +2,7 @@ import { defineTool } from 'eve/tools';
 import { z } from 'zod';
 import { enrollIn } from '../../lib/learning-bridges';
 import { lessonPlanProgress } from '../../lib/learn-queries';
+import { awardEarnedBadges } from '../../lib/learn-badges';
 import { lessonPlansForPark } from '../../lib/queries';
 import { callerId } from '../../lib/agent-ctx';
 
@@ -33,9 +34,10 @@ export default defineTool({
     await enrollIn(userId, lessonPlanId);
     const progress = await lessonPlanProgress(userId, lessonPlanId);
     if (!progress) return { kind: 'lesson_card', data: { error: `Course ${lessonPlanId} not found.` } };
+    const earnedBadges = await awardEarnedBadges(userId); // e.g. "explorer" on a first enrollment
     return {
       kind: 'lesson_card',
-      data: { lessonPlanId, title: progress.title, enrolled: true, done: progress.done, total: progress.total, modules: progress.modules },
+      data: { lessonPlanId, title: progress.title, enrolled: true, done: progress.done, total: progress.total, modules: progress.modules, earnedBadges },
     };
   },
 });

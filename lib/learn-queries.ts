@@ -162,13 +162,30 @@ export interface LearnCourseCard {
   decomposed: boolean; // has a Module/Lesson spine (i.e. teachable now)
 }
 
+/** Grade-band → [minGrade, maxGrade] for the catalog filter (K=0). */
+export const GRADE_BANDS: Record<string, [number, number]> = {
+  'k-2': [0, 2],
+  '3-5': [3, 5],
+  '6-8': [6, 8],
+  '9-12': [9, 12],
+};
+
+/** Resolve a grade-band id to its [min,max] range, or null for an unknown/empty band. Pure. */
+export function gradeBandRange(band: string | null | undefined): [number, number] | null {
+  if (!band) return null;
+  return GRADE_BANDS[band.toLowerCase()] ?? null;
+}
+
 /**
- * Catalog of courses (lesson plans) across parks for `/learn`. Sorted decomposed-first (teachable courses
- * surface ahead of catalog-only ones), then by park + title for stable ordering.
+ * Catalog of courses (lesson plans) across parks for `/learn`, optionally filtered to a grade band. Sorted
+ * decomposed-first (teachable courses surface ahead of catalog-only ones), then by park + title.
  */
-export async function learnCatalog(limit = 60): Promise<LearnCourseCard[]> {
+export async function learnCatalog(limit = 60, gradeBand?: string): Promise<LearnCourseCard[]> {
+  const band = gradeBandRange(gradeBand);
   return readGraph<LearnCourseCard>(
     `MATCH (lp:LessonPlan)
+     WHERE $bandMin IS NULL OR (lp.gradeMin IS NOT NULL AND lp.gradeMax IS NOT NULL
+                                AND lp.gradeMin <= $bandMax AND lp.gradeMax >= $bandMin)
      OPTIONAL MATCH (lp)-[:ABOUT]->(p:Park)
      OPTIONAL MATCH (lp)-[:CONTAINS_MODULE]->(:Module)-[:CONTAINS_LESSON]->(l:Lesson)
      WITH lp, p, count(DISTINCT l) AS lessonCount
@@ -177,7 +194,7 @@ export async function learnCatalog(limit = 60): Promise<LearnCourseCard[]> {
             toInteger(lessonCount) AS lessonCount, lessonCount > 0 AS decomposed
      ORDER BY decomposed DESC, parkCode ASC, title ASC
      LIMIT toInteger($limit)`,
-    { limit },
+    { limit, bandMin: band?.[0] ?? null, bandMax: band?.[1] ?? null },
   );
 }
 
@@ -201,6 +218,48 @@ export async function certificateBySlug(slug: string): Promise<CertificateShare 
     { slug },
   );
   return rows[0] ?? null;
+}
+
+/**
+ * Sanitize a user search string into a safe Lucene prefix query for the `lessonplan_fulltext` index:
+ * lowercase, strip everything but letters/digits/spaces (no Lucene-operator injection), then prefix-wildcard
+ * each term ("Yellowstone Geology!" → "yellowstone* geology*"). Returns '' for an empty/punctuation-only
+ * query (caller falls back to the default catalog). Pure (unit-tested).
+ */
+export function toFulltextQuery(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((t) => `${t}*`)
+    .join(' ');
+}
+
+/**
+ * Search the course catalog by title/subject (fulltext, decomposed-first then by relevance). Falls back to
+ * `learnCatalog` for an empty query, so the catalog page can use one code path. Essential at scale — there
+ * are ~1,357 lesson plans.
+ */
+export async function searchCourses(rawQuery: string, opts: { limit?: number; gradeBand?: string } = {}): Promise<LearnCourseCard[]> {
+  const limit = opts.limit ?? 60;
+  const ft = toFulltextQuery(rawQuery);
+  if (!ft) return learnCatalog(limit, opts.gradeBand);
+  const band = gradeBandRange(opts.gradeBand);
+  return readGraph<LearnCourseCard>(
+    `CALL db.index.fulltext.queryNodes('lessonplan_fulltext', $ft) YIELD node AS lp, score
+     WHERE $bandMin IS NULL OR (lp.gradeMin IS NOT NULL AND lp.gradeMax IS NOT NULL
+                                AND lp.gradeMin <= $bandMax AND lp.gradeMax >= $bandMin)
+     OPTIONAL MATCH (lp)-[:ABOUT]->(p:Park)
+     OPTIONAL MATCH (lp)-[:CONTAINS_MODULE]->(:Module)-[:CONTAINS_LESSON]->(l:Lesson)
+     WITH lp, p, score, count(DISTINCT l) AS lessonCount
+     RETURN lp.id AS id, lp.title AS title, lp.subject AS subject, lp.gradeLevel AS gradeLevel,
+            p.parkCode AS parkCode, p.fullName AS parkName,
+            toInteger(lessonCount) AS lessonCount, lessonCount > 0 AS decomposed
+     ORDER BY decomposed DESC, score DESC
+     LIMIT toInteger($limit)`,
+    { ft, limit, bandMin: band?.[0] ?? null, bandMax: band?.[1] ?? null },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -254,16 +313,16 @@ export interface QuizGradeData {
   rationale: string | null;
   difficulty: string;
   lessonId: string;
-  topic: string | null; // null when the quiz has no TESTS topic (live NPS lessonplans carry no topics)
+  topics: string[]; // all TESTS topics (empty until deriveLessonTopics grounds the course in its park's topics)
 }
 
-/** SERVER-ONLY grading ground truth (`correctId` + rationale + the TESTS topic). Never sent to the client. */
+/** SERVER-ONLY grading ground truth (`correctId` + rationale + every TESTS topic). Never sent to the client. */
 export async function quizGradeData(quizId: string): Promise<QuizGradeData | null> {
   const rows = await readGraph<QuizGradeData>(
     `MATCH (q:QuizQuestion {id: $quizId})
      OPTIONAL MATCH (q)-[:TESTS]->(t:Topic)
      RETURN q.correctId AS correctId, q.rationale AS rationale, q.difficulty AS difficulty,
-            q.lessonId AS lessonId, t.name AS topic`,
+            q.lessonId AS lessonId, [x IN collect(DISTINCT t.name) WHERE x IS NOT NULL] AS topics`,
     { quizId },
   );
   return rows[0] ?? null;

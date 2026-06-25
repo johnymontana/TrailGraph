@@ -27,7 +27,40 @@ test('course syllabus shows the module + lesson spine', async ({ page }) => {
   await page.goto('/learn/lesson-yell-geology');
   await expect(page.getByRole('heading', { name: /Geology of Yellowstone/i })).toBeVisible();
   await expect(page.getByText(/Hotspot & Caldera/)).toBeVisible();
-  await expect(page.getByText(/The Yellowstone Hotspot/)).toBeVisible();
+  // Each lesson links to the player (the navigation fix); the link carries the player href.
+  const lessonLink = page.getByRole('link', { name: /The Yellowstone Hotspot/ });
+  await expect(lessonLink).toBeVisible();
+  await expect(lessonLink).toHaveAttribute('href', /\/learn\/lesson-yell-geology\/lesson-yell-geology/);
+});
+
+test('catalog search filters to matching courses', async ({ page }) => {
+  await page.goto('/learn?q=geology');
+  await expect(page.getByRole('heading', { name: /Results for/i })).toBeVisible();
+  await expect(page.getByText('Geology of Yellowstone')).toBeVisible();
+});
+
+test('catalog search with no matches shows an empty state', async ({ page }) => {
+  await page.goto('/learn?q=zzqqxxnomatchterm');
+  await expect(page.getByText(/No courses match/i)).toBeVisible();
+});
+
+test('grade-band filter narrows the catalog (seed course is grade 6-8)', async ({ page }) => {
+  await page.goto('/learn?grade=6-8');
+  await expect(page.getByText('Geology of Yellowstone')).toBeVisible();
+  // the seed course is 6-8, so the K-2 band is empty
+  await page.goto('/learn?grade=k-2');
+  await expect(page.getByText(/No courses in this grade band/i)).toBeVisible();
+});
+
+test('certificate page offers a copy-link button', async ({ page }) => {
+  await page.goto('/learn/cert/test0123456789abcd');
+  await expect(page.getByRole('button', { name: /Copy share link/i })).toBeVisible();
+});
+
+test('park page surfaces its Ranger School courses (discovery)', async ({ page }) => {
+  await page.goto('/parks/yell');
+  await expect(page.getByRole('heading', { name: 'Ranger School', exact: true })).toBeVisible();
+  await expect(page.getByText('Geology of Yellowstone')).toBeVisible();
 });
 
 test('certificate share page renders a seeded certificate (public, no auth)', async ({ page }) => {

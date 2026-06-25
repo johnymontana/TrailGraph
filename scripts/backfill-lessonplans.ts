@@ -13,6 +13,7 @@ import '../lib/load-env';
 import { fetchAll, type NpsLessonPlan } from '../lib/nps';
 import { upsertLessonPlans } from '../lib/sync/upserts';
 import { deriveLessonJoins } from '../lib/sync/derive-lesson-joins';
+import { deriveLessonTopics } from '../lib/sync/derive-lesson-topics';
 import { decomposeLessons } from '../lib/sync/decompose-lessons';
 import { readGraph, closeDriver } from '../lib/neo4j';
 
@@ -48,6 +49,10 @@ async function main() {
   } else {
     console.log(`[backfill] DECOMPOSE_LESSONPLANS not set — skipped decompose`);
   }
+
+  // Ground lesson plans + quizzes in their park's topics (after decompose, so the quizzes exist).
+  const topics = await deriveLessonTopics();
+  console.log(`[backfill] deriveLessonTopics → ${topics.linkedPlans} plans, ${topics.relatesEdges} RELATES_TO_TOPIC, ${topics.testsEdges} TESTS edges`);
 
   await closeDriver();
   console.log(`[backfill] done.`);

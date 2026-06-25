@@ -616,6 +616,7 @@ function LessonCard({ data }: { data: Record<string, unknown> }) {
             </Box>
           ))}
         </Stack>
+        <EarnedBadges ids={data.earnedBadges} />
       </Card.Body>
     </Card.Root>
   );
@@ -708,6 +709,20 @@ function QuizCard({ data, onAnswer }: { data: Record<string, unknown>; onAnswer?
   );
 }
 
+/** Newly-earned badge chips (surfaced by start_lesson / grade_answer / recommend_next). Renders nothing when empty. */
+function EarnedBadges({ ids }: { ids?: unknown }) {
+  const list = (Array.isArray(ids) ? ids : []) as string[];
+  if (!list.length) return null;
+  return (
+    <HStack gap={1} mt={2} wrap="wrap">
+      <Text fontSize="sm">🏅 New badge{list.length > 1 ? 's' : ''}:</Text>
+      {list.map((b) => (
+        <Badge key={b} colorPalette="trail">{b}</Badge>
+      ))}
+    </HStack>
+  );
+}
+
 /** Deterministic grading feedback (grade_answer): green/red + the lesson's cited rationale + topic mastery. */
 function QuizFeedbackCard({ data }: { data: Record<string, unknown> }) {
   const correct = data.correct as boolean | undefined;
@@ -723,6 +738,7 @@ function QuizFeedbackCard({ data }: { data: Record<string, unknown> }) {
         {typeof mastery === 'number' ? (
           <Text fontSize="xs" color="fg.muted" mt={2}>Topic mastery: {Math.round(mastery * 100)}%</Text>
         ) : null}
+        <EarnedBadges ids={data.earnedBadges} />
       </Card.Body>
     </Card.Root>
   );
@@ -732,7 +748,6 @@ function QuizFeedbackCard({ data }: { data: Record<string, unknown> }) {
 function NextStepCard({ data }: { data: Record<string, unknown> }) {
   const rec = data.recommendation as string | undefined;
   const reason = data.reason as string | undefined;
-  const earnedBadge = data.earnedBadge as string | null | undefined;
   const cert = data.certificate as { shareSlug?: string } | null | undefined;
   const label = rec === 'complete' ? '🎓 Course complete' : rec === 'remediate' ? '🔁 Review' : '➡️ Next up';
   const palette = rec === 'complete' ? 'pine' : rec === 'remediate' ? 'sand' : 'trail';
@@ -744,9 +759,7 @@ function NextStepCard({ data }: { data: Record<string, unknown> }) {
           {rec ? <Badge colorPalette={palette} size="sm">{rec}</Badge> : null}
         </HStack>
         {reason ? <Text fontSize="sm">{reason}</Text> : null}
-        {earnedBadge ? (
-          <Text fontSize="sm" mt={2}>🏅 Badge earned: <Badge colorPalette="trail">{earnedBadge}</Badge></Text>
-        ) : null}
+        <EarnedBadges ids={data.earnedBadges} />
         {cert?.shareSlug ? (
           <Text fontSize="sm" mt={2}>📜 <CLink href={`/learn/cert/${cert.shareSlug}`} color="brand.fg">View &amp; share your certificate ↗</CLink></Text>
         ) : null}

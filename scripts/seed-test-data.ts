@@ -17,6 +17,7 @@ export async function seedTestData(): Promise<void> {
     MERGE (hike:Activity {id:'act-hike'}) SET hike.name='Hiking'
     MERGE (lakes:Topic {id:'top-lakes'}) SET lakes.name='Lakes'
     MERGE (volc:Topic {id:'top-volc'}) SET volc.name='Volcanoes'
+    MERGE (geol:Topic {id:'top-geology'}) SET geol.name='Geology'
     // Parks
     MERGE (yell:Park {parkCode:'yell'})
       SET yell.name='Yellowstone', yell.fullName='Yellowstone National Park',
@@ -41,7 +42,7 @@ export async function seedTestData(): Promise<void> {
     // Relationships
     MERGE (yell)-[:LOCATED_IN]->(wy) MERGE (yell)-[:LOCATED_IN]->(mt)
     MERGE (grca)-[:LOCATED_IN]->(az) MERGE (glac)-[:LOCATED_IN]->(mt)
-    MERGE (yell)-[:OFFERS]->(hike) MERGE (yell)-[:HAS_TOPIC]->(volc)
+    MERGE (yell)-[:OFFERS]->(hike) MERGE (yell)-[:HAS_TOPIC]->(volc) MERGE (yell)-[:HAS_TOPIC]->(geol)
     MERGE (grca)-[:OFFERS]->(astro) MERGE (grca)-[:OFFERS]->(hike)
     MERGE (glac)-[:OFFERS]->(astro) MERGE (glac)-[:OFFERS]->(hike) MERGE (glac)-[:HAS_TOPIC]->(lakes)
     // Campground in Yellowstone

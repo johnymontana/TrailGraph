@@ -1,7 +1,8 @@
 import { defineTool } from 'eve/tools';
 import { z } from 'zod';
 import { lessonContent, lessonPlanProgress, masteryByTopic } from '../../lib/learn-queries';
-import { earnBadge, issueCertificate } from '../../lib/learning-bridges';
+import { issueCertificate } from '../../lib/learning-bridges';
+import { awardEarnedBadges } from '../../lib/learn-badges';
 import { callerId } from '../../lib/agent-ctx';
 
 /**
@@ -28,7 +29,7 @@ export default defineTool({
       const mastery = await masteryByTopic(userId, lc.lessonPlanId);
       const avg = mastery.length ? mastery.reduce((s, m) => s + m.mastery, 0) / mastery.length : 1;
       const certificate = await issueCertificate(userId, lc.lessonPlanId, avg);
-      const earnedBadge = (await earnBadge(userId, 'ranger')) ? 'ranger' : null;
+      const earnedBadges = await awardEarnedBadges(userId); // ranger now, senior-ranger at the 3rd course
       return {
         kind: 'next_step_card',
         data: {
@@ -36,7 +37,7 @@ export default defineTool({
           lessonPlanId: lc.lessonPlanId,
           courseTitle: progress.title,
           certificate,
-          earnedBadge,
+          earnedBadges,
           reason: `You completed all ${progress.total} lessons of "${progress.title}".`,
         },
       };

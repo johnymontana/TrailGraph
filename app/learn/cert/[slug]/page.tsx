@@ -2,6 +2,7 @@ import { Box, Container, Heading, Stack, Text } from '@chakra-ui/react';
 import { notFound } from 'next/navigation';
 import { heroContourTexture } from '../../../../theme/textures';
 import { certificateBySlug } from '../../../../lib/learn-queries';
+import { CopyLinkButton } from '../../../../components/learn/CopyLinkButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,6 +50,9 @@ export default async function CertificatePage({ params }: { params: Promise<{ sl
             </Box>
           ) : null}
         </Stack>
+        <Box mt={10}>
+          <CopyLinkButton />
+        </Box>
       </Box>
     </Container>
   );

@@ -1,4 +1,4 @@
-import { Badge, Box, Flex, HStack, Heading, Stack, Text, Link as CLink } from '@chakra-ui/react';
+import { Badge, Box, Button, Flex, HStack, Heading, Stack, Text, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getServerUserId } from '../../../../lib/session';
@@ -33,6 +33,11 @@ export default async function LessonPlayerPage({
   const audio = content.context?.media.audio ?? [];
   const parkName = content.context?.park?.fullName ?? null;
   const lessonHref = (id: string) => `/learn/${encodeURIComponent(lessonPlanId)}/${encodeURIComponent(id)}`;
+  // Linear prev/next across the flattened course spine.
+  const flatLessons = progress.modules.flatMap((m) => m.lessons);
+  const idx = flatLessons.findIndex((l) => l.id === lessonId);
+  const prevLesson = idx > 0 ? flatLessons[idx - 1] : null;
+  const nextLesson = idx >= 0 && idx < flatLessons.length - 1 ? flatLessons[idx + 1] : null;
 
   // Lesson-seeded tutor prompts: the lessonId is embedded so the model grounds tutor_step/generate_quiz.
   const suggestions = [
@@ -104,6 +109,32 @@ export default async function LessonPlayerPage({
           Ask the Ranger on the right to teach this lesson, quiz you, and track your progress — everything is
           grounded in this course. Openness and accessibility are reported by the park; verify before a visit.
         </Text>
+
+        {/* Linear prev/next across the course */}
+        <HStack justify="space-between" mt={10} gap={3}>
+          {prevLesson ? (
+            <CLink asChild _hover={{ textDecoration: 'none' }}>
+              <NextLink href={lessonHref(prevLesson.id)}>
+                <Button variant="outline" colorPalette="pine" maxW="48%">
+                  <Text lineClamp={1}>← {prevLesson.title}</Text>
+                </Button>
+              </NextLink>
+            </CLink>
+          ) : (
+            <Box />
+          )}
+          {nextLesson ? (
+            <CLink asChild _hover={{ textDecoration: 'none' }}>
+              <NextLink href={lessonHref(nextLesson.id)}>
+                <Button colorPalette="pine" maxW="48%">
+                  <Text lineClamp={1}>{nextLesson.title} →</Text>
+                </Button>
+              </NextLink>
+            </CLink>
+          ) : (
+            <Box />
+          )}
+        </HStack>
       </Box>
 
       {/* Right: lesson-seeded tutor chat (mounted exactly once) */}

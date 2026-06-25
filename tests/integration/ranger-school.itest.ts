@@ -1,7 +1,7 @@
 import { it, expect, beforeAll, afterAll } from 'vitest';
 import { describeIntegration } from './db';
 import { seedTestData } from '../../scripts/seed-test-data';
-import { closeDriver, writeGraph } from '../../lib/neo4j';
+import { closeDriver, writeGraph, readGraph } from '../../lib/neo4j';
 import {
   enrollIn,
   completeLesson,
@@ -21,8 +21,11 @@ import {
   lessonContent,
   learnCatalog,
   certificateBySlug,
+  searchCourses,
 } from '../../lib/learn-queries';
 import { reconcileUserLearning } from '../../lib/reconcile-memory';
+import { deriveLessonTopics } from '../../lib/sync/derive-lesson-topics';
+import { awardEarnedBadges } from '../../lib/learn-badges';
 
 /**
  * Ranger School Phase 3 — learning bridges + progress/mastery reads, against the seeded
@@ -104,6 +107,15 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
     expect(second!.score).toBe(first!.score);
   });
 
+  it('Phase 6: awardEarnedBadges grants milestone badges (explorer + cadet + ranger) and is idempotent', async () => {
+    // By now this user has enrolled (test 1), completed a lesson (test 1), and issued a certificate (above).
+    const newly = await awardEarnedBadges(userId);
+    expect(newly).toEqual(expect.arrayContaining(['explorer', 'ranger'])); // cadet was earned directly earlier
+    const have = (await getLearningMemory(userId)).badges.map((b) => b.id);
+    expect(have).toEqual(expect.arrayContaining(['explorer', 'cadet', 'ranger']));
+    expect(await awardEarnedBadges(userId)).toEqual([]); // idempotent — nothing new on a re-run
+  });
+
   it('deleteStruggle tombstones the topic so reconcile will not resurrect it', async () => {
     await deleteStruggle(userId, 'Volcanoes');
     let mem = await getLearningMemory(userId);
@@ -125,7 +137,7 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
 
     const grade = await quizGradeData(QUIZ);
     expect(grade!.correctId).toBe('hotspot');
-    expect(grade!.topic).toBe('Volcanoes');
+    expect(grade!.topics).toContain('Volcanoes');
 
     const picked = await pickQuizForLesson(LESSON, 'easy');
     expect(picked!.id).toBe(QUIZ);
@@ -156,6 +168,24 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
     expect(await certificateBySlug('nope-not-a-real-slug')).toBeNull();
   });
 
+  it('Phase 5: searchCourses fulltext finds the seeded course; empty query falls back to the catalog', async () => {
+    const hits = await searchCourses('geology');
+    expect(hits.some((c) => c.id === LP)).toBe(true);
+    // a no-match query returns nothing (not an error)
+    expect(await searchCourses('zzqqxxnomatchterm')).toEqual([]);
+    // an empty / punctuation-only query falls back to the full catalog
+    const fallback = await searchCourses('   ');
+    expect(fallback.some((c) => c.id === LP)).toBe(true);
+  });
+
+  it('Phase 6: grade-band filter (the seed course is grade 6-8) on learnCatalog + searchCourses', async () => {
+    // 6-8 includes the seeded course; k-2 excludes it.
+    expect((await learnCatalog(60, '6-8')).some((c) => c.id === LP)).toBe(true);
+    expect((await learnCatalog(60, 'k-2')).some((c) => c.id === LP)).toBe(false);
+    expect((await searchCourses('geology', { gradeBand: '6-8' })).some((c) => c.id === LP)).toBe(true);
+    expect((await searchCourses('geology', { gradeBand: 'k-2' })).some((c) => c.id === LP)).toBe(false);
+  });
+
   it('lessonPlanProgress keeps a module with zero lessons (split OPTIONAL MATCH, not dropped)', async () => {
     const planId = `test-rs-emptymod-${userId}`;
     await writeGraph(
@@ -173,5 +203,26 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
       `MATCH (lp:LessonPlan {id: $planId}) OPTIONAL MATCH (lp)-[:CONTAINS_MODULE]->(m:Module) DETACH DELETE lp, m`,
       { planId },
     );
+  });
+
+  // Runs LAST: deriveLessonTopics adds 'Geology' to the seeded quiz's TESTS, which would perturb the
+  // earlier Volcanoes-specific assertions if it ran first.
+  it('Phase 6: deriveLessonTopics grounds the course in its park topic + backfills quiz TESTS edges', async () => {
+    // The seed's "Geology of Yellowstone" is ABOUT yell, which HAS_TOPIC Geology — so the title matches.
+    const res = await deriveLessonTopics();
+    expect(res.linkedPlans).toBeGreaterThanOrEqual(1);
+    expect(res.relatesEdges).toBeGreaterThanOrEqual(1);
+
+    const rows = await readGraph<{ relates: boolean; tests: boolean }>(
+      `RETURN EXISTS { (:LessonPlan {id:$lp})-[:RELATES_TO_TOPIC]->(:Topic {name:'Geology'}) } AS relates,
+              EXISTS { (:QuizQuestion {id:$q})-[:TESTS]->(:Topic {name:'Geology'}) } AS tests`,
+      { lp: LP, q: QUIZ },
+    );
+    expect(rows[0].relates).toBe(true); // lesson plan grounded in its park's Geology topic
+    expect(rows[0].tests).toBe(true); // and the quiz's TESTS edge backfilled
+
+    // quizGradeData now surfaces it (alongside the seed's Volcanoes) for mastery tracking.
+    const grade = await quizGradeData(QUIZ);
+    expect(grade!.topics).toContain('Geology');
   });
 });
