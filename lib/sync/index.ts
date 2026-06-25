@@ -332,7 +332,9 @@ export async function runSlowSync(): Promise<StepResult[]> {
     await pagedStep<NpsLessonPlan>(
       'lessonplans',
       'lessonplans',
-      ['questionObjective', 'objective', 'durationInMinutes', 'commonCore', 'image', 'images', 'relatedParks', 'topics'],
+      // NPS /lessonplans supports: questionObjective, commonCore (+ default parks/duration/gradeLevel/subject).
+      // It does NOT return objective/durationInMinutes/topics/image/relatedParks for this resource.
+      ['questionObjective', 'commonCore', 'parks', 'duration'],
       upsertLessonPlans,
     ),
   );

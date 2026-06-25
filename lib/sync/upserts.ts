@@ -1144,6 +1144,25 @@ export function parseGradeBand(gradeLevel: string | null | undefined): { min: nu
 }
 
 /**
+ * NPS `commonCore` is either a narrative string OR a structured object
+ * (`{additionalStandards, elaStandards, stateStandards, mathStandards}`, values string|string[]). Flatten
+ * to a single queryable string (a Neo4j property can't be a Map). Pure (unit-tested); null when empty.
+ */
+export function parseStandards(commonCore: unknown): string | null {
+  if (commonCore == null) return null;
+  if (typeof commonCore === 'string') return commonCore.trim() || null;
+  if (typeof commonCore === 'object') {
+    const parts: string[] = [];
+    for (const v of Object.values(commonCore as Record<string, unknown>)) {
+      if (typeof v === 'string' && v.trim()) parts.push(v.trim());
+      else if (Array.isArray(v)) for (const x of v) if (typeof x === 'string' && x.trim()) parts.push(x.trim());
+    }
+    return parts.join('; ') || null;
+  }
+  return null;
+}
+
+/**
  * Lesson plans (educator content for "Ranger School"): `(:LessonPlan)-[:ABOUT]->(:Park)` + RELATES_TO_TOPIC.
  * Captures the essential question, objective, duration, grade band, standards, and image so the courseware
  * can build park-grounded lessons. Idempotent.
@@ -1164,10 +1183,14 @@ export async function upsertLessonPlans(items: NpsLessonPlan[]): Promise<number>
       gradeBandLabel: gradeBandId ? `Grades ${band.min}–${band.max}` : null,
       subject: l.subject ?? null,
       objective: l.questionObjective ?? l.objective ?? null,
-      durationMin: countOf(l.durationInMinutes) || null,
-      standards: l.commonCore ?? null,
+      durationMin: countOf(l.durationInMinutes) || countOf((typeof l.duration === 'string' ? l.duration.match(/\d+/)?.[0] : undefined)) || null,
+      standards: parseStandards(l.commonCore),
       image: l.image?.url ?? (l.images ?? [])[0]?.url ?? null,
-      parkCodes: (l.relatedParks ?? []).map((rp) => rp.parkCode).filter(Boolean),
+      // NPS /lessonplans uses `parks` (array of park-code strings); keep relatedParks as a fallback for safety.
+      parkCodes: [
+        ...(Array.isArray(l.parks) ? l.parks : []),
+        ...(l.relatedParks ?? []).map((rp) => rp.parkCode),
+      ].filter((pc): pc is string => typeof pc === 'string' && pc.length > 0),
       topics: (l.topics ?? []).map((t) => ({ id: t.id, name: t.name })),
     };
   });

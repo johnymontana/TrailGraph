@@ -221,7 +221,7 @@ interface LessonPlanRow {
  * `generated` (decomposed this run), `skipped` (unchanged or too thin to decompose), `failed`
  * (model/parse error — logged, non-fatal, retried next run).
  */
-export async function decomposeLessons(): Promise<{ generated: number; skipped: number; failed: number }> {
+export async function decomposeLessons(limit?: number): Promise<{ generated: number; skipped: number; failed: number }> {
   const rows = await readGraph<LessonPlanRow>(
     `MATCH (lp:LessonPlan)
      OPTIONAL MATCH (lp)-[:CONTAINS_MODULE]->(m:Module)
@@ -266,6 +266,7 @@ export async function decomposeLessons(): Promise<{ generated: number; skipped: 
     }
     await persist(lp.id, modules);
     generated++;
+    if (limit && generated >= limit) break; // batch cap for cost-controlled backfills (cron passes none → all)
   }
 
   return { generated, skipped, failed };

@@ -16,6 +16,7 @@ import {
   extractParkingDetail,
   extractContacts,
   parseGradeBand,
+  parseStandards,
   upsertOperatingHoursForOwners,
   upsertEntranceFees,
 } from './upserts';
@@ -282,6 +283,27 @@ describe('parseGradeBand (Ranger School lesson plans)', () => {
   it('returns nulls for missing/unknown', () => {
     expect(parseGradeBand(null)).toEqual({ min: null, max: null });
     expect(parseGradeBand('All ages')).toEqual({ min: null, max: null });
+  });
+});
+
+describe('parseStandards (Ranger School lesson plans — commonCore string or object)', () => {
+  it('passes through a narrative string', () => {
+    expect(parseStandards('CCSS.ELA-LITERACY.RST.6-8.4')).toBe('CCSS.ELA-LITERACY.RST.6-8.4');
+  });
+  it('flattens the NPS {…Standards} object (strings + arrays), dropping empties', () => {
+    expect(
+      parseStandards({
+        additionalStandards: '',
+        elaStandards: [],
+        stateStandards: 'SC.4.L.17 SC.5.L.15',
+        mathStandards: ['MATH.A', 'MATH.B'],
+      }),
+    ).toBe('SC.4.L.17 SC.5.L.15; MATH.A; MATH.B');
+  });
+  it('returns null for empty/missing', () => {
+    expect(parseStandards(null)).toBeNull();
+    expect(parseStandards('   ')).toBeNull();
+    expect(parseStandards({ additionalStandards: '', elaStandards: [] })).toBeNull();
   });
 });
 
