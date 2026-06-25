@@ -19,7 +19,12 @@ export default async function LessonPlayerPage({
 }: {
   params: Promise<{ lessonPlanId: string; lessonId: string }>;
 }) {
-  const { lessonPlanId, lessonId } = await params;
+  const { lessonPlanId: rawPlanId, lessonId: rawLessonId } = await params;
+  // Next hands back URL-ENCODED dynamic segments in production builds, and our lesson IDs contain ':'
+  // (deterministic "<planId>:m<i>:l<j>") which arrives as %3A — decode so the graph lookups match.
+  // (decodeURIComponent is a no-op on an already-decoded value, e.g. in dev.)
+  const lessonPlanId = decodeURIComponent(rawPlanId);
+  const lessonId = decodeURIComponent(rawLessonId);
   const userId = await getServerUserId();
   if (!userId) redirect('/signin');
 
