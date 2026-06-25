@@ -42,9 +42,10 @@ export async function getLearningMemory(userId: string): Promise<LearningMemory>
      OPTIONAL MATCH (u)-[:EARNED]->(b:Badge)
      WITH u, enrolled, completedLessons, struggling, mastery, collect(DISTINCT {id: b.id, label: b.label, tier: b.tier}) AS badges
      OPTIONAL MATCH (u)-[:ISSUED]->(c:Certificate)
+     OPTIONAL MATCH (clp:LessonPlan {id: c.lessonPlanId})
      RETURN enrolled, completedLessons, struggling, mastery, badges,
             collect(DISTINCT {lessonPlanId: c.lessonPlanId,
-                              courseTitle: head([(lp:LessonPlan {id: c.lessonPlanId}) | lp.title]),
+                              courseTitle: clp.title,
                               shareSlug: c.shareSlug, score: c.score, issuedAt: toString(c.issuedAt)}) AS certificates`,
     { userId },
   );

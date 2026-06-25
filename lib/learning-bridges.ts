@@ -145,6 +145,7 @@ export async function earnBadge(userId: string, badgeId: string): Promise<boolea
   const rows = await writeGraph<{ newlyEarned: boolean }>(
     `MATCH (b:Badge {id: $badgeId})
      MERGE (u:User {userId: $userId})
+     WITH b, u
      OPTIONAL MATCH (u)-[pre:EARNED]->(b)
      WITH b, u, pre IS NOT NULL AS already
      MERGE (u)-[e:EARNED]->(b)

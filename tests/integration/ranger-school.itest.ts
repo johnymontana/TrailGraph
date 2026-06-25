@@ -135,9 +135,13 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
     const client = await quizForClient(QUIZ);
     expect(client).not.toBeNull();
     expect(client!.choices.length).toBeGreaterThanOrEqual(2);
-    // anti-cheat: the client payload must never carry the answer key
+    // anti-cheat: the client payload must never carry the answer key.
     expect((client as unknown as Record<string, unknown>).correctId).toBeUndefined();
-    expect(JSON.stringify(client)).not.toContain('hotspot');
+    // choices expose only id + label — no per-choice "correct" flag leaks the answer. (A substring scan
+    // for the correctId value can't work: it's also a visible choice id like "hotspot".)
+    for (const ch of client!.choices) {
+      expect(Object.keys(ch).sort()).toEqual(['id', 'label']);
+    }
 
     const grade = await quizGradeData(QUIZ);
     expect(grade!.correctId).toBe('hotspot');
