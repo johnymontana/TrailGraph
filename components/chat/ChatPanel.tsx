@@ -8,11 +8,23 @@ import { Markdown } from './Markdown';
 import { ToolActivityPill } from './ToolActivityPill';
 import { summarizeActivity, type ActivityPart } from '../../lib/tool-activity';
 
-const SUGGESTIONS = [
+const DEFAULT_SUGGESTIONS = [
   '4 days, mountains and easy hikes near Montana',
   'A dark-sky road trip in Utah',
   'Fewer crowds, waterfalls, kid-friendly',
 ];
+
+export interface ChatPanelProps {
+  /** Starter prompt chips on the empty state (e.g. lesson-seeded tutor prompts for the lesson player). */
+  suggestions?: string[];
+  /** Header identity (defaults to "The Ranger" / "Plans around what you love"). */
+  title?: string;
+  subtitle?: string;
+  /** Empty-state lead line. */
+  emptyHint?: string;
+  /** Input placeholder. */
+  placeholder?: string;
+}
 
 /**
  * Ranger chat (D1, D5) via Eve's native client, same-origin so the Better Auth cookie flows (R4).
@@ -20,8 +32,15 @@ const SUGGESTIONS = [
  *   incomplete `**`/`#` tokens don't flash (R2 §3.4).
  * - De-dupes park cards by parkCode across ALL tool outputs in a message (R2 §2.3).
  * - Never shows an empty Ranger turn — falls back to a notice if nothing rendered (R2 §3.1).
+ * Optional props let the Ranger School lesson player reuse it as a lesson-seeded tutor (no fork).
  */
-export function ChatPanel() {
+export function ChatPanel({
+  suggestions = DEFAULT_SUGGESTIONS,
+  title = 'The Ranger',
+  subtitle = 'Plans around what you love',
+  emptyHint = 'Ask the ranger to plan a trip, find parks, or check conditions.',
+  placeholder = 'Plan a trip with the ranger…',
+}: ChatPanelProps = {}) {
   const agent = useEveAgent();
   const [input, setInput] = useState('');
   const busy = agent.status === 'submitted' || agent.status === 'streaming';
@@ -136,17 +155,17 @@ export function ChatPanel() {
           <Icon as={LuSparkles} boxSize={4} />
         </Box>
         <Box>
-          <Text fontSize="sm" fontWeight="semibold" fontFamily="heading" lineHeight="1.1">The Ranger</Text>
-          <Text fontSize="xs" color="fg.muted" lineHeight="1.1">Plans around what you love</Text>
+          <Text fontSize="sm" fontWeight="semibold" fontFamily="heading" lineHeight="1.1">{title}</Text>
+          <Text fontSize="xs" color="fg.muted" lineHeight="1.1">{subtitle}</Text>
         </Box>
       </HStack>
 
       <Stack flex="1" overflowY="auto" gap={5} p={4} minW={0}>
         {messages.length === 0 ? (
           <Stack gap={3} color="fg.muted" pt={4}>
-            <Text>Ask the ranger to plan a trip, find parks, or check conditions.</Text>
+            <Text>{emptyHint}</Text>
             <Stack gap={2} align="start">
-              {SUGGESTIONS.map((s) => (
+              {suggestions.map((s) => (
                 <Badge
                   key={s}
                   as="button"
@@ -230,7 +249,7 @@ export function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
-          placeholder="Plan a trip with the ranger…"
+          placeholder={placeholder}
           disabled={busy}
           borderRadius="full"
           bg="bg.canvas"

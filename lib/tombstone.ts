@@ -11,6 +11,16 @@ export function preferenceSignature(kind: string, name: string): string {
   return `pref:${kind}:${name.trim().toLowerCase()}`;
 }
 
+/**
+ * Tombstone signature for a Ranger School learning fact. Namespaced under `learn:` and qualified by a
+ * COMPOUND kind (e.g. 'struggle:topic', 'earned:badge') so it can never collide with a preference
+ * signature (`pref:…`) or across learning kinds — the documented collision risk once Module/Badge kinds
+ * exist (RANGER_SCHOOL_DESIGN.md §5). Mirrors `preferenceSignature`.
+ */
+export function learningSignature(kind: string, name: string): string {
+  return `learn:${kind}:${name.trim().toLowerCase()}`;
+}
+
 export async function suppress(userId: string, signature: string): Promise<void> {
   await writeGraph(
     `MERGE (u:User {userId:$userId})

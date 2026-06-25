@@ -27,5 +27,11 @@ export function isRenderableToolOutput(kind: string, data: unknown): boolean {
   if (kind === 'digest_card') return Array.isArray(d.items); // render even when empty ("all clear")
   if (kind === 'why_this') return ((d.prefPaths as unknown[])?.length ?? 0) > 0 || ((d.constraints as unknown[])?.length ?? 0) > 0 || !!d.park;
   if (kind === 'question_card') return typeof d.prompt === 'string' && ((d.options as unknown[])?.length ?? 0) > 0;
+  // Ranger School (Phase 4) tutor cards
+  if (kind === 'lesson_card') return Array.isArray(d.modules) || Array.isArray(d.courses) || !!d.lessonPlanId;
+  if (kind === 'explanation_card') return !!d.title || !!d.objective || !!d.narrative;
+  if (kind === 'quiz_card') return typeof d.stem === 'string' && ((d.choices as unknown[])?.length ?? 0) > 0;
+  if (kind === 'quiz_feedback_card') return typeof d.correct === 'boolean';
+  if (kind === 'next_step_card') return !!d.recommendation;
   return false;
 }

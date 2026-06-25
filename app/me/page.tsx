@@ -3,9 +3,12 @@ import NextLink from 'next/link';
 import { LuBrain } from 'react-icons/lu';
 import { getServerUserId } from '../../lib/session';
 import { getUserMemory, userContextGraph } from '../../lib/memory-graph';
+import { getLearningMemory } from '../../lib/learn-queries';
+import { allBadges } from '../../lib/learn-badges';
 import { MemoryList } from '../../components/memory/MemoryList';
 import { ContextGraph } from '../../components/memory/ContextGraph';
 import { CollectivePanel } from '../../components/memory/CollectivePanel';
+import { LearningSummary } from '../../components/learn/LearningSummary';
 import { DigestInbox } from '../../components/inbox/DigestInbox';
 import { PageHeader } from '../../components/ui/page-header';
 import { EmptyState } from '../../components/ui/empty-state';
@@ -30,7 +33,12 @@ export default async function MePage() {
       </Box>
     );
   }
-  const [memory, context] = await Promise.all([getUserMemory(userId), userContextGraph(userId).catch(() => null)]);
+  const [memory, context, learning, badges] = await Promise.all([
+    getUserMemory(userId),
+    userContextGraph(userId).catch(() => null),
+    getLearningMemory(userId),
+    allBadges(),
+  ]);
   return (
     <Box>
       <PageHeader
@@ -42,6 +50,7 @@ export default async function MePage() {
       <Container maxW="3xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 10 }}>
         {context ? <ContextGraph nodes={context.nodes} rels={context.rels} /> : null}
         <MemoryList initial={memory} />
+        <LearningSummary learning={learning} badges={badges} />
         <DigestInbox />
         <CollectivePanel />
       </Container>

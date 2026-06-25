@@ -12,9 +12,10 @@ import {
   Separator,
 } from '@chakra-ui/react';
 import NextImage from 'next/image';
+import NextLink from 'next/link';
 import { LuCalendar, LuClock, LuFootprints, LuMoon, LuStar, LuTicket, LuUsers } from 'react-icons/lu';
 import { StatCard } from '../../../components/ui/stat-card';
-import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph, peopleForPark, toursForPark, stampsForPark, eventsForPark, placesForPark, articlesForPark, parkingForPark, accessibilityScorecard, newsForPark, mediaForPark, checkOpen, type AccessibilityScorecard, type ParkMedia } from '../../../lib/queries';
+import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph, peopleForPark, toursForPark, stampsForPark, eventsForPark, placesForPark, articlesForPark, parkingForPark, accessibilityScorecard, newsForPark, mediaForPark, checkOpen, lessonPlansForPark, type AccessibilityScorecard, type ParkMedia, type LessonPlanSummary } from '../../../lib/queries';
 import { getAvailability } from '../../../lib/bridges';
 import { darkSkyRating, monthNames, difficultyDot, getWeather, getConditions, getAstro, sqmFromBortle, type Difficulty } from '../../../lib/datasources';
 import { explainForParks } from '../../../lib/explain';
@@ -62,7 +63,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
   const park = await parkDetail(parkCode);
   if (!park) notFound();
 
-  const [similar, nearby, together, graph, weather, people, tours, conditions, places, articles, parking, accessibility, news, media, openToday] = await Promise.all([
+  const [similar, nearby, together, graph, weather, people, tours, conditions, places, articles, parking, accessibility, news, media, openToday, courses] = await Promise.all([
     similarParks(parkCode).catch(() => []),
     nearbyParks(parkCode).catch(() => []),
     oftenPlannedTogether(parkCode).catch(() => []),
@@ -80,6 +81,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
     newsForPark(parkCode).catch(() => [] as { id: string; title: string; abstract: string | null; url: string | null; releaseDate: string | null }[]),
     mediaForPark(parkCode).catch(() => ({ audio: [], galleries: [], videos: [] }) as ParkMedia),
     checkOpen(parkCode, new Date().toISOString().slice(0, 10)).catch(() => null),
+    lessonPlansForPark(parkCode).catch(() => [] as LessonPlanSummary[]),
   ]);
 
   // Personalized rationale (§5f): "because you liked …" on related cards, for signed-in users.
@@ -660,6 +662,39 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
                 )}
                 {a.description ? <Text fontSize="sm" color="fg.muted" lineClamp={2}>{a.description}</Text> : null}
               </Box>
+            ))}
+          </Stack>
+        </Box>
+      ) : null}
+
+      {/* Ranger School — courses grounded in this park (links into /learn). */}
+      {courses.length > 0 ? (
+        <Box mt={12}>
+          <Heading size="md" mb={1}>Ranger School</Heading>
+          <Text fontSize="sm" color="fg.muted" mb={3}>Park-grounded courses you can learn with the Ranger.</Text>
+          <Stack gap={2}>
+            {courses.map((c) => (
+              <CLink key={c.id} asChild display="block" w="full" _hover={{ textDecoration: 'none' }}>
+                <NextLink href={`/learn/${encodeURIComponent(c.id)}`}>
+                  <HStack
+                    justify="space-between"
+                    borderWidth="1px"
+                    borderColor="border"
+                    borderRadius="l2"
+                    p={3}
+                    _hover={{ bg: 'bg.subtle', borderColor: 'brand.solid' }}
+                  >
+                    <Box minW={0}>
+                      <Text fontWeight="medium" lineClamp={1}>{c.title}</Text>
+                      <HStack gap={1} mt={0.5} wrap="wrap">
+                        {c.subject ? <Badge colorPalette="pine" size="sm">{c.subject}</Badge> : null}
+                        {c.gradeLevel ? <Badge colorPalette="trail" size="sm">{c.gradeLevel}</Badge> : null}
+                      </HStack>
+                    </Box>
+                    <Text color="brand.fg" fontSize="sm" flexShrink={0}>Open →</Text>
+                  </HStack>
+                </NextLink>
+              </CLink>
             ))}
           </Stack>
         </Box>

@@ -279,7 +279,10 @@ public surface (incl. the new park-page hours/accessibility/news/parking blocks 
 hydration signal in prod (dev emits class-hash false positives).
 
 ---
+"
 
+
+  
 ![](img/trail-graph-search.png)
 
 > ⚠️ TrailGraph is a demo, **not** an official NPS safety source — always defer to NPS.gov and rangers

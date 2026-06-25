@@ -109,6 +109,13 @@ const TOOL_LABELS: Record<string, string> = {
   record_pass: 'Recording a pass',
   set_availability: 'Saving your travel dates',
   recall_user_context: 'Recalling your context',
+  // Ranger School tutor
+  recall_learning_context: 'Recalling your progress',
+  start_lesson: 'Opening the course',
+  tutor_step: 'Teaching the lesson',
+  generate_quiz: 'Building a quiz',
+  grade_answer: 'Grading your answer',
+  recommend_next: 'Planning your next step',
 };
 
 export function toolLabel(name: string): string {

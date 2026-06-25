@@ -13,7 +13,10 @@ import { test, expect } from '@playwright/test';
 // control (the highest-risk new hydration surface). `/parks/yell` (seeded) exercises the new motion
 // client islands — the ParkHero (layoutId + scale-settle) and the global MotionConfig (ADR-044) — plus
 // the astro "Tonight" stat; `/explore` now carries the RankPanel sliders (ADR-046).
-const ROUTES = ['/', '/explore', '/plan', '/me', '/map', '/graph', '/trails', '/signin', '/parks/yell'];
+// `/learn` + `/learn/lesson-yell-geology` are the public Ranger School catalog + syllabus (seeded course);
+// `/learn/topic/Geology` is the public cross-park trail (design §13); `/learn/cert/<slug>` is the public
+// certificate share page (a seeded fixture).
+const ROUTES = ['/', '/explore', '/plan', '/me', '/map', '/graph', '/trails', '/learn', '/learn/lesson-yell-geology', '/learn/topic/Geology', '/learn/cert/test0123456789abcd', '/signin', '/parks/yell'];
 const HYDRATION_RX = /hydrat|did not match|text content does not match|tree hydrated|css-\w+/i;
 
 for (const route of ROUTES) {

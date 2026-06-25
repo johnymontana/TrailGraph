@@ -198,9 +198,10 @@ export interface NpsLessonPlan {
   durationInMinutes?: number | string;
   questionObjective?: string; // the lesson's essential question
   objective?: string;
-  commonCore?: string; // standards alignment (narrative)
+  commonCore?: string | Record<string, unknown>; // standards alignment — NPS returns a string OR a {…Standards} object
   image?: NpsImage;
   images?: NpsImage[];
+  parks?: string[]; // NPS /lessonplans links parks as an array of park-code STRINGS (e.g. ["ever"]), not relatedParks
   relatedParks?: NpsRelatedPark[];
   topics?: NpsActivityRef[];
 }
