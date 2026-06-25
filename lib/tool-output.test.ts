@@ -98,4 +98,27 @@ describe('isRenderableToolOutput', () => {
     expect(isRenderableToolOutput('park_card', null)).toBe(false);
     expect(isRenderableToolOutput('why_this', undefined)).toBe(false);
   });
+
+  it('Ranger School (Phase 4) tutor cards', () => {
+    // lesson_card: a course list, an enrolled spine, or just an id all render; empty does not
+    expect(isRenderableToolOutput('lesson_card', { courses: [{}] })).toBe(true);
+    expect(isRenderableToolOutput('lesson_card', { modules: [] })).toBe(true); // array present = render (shows progress)
+    expect(isRenderableToolOutput('lesson_card', { lessonPlanId: 'lp1' })).toBe(true);
+    expect(isRenderableToolOutput('lesson_card', {})).toBe(false);
+    // explanation_card
+    expect(isRenderableToolOutput('explanation_card', { title: 'Hotspot' })).toBe(true);
+    expect(isRenderableToolOutput('explanation_card', { objective: 'x' })).toBe(true);
+    expect(isRenderableToolOutput('explanation_card', {})).toBe(false);
+    // quiz_card requires a stem + at least one choice (anti-empty)
+    expect(isRenderableToolOutput('quiz_card', { stem: 'Q?', choices: [{ id: 'a', label: 'A' }] })).toBe(true);
+    expect(isRenderableToolOutput('quiz_card', { stem: 'Q?', choices: [] })).toBe(false);
+    expect(isRenderableToolOutput('quiz_card', { choices: [{ id: 'a' }] })).toBe(false);
+    // quiz_feedback_card renders on a boolean correct (true OR false)
+    expect(isRenderableToolOutput('quiz_feedback_card', { correct: false })).toBe(true);
+    expect(isRenderableToolOutput('quiz_feedback_card', { correct: true })).toBe(true);
+    expect(isRenderableToolOutput('quiz_feedback_card', {})).toBe(false);
+    // next_step_card
+    expect(isRenderableToolOutput('next_step_card', { recommendation: 'advance' })).toBe(true);
+    expect(isRenderableToolOutput('next_step_card', {})).toBe(false);
+  });
 });

@@ -1,6 +1,7 @@
 import { readGraph } from './neo4j';
 import { memory } from './memory';
 import { writePreferenceBridge } from './bridges';
+import { recordStruggle, recordMastery } from './learning-bridges';
 import { extractCanonicalTerms, isParksRelevant } from './canonicalize';
 
 /**
@@ -43,6 +44,35 @@ export async function reconcileUser(userId: string): Promise<{ written: number; 
     }
   }
   return { written, skipped };
+}
+
+/**
+ * Async learning reconciliation (Ranger School, docs/RANGER_SCHOOL_DESIGN.md §12) — the learning sibling
+ * of reconcileUser. Source A (live now): a deterministic scan of the user's recent ANSWERED edges, grouped
+ * by the quiz's TESTS topic, deriving rolling mastery + a struggle signal where recent correctness is low.
+ * Both writes are idempotent + tombstone-aware (recordStruggle honors a dismissed struggle). Adaptivity does
+ * NOT wait on this — recordQuizAttempt writes the ANSWERED edge synchronously; this only enriches the
+ * STRUGGLES_WITH / MASTERY rollups. Source B (NAMS "I'm confused"/"explain again" signals) is deferred to
+ * Phase 4 with the tutor tools, once the NAMS entity types are finalized.
+ */
+export async function reconcileUserLearning(userId: string): Promise<{ struggles: number; mastery: number }> {
+  const rows = await readGraph<{ topic: string; mastery: number; wrongRatio: number }>(
+    `MATCH (:User {userId:$userId})-[a:ANSWERED]->(:QuizQuestion)-[:TESTS]->(t:Topic)
+     WITH t, a ORDER BY a.at DESC
+     WITH t, collect(a)[0..10] AS recent
+     WHERE size(recent) > 0
+     WITH t, toFloat(size([x IN recent WHERE x.correct])) / toFloat(size(recent)) AS mastery
+     RETURN t.name AS topic, mastery, 1.0 - mastery AS wrongRatio`,
+    { userId },
+  );
+  let struggles = 0;
+  let mastery = 0;
+  for (const r of rows) {
+    if (await recordMastery(userId, r.topic, r.mastery).catch(() => null)) mastery++;
+    // Struggle only when recent correctness is poor; confidence = how strongly they're struggling.
+    if (r.wrongRatio >= 0.5 && (await recordStruggle(userId, r.topic, r.wrongRatio).catch(() => false))) struggles++;
+  }
+  return { struggles, mastery };
 }
 
 /** Reconcile every user who has chatted (has an agent session). For the scheduled job. */

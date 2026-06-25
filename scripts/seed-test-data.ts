@@ -222,6 +222,12 @@ export async function seedTestData(): Promise<void> {
           af.transcript='Old Faithful erupts every 60 to 90 minutes, sending boiling water up to 180 feet into the air.'
     MERGE (af)-[:ABOUT]->(yell)
     MERGE (lp)-[:CAN_USE_MEDIA]->(af)
+    // Phase 5: a seeded certificate for the /learn/cert/<slug> share page (fixed slug for E2E determinism).
+    MERGE (certuser:User {userId:'e2e-cert-user'})
+    MERGE (cert:Certificate {userId:'e2e-cert-user', lessonPlanId:'lesson-yell-geology'})
+      ON CREATE SET cert.id='cert:e2e-cert-user:lesson-yell-geology', cert.shareSlug='test0123456789abcd',
+                    cert.score=0.95, cert.issuedAt=datetime('2026-06-20T00:00:00Z')
+    MERGE (certuser)-[:ISSUED]->(cert)
   `);
 }
 

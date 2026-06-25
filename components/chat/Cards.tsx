@@ -82,6 +82,16 @@ export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: un
           </Card.Body>
         </Card.Root>
       );
+    case 'lesson_card':
+      return <LessonCard data={data} />;
+    case 'explanation_card':
+      return <ExplanationCard data={data} />;
+    case 'quiz_card':
+      return <QuizCard data={data} onAnswer={onAnswer} />;
+    case 'quiz_feedback_card':
+      return <QuizFeedbackCard data={data} />;
+    case 'next_step_card':
+      return <NextStepCard data={data} />;
     default:
       return null;
   }
@@ -545,6 +555,201 @@ function LeaderboardCard({ data }: { data: Record<string, unknown> }) {
           </Text>
         ) : null}
         <SkyLeaderboard entries={entries} />
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Ranger School (Phase 4) tutor cards
+// ---------------------------------------------------------------------------
+
+/** A course: either a list of a park's courses (start_lesson with parkCode) or an enrolled module/lesson spine. */
+function LessonCard({ data }: { data: Record<string, unknown> }) {
+  const courses = data.courses as { id: string; title: string; subject: string | null; gradeLevel: string | null }[] | undefined;
+  const modules = data.modules as
+    | { id: string; ordinal: number; title: string; lessons: { id: string; ordinal: number; title: string; completed: boolean }[] }[]
+    | undefined;
+  if (courses) {
+    return (
+      <Card.Root variant="subtle" size="sm" my={2}>
+        <Card.Body p={3}>
+          <Text fontWeight="semibold" fontFamily="heading" mb={2}>
+            🎓 Courses{data.parkCode ? ` · ${String(data.parkCode).toUpperCase()}` : ''}
+          </Text>
+          <Stack gap={2}>
+            {courses.map((c) => (
+              <Box key={c.id}>
+                <Text fontSize="sm" fontWeight="medium">{c.title}</Text>
+                <HStack gap={1} mt={0.5}>
+                  {c.subject ? <Badge colorPalette="pine" size="sm">{c.subject}</Badge> : null}
+                  {c.gradeLevel ? <Badge colorPalette="trail" size="sm">{c.gradeLevel}</Badge> : null}
+                </HStack>
+              </Box>
+            ))}
+          </Stack>
+        </Card.Body>
+      </Card.Root>
+    );
+  }
+  const title = data.title as string | undefined;
+  const done = data.done as number | undefined;
+  const total = data.total as number | undefined;
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <HStack justify="space-between" mb={2}>
+          <Text fontWeight="semibold" fontFamily="heading">🎓 {title ?? 'Course'}</Text>
+          {typeof done === 'number' && typeof total === 'number' ? (
+            <Badge colorPalette="pine">{done}/{total} done</Badge>
+          ) : null}
+        </HStack>
+        <Stack gap={2}>
+          {(modules ?? []).map((m) => (
+            <Box key={m.id}>
+              <Text fontSize="sm" fontWeight="medium" color="fg.muted">{m.ordinal}. {m.title}</Text>
+              <Stack gap={0.5} pl={3} mt={1}>
+                {m.lessons.map((l) => (
+                  <Text key={l.id} fontSize="sm">{l.completed ? '✅' : '⬜'} {l.title}</Text>
+                ))}
+              </Stack>
+            </Box>
+          ))}
+        </Stack>
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+/** A taught lesson: objective + the park's audio tours + field-trip feasibility (tutor_step). */
+function ExplanationCard({ data }: { data: Record<string, unknown> }) {
+  const title = data.title as string | undefined;
+  const moduleTitle = data.moduleTitle as string | undefined;
+  const objective = data.objective as string | null | undefined;
+  const narrative = data.narrative as string | null | undefined;
+  const media = (data.media ?? {}) as { audio?: { id: string; title: string; url: string | null; hasTranscript: boolean }[] };
+  const openWindow = data.openWindow as { name?: string; state?: string; closureSummary?: string | null } | null | undefined;
+  const audio = media.audio ?? [];
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading">{title ?? 'Lesson'}</Text>
+        {moduleTitle ? <Text fontSize="xs" color="fg.muted" mb={2}>{moduleTitle}</Text> : null}
+        {objective ? (
+          <Text fontSize="sm" mb={2}><Text as="span" fontWeight="medium">Objective: </Text>{objective}</Text>
+        ) : null}
+        {narrative ? <Text fontSize="sm" mb={2}>{narrative}</Text> : null}
+        {audio.length ? (
+          <Stack gap={1} mb={2}>
+            {audio.map((a) => (
+              <Text key={a.id} fontSize="sm">
+                🎧 {a.url ? <CLink href={a.url} color="brand.fg">{a.title} ↗</CLink> : a.title}
+                {a.hasTranscript ? <Badge ml={2} colorPalette="pine" size="sm">transcript</Badge> : null}
+              </Text>
+            ))}
+          </Stack>
+        ) : null}
+        {openWindow?.state ? (
+          <Text fontSize="xs" color="fg.muted">
+            Field trip: {openWindow.name ?? 'the park'} is {openWindow.state}
+            {openWindow.closureSummary ? ` — ${openWindow.closureSummary}` : ''} (reported by the park — verify).
+          </Text>
+        ) : null}
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+/** Interactive quiz (generate_quiz) — forks QuestionCard; a tap sends "quizId:choiceId" back as the next
+ * message for grade_answer. Disables after one pick; read-only on stale (non-latest) turns. */
+function QuizCard({ data, onAnswer }: { data: Record<string, unknown>; onAnswer?: (text: string) => void }) {
+  const quizId = data.quizId as string | undefined;
+  const stem = data.stem as string | undefined;
+  const choices = (data.choices ?? []) as { id: string; label: string }[];
+  const difficulty = data.difficulty as string | undefined;
+  const [answered, setAnswered] = useState(false);
+  if (!quizId || !stem || !choices.length) return null;
+  const disabled = answered || !onAnswer;
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <HStack justify="space-between" mb={2}>
+          <Text fontWeight="semibold" fontFamily="heading">📝 Quiz</Text>
+          {difficulty ? <Badge colorPalette="trail" size="sm">{difficulty}</Badge> : null}
+        </HStack>
+        <Text fontSize="sm" mb={2}>{stem}</Text>
+        <Stack gap={2} align="stretch">
+          {choices.map((c) => (
+            <Box
+              key={c.id}
+              as="button"
+              textAlign="start"
+              borderWidth="1px"
+              borderColor="border"
+              borderRadius="l2"
+              px={3}
+              py={2}
+              opacity={answered ? 0.55 : 1}
+              cursor={disabled ? 'default' : 'pointer'}
+              transition="background 0.15s, border-color 0.15s"
+              _hover={disabled ? undefined : { bg: 'brand.muted', borderColor: 'brand.solid' }}
+              onClick={() => {
+                if (disabled) return;
+                setAnswered(true);
+                onAnswer?.(`${quizId}:${c.id}`);
+              }}
+            >
+              <Text fontWeight="medium">{c.label}</Text>
+            </Box>
+          ))}
+        </Stack>
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+/** Deterministic grading feedback (grade_answer): green/red + the lesson's cited rationale + topic mastery. */
+function QuizFeedbackCard({ data }: { data: Record<string, unknown> }) {
+  const correct = data.correct as boolean | undefined;
+  const rationale = data.rationale as string | null | undefined;
+  const mastery = data.mastery as number | null | undefined;
+  return (
+    <Card.Root variant="subtle" size="sm" my={2} colorPalette={correct ? 'pine' : 'red'}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading" color="colorPalette.fg" mb={1}>
+          {correct ? '✅ Correct!' : '❌ Not quite'}
+        </Text>
+        {rationale ? <Text fontSize="sm">{rationale}</Text> : null}
+        {typeof mastery === 'number' ? (
+          <Text fontSize="xs" color="fg.muted" mt={2}>Topic mastery: {Math.round(mastery * 100)}%</Text>
+        ) : null}
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+/** What to do next (recommend_next): advance / remediate / complete (+ certificate + badge on completion). */
+function NextStepCard({ data }: { data: Record<string, unknown> }) {
+  const rec = data.recommendation as string | undefined;
+  const reason = data.reason as string | undefined;
+  const earnedBadge = data.earnedBadge as string | null | undefined;
+  const cert = data.certificate as { shareSlug?: string } | null | undefined;
+  const label = rec === 'complete' ? '🎓 Course complete' : rec === 'remediate' ? '🔁 Review' : '➡️ Next up';
+  const palette = rec === 'complete' ? 'pine' : rec === 'remediate' ? 'sand' : 'trail';
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <HStack justify="space-between" mb={1}>
+          <Text fontWeight="semibold" fontFamily="heading">{label}</Text>
+          {rec ? <Badge colorPalette={palette} size="sm">{rec}</Badge> : null}
+        </HStack>
+        {reason ? <Text fontSize="sm">{reason}</Text> : null}
+        {earnedBadge ? (
+          <Text fontSize="sm" mt={2}>🏅 Badge earned: <Badge colorPalette="trail">{earnedBadge}</Badge></Text>
+        ) : null}
+        {cert?.shareSlug ? (
+          <Text fontSize="sm" mt={2}>📜 <CLink href={`/learn/cert/${cert.shareSlug}`} color="brand.fg">View &amp; share your certificate ↗</CLink></Text>
+        ) : null}
       </Card.Body>
     </Card.Root>
   );
