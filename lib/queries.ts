@@ -916,6 +916,36 @@ export async function mediaForPark(parkCode: string, limit = 8): Promise<ParkMed
   return rows[0] ?? { audio: [], galleries: [], videos: [] };
 }
 
+export interface LessonPlanSummary {
+  id: string;
+  title: string;
+  url: string | null;
+  subject: string | null;
+  gradeLevel: string | null;
+  objective: string | null;
+  durationMin: number | null;
+  image: string | null;
+  topics: string[];
+}
+
+/**
+ * Lesson plans for a park ("Ranger School" courseware foundation): `(:LessonPlan)-[:ABOUT]->(:Park)` with
+ * the essential question, grade band, duration, and topics. The full courseware (modules/lessons/quizzes +
+ * the agentic tutor) is designed in docs/RANGER_SCHOOL_DESIGN.md; this is the read foundation.
+ */
+export async function lessonPlansForPark(parkCode: string, limit = 12): Promise<LessonPlanSummary[]> {
+  return readGraph(
+    `MATCH (lp:LessonPlan)-[:ABOUT]->(:Park {parkCode: $parkCode})
+     OPTIONAL MATCH (lp)-[:RELATES_TO_TOPIC]->(t:Topic)
+     WITH lp, collect(DISTINCT t.name) AS topics
+     RETURN lp.id AS id, lp.title AS title, lp.url AS url, lp.subject AS subject,
+            lp.gradeLevel AS gradeLevel, lp.objective AS objective, lp.durationMin AS durationMin,
+            lp.image AS image, [x IN topics WHERE x IS NOT NULL] AS topics
+     ORDER BY title ASC LIMIT toInteger($limit)`,
+    { parkCode, limit },
+  );
+}
+
 /** Parking lots at a park (NPS-expansion P3): arrival logistics + accessibility. */
 export async function parkingForPark(
   parkCode: string,

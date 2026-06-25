@@ -19,7 +19,6 @@ import {
   type NpsArticle,
   type NpsNewsRelease,
   type NpsMultimedia,
-  type NpsWebcam,
   type NpsLessonPlan,
 } from '../nps';
 import {
@@ -41,7 +40,6 @@ import {
   upsertEvents,
   upsertNewsReleases,
   upsertMultimedia,
-  upsertWebcams,
   upsertLessonPlans,
 } from './upserts';
 import { embedParks } from './embed-parks';
@@ -326,9 +324,16 @@ export async function runSlowSync(): Promise<StepResult[]> {
     out.push(await pagedStep<NpsMultimedia>('multimedia-videos', 'multimedia/videos', ['transcript'], (b) => upsertMultimedia('Video', b)));
   }
 
-  // Bonus: webcams as graph nodes + lesson plans (educator content).
-  out.push(await pagedStep<NpsWebcam>('webcams', 'webcams', undefined, upsertWebcams));
-  out.push(await pagedStep<NpsLessonPlan>('lessonplans', 'lessonplans', undefined, upsertLessonPlans));
+  // Educator content for the "Ranger School" courseware platform (webcams use the runtime conditions
+  // path, not a graph node — see lib/conditions.ts).
+  out.push(
+    await pagedStep<NpsLessonPlan>(
+      'lessonplans',
+      'lessonplans',
+      ['questionObjective', 'objective', 'durationInMinutes', 'commonCore', 'image', 'images', 'relatedParks', 'topics'],
+      upsertLessonPlans,
+    ),
+  );
 
   // Derivations run last (need the full corpus): NEAR proximity (F9) + materialized shared-topic/activity (bonus).
   out.push(await step('derive-near', 'slow', async () => deriveNear()));

@@ -252,16 +252,46 @@ describeIntegration('NPS data features (Neo4j)', () => {
     expect(rows[0].topic).toBe(true);
   });
 
-  it('bonus: queryable contacts + webcam/lesson-plan nodes attach to the park', async () => {
+  it('bonus: queryable contacts + lesson-plan node attaches to the park (Ranger School data)', async () => {
     const p = await parkDetail('yell');
     expect(p!.phone).toBe('307-344-7381');
-    const rows = await readGraph<{ webcam: boolean; lesson: boolean }>(
+    const rows = await readGraph<{ lesson: boolean; topic: boolean }>(
       `MATCH (p:Park {parkCode:'yell'})
-       RETURN EXISTS { (:Webcam {id:'webcam-yell-oldfaithful'})-[:ABOUT]->(p) } AS webcam,
-              EXISTS { (:LessonPlan {id:'lesson-yell-geology'})-[:ABOUT]->(p) } AS lesson`,
+       RETURN EXISTS { (:LessonPlan {id:'lesson-yell-geology'})-[:ABOUT]->(p) } AS lesson,
+              EXISTS { (:LessonPlan {id:'lesson-yell-geology'})-[:RELATES_TO_TOPIC]->(:Topic) } AS topic`,
     );
-    expect(rows[0].webcam).toBe(true);
     expect(rows[0].lesson).toBe(true);
+    expect(rows[0].topic).toBe(true);
+  });
+
+  it('Ranger School: lesson-plan spine (GradeBand + Module→Lesson→QuizQuestion) + park-grounded media (CAN_USE_MEDIA)', async () => {
+    const rows = await readGraph<{
+      gradeBand: boolean;
+      module: boolean;
+      lesson: boolean;
+      quiz: boolean;
+      tests: boolean;
+      media: boolean;
+      correctId: string;
+    }>(
+      `MATCH (lp:LessonPlan {id:'lesson-yell-geology'})
+       OPTIONAL MATCH (lp)-[:CONTAINS_MODULE]->(:Module)-[:CONTAINS_LESSON]->(:Lesson)-[:HAS_QUESTION]->(q:QuizQuestion)
+       RETURN EXISTS { (lp)-[:TARGETS]->(:GradeBand {id:'6-8'}) } AS gradeBand,
+              EXISTS { (lp)-[:CONTAINS_MODULE]->(:Module) } AS module,
+              EXISTS { (lp)-[:CONTAINS_MODULE]->(:Module)-[:CONTAINS_LESSON]->(:Lesson) } AS lesson,
+              q IS NOT NULL AS quiz,
+              EXISTS { (q)-[:TESTS]->(:Topic) } AS tests,
+              EXISTS { (lp)-[:CAN_USE_MEDIA]->(:AudioFile)-[:ABOUT]->(:Park {parkCode:'yell'}) } AS media,
+              q.correctId AS correctId`,
+    );
+    expect(rows[0].gradeBand).toBe(true);
+    expect(rows[0].module).toBe(true);
+    expect(rows[0].lesson).toBe(true);
+    expect(rows[0].quiz).toBe(true);
+    expect(rows[0].tests).toBe(true);
+    expect(rows[0].media).toBe(true);
+    // quiz ground truth lives on the node (deterministic, offline-capable grading) — never shipped to the client
+    expect(rows[0].correctId).toBe('hotspot');
   });
 });
 

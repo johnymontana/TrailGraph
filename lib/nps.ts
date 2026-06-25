@@ -187,26 +187,20 @@ export interface NpsArticle {
   images?: NpsImage[];
 }
 
-/** Webcams (`/webcams`, bonus) — `(:Webcam)-[:ABOUT]->(:Park)`. */
-export interface NpsWebcam {
-  id: string;
-  title?: string;
-  description?: string;
-  url?: string;
-  status?: string;
-  isStreaming?: boolean;
-  images?: NpsImage[];
-  relatedParks?: NpsRelatedPark[];
-}
-
-/** Lesson plans (`/lessonplans`, bonus) — educator content; `(:LessonPlan)-[:ABOUT]->(:Park)`. */
+/** Lesson plans (`/lessonplans`) — educator content powering "Ranger School"; `(:LessonPlan)-[:ABOUT]->(:Park)`. */
 export interface NpsLessonPlan {
   id: string;
   title?: string;
   url?: string;
-  gradeLevel?: string;
+  gradeLevel?: string; // e.g. "Sixth Grade-Eighth Grade"
   subject?: string;
   duration?: string;
+  durationInMinutes?: number | string;
+  questionObjective?: string; // the lesson's essential question
+  objective?: string;
+  commonCore?: string; // standards alignment (narrative)
+  image?: NpsImage;
+  images?: NpsImage[];
   relatedParks?: NpsRelatedPark[];
   topics?: NpsActivityRef[];
 }

@@ -186,14 +186,42 @@ export async function seedTestData(): Promise<void> {
     SET art.body='The Yellowstone caldera powers more than 10,000 hydrothermal features, including the largest concentration of geysers on Earth such as Old Faithful and Steamboat Geyser.'
     // F10: parking detail (accessible spaces + EV charging).
     SET lot.accessibleSpaces=12, lot.hasEvCharging=true, lot.hasLiveData=false
-    // Bonus: queryable contacts + a webcam node + a lesson plan.
+    // Bonus: queryable contacts + a lesson plan (Ranger School courseware).
     SET yell.phone='307-344-7381', yell.email='yell_info@nps.gov'
-    MERGE (wcam:Webcam {id:'webcam-yell-oldfaithful'})
-      SET wcam.title='Old Faithful Webcam', wcam.url='https://www.nps.gov/yell/webcam', wcam.status='Active', wcam.isStreaming=true
-    MERGE (wcam)-[:ABOUT]->(yell)
     MERGE (lp:LessonPlan {id:'lesson-yell-geology'})
-      SET lp.title='Geology of Yellowstone', lp.url='https://www.nps.gov/yell/lesson1.htm', lp.gradeLevel='6-8', lp.subject='Earth Science'
+      SET lp.title='Geology of Yellowstone', lp.url='https://www.nps.gov/yell/lesson1.htm',
+          lp.gradeLevel='6-8', lp.gradeMin=6, lp.gradeMax=8, lp.subject='Earth Science',
+          lp.objective='Explain how the Yellowstone hotspot drives the park''s geysers and calderas.',
+          lp.standards='CCSS.ELA-LITERACY.RST.6-8.4', lp.image='https://www.nps.gov/common/uploads/lesson-geology.jpg',
+          lp.durationMin=50
     MERGE (lp)-[:ABOUT]->(yell)
+    MERGE (volc2:Topic {id:'top-volc'}) MERGE (lp)-[:RELATES_TO_TOPIC]->(volc2)
+    // Ranger School: grade-band vocab node (parseGradeBand → TARGETS), the courseware spine
+    // (Module → Lesson → QuizQuestion), and a park-grounded media join (CAN_USE_MEDIA).
+    MERGE (gb:GradeBand {id:'6-8'}) SET gb.min=6, gb.max=8, gb.label='Grades 6–8'
+    MERGE (lp)-[:TARGETS]->(gb)
+    MERGE (mod:Module {id:'lesson-yell-geology:m1'})
+      SET mod.lessonPlanId='lesson-yell-geology', mod.ordinal=1, mod.title='Hotspot & Caldera',
+          mod.summary='How the Yellowstone hotspot built the caldera and powers its geysers.'
+    MERGE (lp)-[:CONTAINS_MODULE]->(mod)
+    MERGE (les:Lesson {id:'lesson-yell-geology:m1:l1'})
+      SET les.moduleId='lesson-yell-geology:m1', les.ordinal=1, les.title='The Yellowstone Hotspot', les.durationMin=15
+    MERGE (mod)-[:CONTAINS_LESSON]->(les)
+    MERGE (q:QuizQuestion {id:'lesson-yell-geology:m1:l1:quiz_v1:easy'})
+      SET q.lessonId='lesson-yell-geology:m1:l1', q.ordinal=1,
+          q.stem='What drives Yellowstone''s geysers and calderas?',
+          q.choices='[{"id":"hotspot","label":"A stationary mantle hotspot"},{"id":"glacier","label":"Retreating glaciers"},{"id":"meteor","label":"A meteor impact"}]',
+          q.correctId='hotspot',
+          q.rationale='The Yellowstone hotspot is a plume of hot mantle that powers the park''s hydrothermal features.',
+          q.difficulty='easy', q.topic='Volcanoes'
+    MERGE (les)-[:HAS_QUESTION]->(q)
+    MERGE (q)-[:TESTS]->(volc2)
+    MERGE (af:AudioFile {id:'audio-yell-oldfaithful'})
+      SET af.title='Old Faithful Audio Tour', af.durationMs=180000,
+          af.url='https://www.nps.gov/yell/oldfaithful-audio.htm',
+          af.transcript='Old Faithful erupts every 60 to 90 minutes, sending boiling water up to 180 feet into the air.'
+    MERGE (af)-[:ABOUT]->(yell)
+    MERGE (lp)-[:CAN_USE_MEDIA]->(af)
   `);
 }
 

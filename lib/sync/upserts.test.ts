@@ -15,6 +15,7 @@ import {
   parseReleaseDate,
   extractParkingDetail,
   extractContacts,
+  parseGradeBand,
   upsertOperatingHoursForOwners,
   upsertEntranceFees,
 } from './upserts';
@@ -266,6 +267,21 @@ describe('parseReleaseDate (F8)', () => {
     expect(parseReleaseDate('2026-06-20')).toBe('2026-06-20');
     expect(parseReleaseDate('not a date')).toBeNull();
     expect(parseReleaseDate(undefined)).toBeNull();
+  });
+});
+
+describe('parseGradeBand (Ranger School lesson plans)', () => {
+  it('parses word-grade ranges to a numeric band', () => {
+    expect(parseGradeBand('Sixth Grade-Eighth Grade')).toEqual({ min: 6, max: 8 });
+    expect(parseGradeBand('Kindergarten-Second Grade')).toEqual({ min: 0, max: 2 });
+  });
+  it('parses numeric forms and single grades', () => {
+    expect(parseGradeBand('6-8')).toEqual({ min: 6, max: 8 });
+    expect(parseGradeBand('Grade 4')).toEqual({ min: 4, max: 4 });
+  });
+  it('returns nulls for missing/unknown', () => {
+    expect(parseGradeBand(null)).toEqual({ min: null, max: null });
+    expect(parseGradeBand('All ages')).toEqual({ min: null, max: null });
   });
 });
 

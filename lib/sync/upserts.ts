@@ -22,7 +22,6 @@ import type {
   NpsArticle,
   NpsNewsRelease,
   NpsMultimedia,
-  NpsWebcam,
   NpsLessonPlan,
 } from '../nps';
 
@@ -602,7 +601,7 @@ export async function upsertEvents(
                              THEN point({latitude: row.lat, longitude: row.lng}) ELSE e.location END,
            e.lastSyncedAt = datetime()
      WITH e, row
-     CALL { WITH e, row WHERE row.parkCode IS NOT NULL
+     CALL { WITH e, row WITH e, row WHERE row.parkCode IS NOT NULL
        MATCH (p:Park {parkCode: row.parkCode}) MERGE (e)-[:HELD_AT]->(p) }
      CALL { WITH e, row UNWIND row.types AS t
        MERGE (et:EventType {name: t}) MERGE (e)-[:OF_TYPE]->(et) }
@@ -1120,52 +1119,71 @@ export async function upsertMultimedia(
   return r[0]?.c ?? 0;
 }
 
-/** Webcams (bonus): `(:Webcam)-[:ABOUT]->(:Park)`. Idempotent. */
-export async function upsertWebcams(items: NpsWebcam[]): Promise<number> {
-  if (!items.length) return 0;
-  const rows = items.map((w) => ({
-    id: w.id,
-    title: w.title ?? '',
-    url: w.url ?? null,
-    status: w.status ?? null,
-    isStreaming: w.isStreaming ?? false,
-    image: (w.images ?? [])[0]?.url ?? null,
-    parkCodes: (w.relatedParks ?? []).map((rp) => rp.parkCode).filter(Boolean),
-  }));
-  const r = await writeGraph<{ c: number }>(
-    `UNWIND $rows AS row
-     MERGE (w:Webcam {id: row.id})
-       SET w.title = row.title, w.url = row.url, w.status = row.status, w.isStreaming = row.isStreaming,
-           w.image = row.image, w.lastSyncedAt = datetime()
-     WITH w, row
-     CALL { WITH w, row UNWIND row.parkCodes AS pc MATCH (p:Park {parkCode: pc}) MERGE (w)-[:ABOUT]->(p) }
-     RETURN count(w) AS c`,
-    { rows },
-  );
-  return r[0]?.c ?? 0;
+
+const GRADE_WORDS: Record<string, number> = {
+  kindergarten: 0, first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6,
+  seventh: 7, eighth: 8, ninth: 9, tenth: 10, eleventh: 11, twelfth: 12,
+};
+
+/**
+ * Parse an NPS lesson `gradeLevel` ("Sixth Grade-Eighth Grade", "6-8", "Grade 4") into a numeric band
+ * (K=0…12) so courses can be filtered/grouped by grade. Pure (unit-tested). Returns nulls when unknown.
+ */
+export function parseGradeBand(gradeLevel: string | null | undefined): { min: number | null; max: number | null } {
+  if (!gradeLevel) return { min: null, max: null };
+  const grades: number[] = [];
+  for (const m of gradeLevel.toLowerCase().matchAll(/\b(kindergarten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)\b/g)) {
+    grades.push(GRADE_WORDS[m[1]]);
+  }
+  for (const m of gradeLevel.matchAll(/\b(\d{1,2})\b/g)) {
+    const n = Number(m[1]);
+    if (n >= 0 && n <= 12) grades.push(n);
+  }
+  if (!grades.length) return { min: null, max: null };
+  return { min: Math.min(...grades), max: Math.max(...grades) };
 }
 
-/** Lesson plans (bonus, educator): `(:LessonPlan)-[:ABOUT]->(:Park)` + RELATES_TO_TOPIC. Idempotent. */
+/**
+ * Lesson plans (educator content for "Ranger School"): `(:LessonPlan)-[:ABOUT]->(:Park)` + RELATES_TO_TOPIC.
+ * Captures the essential question, objective, duration, grade band, standards, and image so the courseware
+ * can build park-grounded lessons. Idempotent.
+ */
 export async function upsertLessonPlans(items: NpsLessonPlan[]): Promise<number> {
   if (!items.length) return 0;
-  const rows = items.map((l) => ({
-    id: l.id,
-    title: l.title ?? '',
-    url: l.url ?? null,
-    gradeLevel: l.gradeLevel ?? null,
-    subject: l.subject ?? null,
-    duration: l.duration ?? null,
-    parkCodes: (l.relatedParks ?? []).map((rp) => rp.parkCode).filter(Boolean),
-    topics: (l.topics ?? []).map((t) => ({ id: t.id, name: t.name })),
-  }));
+  const rows = items.map((l) => {
+    const band = parseGradeBand(l.gradeLevel);
+    const gradeBandId = band.min != null && band.max != null ? `${band.min}-${band.max}` : null;
+    return {
+      id: l.id,
+      title: l.title ?? '',
+      url: l.url ?? null,
+      gradeLevel: l.gradeLevel ?? null,
+      gradeMin: band.min,
+      gradeMax: band.max,
+      gradeBandId,
+      gradeBandLabel: gradeBandId ? `Grades ${band.min}–${band.max}` : null,
+      subject: l.subject ?? null,
+      objective: l.questionObjective ?? l.objective ?? null,
+      durationMin: countOf(l.durationInMinutes) || null,
+      standards: l.commonCore ?? null,
+      image: l.image?.url ?? (l.images ?? [])[0]?.url ?? null,
+      parkCodes: (l.relatedParks ?? []).map((rp) => rp.parkCode).filter(Boolean),
+      topics: (l.topics ?? []).map((t) => ({ id: t.id, name: t.name })),
+    };
+  });
   const r = await writeGraph<{ c: number }>(
     `UNWIND $rows AS row
      MERGE (lp:LessonPlan {id: row.id})
        SET lp.title = row.title, lp.url = row.url, lp.gradeLevel = row.gradeLevel,
-           lp.subject = row.subject, lp.duration = row.duration, lp.lastSyncedAt = datetime()
+           lp.gradeMin = row.gradeMin, lp.gradeMax = row.gradeMax, lp.subject = row.subject,
+           lp.objective = row.objective, lp.durationMin = row.durationMin, lp.standards = row.standards,
+           lp.image = row.image, lp.lastSyncedAt = datetime()
      WITH lp, row
      CALL { WITH lp, row UNWIND row.parkCodes AS pc MATCH (p:Park {parkCode: pc}) MERGE (lp)-[:ABOUT]->(p) }
      CALL { WITH lp, row UNWIND row.topics AS top MERGE (t:Topic {id: top.id}) SET t.name = coalesce(t.name, top.name) MERGE (lp)-[:RELATES_TO_TOPIC]->(t) }
+     CALL { WITH lp, row WITH lp, row WHERE row.gradeBandId IS NOT NULL
+            MERGE (gb:GradeBand {id: row.gradeBandId}) SET gb.min = row.gradeMin, gb.max = row.gradeMax, gb.label = row.gradeBandLabel
+            MERGE (lp)-[:TARGETS]->(gb) }
      RETURN count(lp) AS c`,
     { rows },
   );
