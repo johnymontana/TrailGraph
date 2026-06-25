@@ -66,6 +66,20 @@ describe('darkSkyDigestItem boundaries (ADR-052)', () => {
   });
 });
 
+describe('darkSkyDigestItem dating (P2.3)', () => {
+  it('labels the best night in the trip window when nightDate is given', () => {
+    const item = darkSkyDigestItem(astro(8, 6), 'grba', 'Great Basin', '2026-10-06');
+    expect(item?.detail).toContain('On 2026-10-06');
+    expect(item?.detail).toContain('trip window');
+    expect(item?.detail).not.toContain('Tonight');
+  });
+  it('falls back to "Tonight" when no nightDate is given (watched park, no window)', () => {
+    const item = darkSkyDigestItem(astro(8, 6), 'grba', 'Great Basin');
+    expect(item?.detail).toContain('Tonight');
+    expect(item?.detail).not.toContain('trip window');
+  });
+});
+
 describe('roadClosureItems (ADR-052)', () => {
   const ev = (title: string, severityRank: number): RoadEvent => ({ id: title, title, type: 'Incident', severity: 'major', severityRank });
   it('keeps only significant (rank ≥ 2) events as warn items', () => {

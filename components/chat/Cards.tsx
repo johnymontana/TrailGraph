@@ -8,6 +8,7 @@ import { TripDiffCard } from '../plan/TripDiffCard';
 import { SkyLeaderboard, type LeaderboardEntry } from '../collective/SkyLeaderboard';
 import { DigestItems, type DigestItemView } from '../inbox/DigestItems';
 import { ProvenanceEdges } from '../parks/ProvenanceEdges';
+import { WATCH_CAP } from '../../lib/watch-cap';
 
 /** Renders a tool's `{kind,data}` output as a structured card (ADR-013, D5). Graph-grounded only.
  * `onAnswer` is passed only for interactive cards (the `question_card`) and only on the latest turn — it
@@ -373,7 +374,8 @@ function DigestCard({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-/** Standing watches (Proactive Ranger) — from the `watch_list` envelope (set_watch / list_watches). */
+/** Standing watches (Proactive Ranger) — from the `watch_list` envelope (set_watch / list_watches).
+ * Surfaces the per-user cap (P2.4) so the limit is legible before the user hits it. */
 function WatchListCard({ data }: { data: Record<string, unknown> }) {
   const watches = (data.watches ?? []) as { id: string; kind: string; refId: string; label: string | null }[];
   if (!watches.length) {
@@ -383,14 +385,26 @@ function WatchListCard({ data }: { data: Record<string, unknown> }) {
       </Text>
     );
   }
+  const atCap = watches.length >= WATCH_CAP;
   return (
     <Stack gap={2} my={2}>
+      <HStack justify="space-between">
+        <Text fontSize="xs" color="fg.muted">Manage watches on Your memory · inbox.</Text>
+        <Text fontSize="xs" color={atCap ? 'orange.fg' : 'fg.muted'} fontWeight={atCap ? 'medium' : undefined}>
+          {watches.length} / {WATCH_CAP} watches
+        </Text>
+      </HStack>
       {watches.map((w) => (
         <HStack key={w.id} borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2} gap={2}>
           <Badge colorPalette={w.kind === 'trip' ? 'pine' : 'trail'}>{w.kind}</Badge>
           <Text fontSize="sm" flex="1">{w.label ?? w.refId}</Text>
         </HStack>
       ))}
+      {atCap ? (
+        <Text fontSize="xs" color="orange.fg">
+          You&apos;re at the watch limit — remove one (ask the ranger to &ldquo;stop watching&rdquo; a trip or park) to add another.
+        </Text>
+      ) : null}
     </Stack>
   );
 }
@@ -479,8 +493,10 @@ function AccessibilityCard({ data }: { data: Record<string, unknown> }) {
           <Text fontSize="sm" color="fg.muted" mb={2}>No accessibility features reported for this park.</Text>
         )}
         <Stack gap={0.5} fontSize="sm" color="fg.muted">
-          {accessibleCampgrounds > 0 ? <Text>{accessibleCampgrounds} accessible campground{accessibleCampgrounds > 1 ? 's' : ''}</Text> : null}
-          {audioDescribedPlaces > 0 ? <Text>{audioDescribedPlaces} audio-described place{audioDescribedPlaces > 1 ? 's' : ''}</Text> : null}
+          {/* P2.2: show explicit zero counts ("0 accessible campgrounds") instead of hiding them — a silent
+              omission reads as "no data," whereas a hard 0 is honest reported data. */}
+          <Text>{accessibleCampgrounds} accessible campground{accessibleCampgrounds === 1 ? '' : 's'}</Text>
+          <Text>{audioDescribedPlaces} audio-described place{audioDescribedPlaces === 1 ? '' : 's'}</Text>
         </Stack>
         <Text fontSize="xs" color="fg.muted" mt={2}>Reported by the park — verify specifics with the park before you go.</Text>
       </Card.Body>

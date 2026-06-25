@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readGraph, writeGraph } from './neo4j';
+import { WATCH_CAP } from './watch-cap';
 
 /**
  * Proactive Ranger watches (ADR-052) — a user attaches a standing :Watch to a saved trip or a park.
@@ -17,8 +18,8 @@ export interface Watch {
   createdAt: string | null;
 }
 
-/** Max distinct watches per user (audit C8) — bounds the daily digest fan-out + per-park NPS fetches. */
-export const WATCH_CAP = 25;
+// WATCH_CAP lives in the dependency-free `./watch-cap` module so the client card can import it too.
+export { WATCH_CAP } from './watch-cap';
 
 export type CreateWatchResult = { id: string } | { error: string };
 

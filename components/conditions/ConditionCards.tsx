@@ -76,7 +76,16 @@ export function DarkSkyCard({ data }: { data: Record<string, unknown> }) {
               icon={LuSparkles}
               tone="accent"
             />
-          ) : null}
+          ) : (
+            // P2.2: be explicit about a missing Bortle rating (the Great Basin gap) rather than silently
+            // omitting the tile — "we don't have it," never a guessed number.
+            <StatCard
+              label="Dark sky"
+              value="—"
+              hint="No verified Bortle rating in our data"
+              icon={LuSparkles}
+            />
+          )}
           {d.sqmEstimate != null ? (
             <StatCard
               label="SQM"

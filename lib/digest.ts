@@ -3,7 +3,7 @@ import { readGraph, writeGraph } from './neo4j';
 import { listWatches } from './watches';
 import { getTrip } from './trips';
 import { parkDetail, eventsForPark, newsForPark } from './queries';
-import { getAstro, getConditions, type AstroEvents, type RoadEvent } from './datasources';
+import { getAstro, darkestNight, getConditions, type AstroEvents, type RoadEvent } from './datasources';
 
 /**
  * Proactive Ranger digest builder (ADR-052). Walks a user's watches → resolves the watched parks →
@@ -72,16 +72,27 @@ export function upcomingFeeFree(ymd: string, windowDays = 21): { date: string; n
   return upcoming.length ? { date: upcoming[0].date, name: upcoming[0].name } : null;
 }
 
-/** A clear-sky-on-new-moon window is "good news" worth a nudge: dim moon + a real dark window. Pure. */
-export function darkSkyDigestItem(astro: AstroEvents, parkCode: string, parkName: string): DigestItem | null {
+/**
+ * A clear-sky-on-new-moon window is "good news" worth a nudge: dim moon + a real dark window. Pure.
+ * `nightDate` (P2.3) labels the night these numbers describe — the best night in the watched trip's window
+ * when given, else tonight — so a future-dated trip's digest never reports tonight's wrong moon phase.
+ */
+export function darkSkyDigestItem(
+  astro: AstroEvents,
+  parkCode: string,
+  parkName: string,
+  nightDate?: string | null,
+): DigestItem | null {
   if (astro.moon.illuminationPct >= 25) return null;
   if (astro.darkHours.hours == null || astro.darkHours.hours < 4) return null;
+  const when = nightDate ? `On ${nightDate}` : 'Tonight';
+  const tail = nightDate ? 'your darkest night in this trip window' : 'a near-new-moon stargazing window';
   return {
     kind: 'darksky',
     parkCode,
     parkName,
     title: `Dark-sky window at ${parkName}`,
-    detail: `Tonight: ${astro.moon.illuminationPct}% moon and ~${astro.darkHours.hours} h of astronomical darkness — a near-new-moon stargazing window.`,
+    detail: `${when}: ${astro.moon.illuminationPct}% moon and ~${astro.darkHours.hours} h of astronomical darkness — ${tail}.`,
     tone: 'good',
   };
 }
@@ -205,7 +216,11 @@ export async function buildDigest(userId: string, forDate?: string): Promise<Dig
     const cond = await getConditions(p.parkCode).catch(() => null);
     if (cond) items.push(...roadClosureItems(cond.roadEvents, p.parkCode, p.name));
     if (p.lat != null && p.lng != null) {
-      const item = darkSkyDigestItem(getAstro(p.lat, p.lng, date), p.parkCode, p.name);
+      // P2.3: a watched TRIP with a date window should report the best (darkest) night IN that window, not
+      // tonight's moon — moon phase months out is otherwise wrong. A watched park (no window) stays tonight.
+      const best = p.window?.start ? darkestNight(p.lat, p.lng, p.window.start, p.window.end ?? p.window.start) : null;
+      const astro = best ? best.astro : getAstro(p.lat, p.lng, date);
+      const item = darkSkyDigestItem(astro, p.parkCode, p.name, best ? best.date : null);
       if (item) items.push(item);
     }
     // F4 events during the trip window + F8 recent news for the park (P1-1).

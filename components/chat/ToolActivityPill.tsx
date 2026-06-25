@@ -69,7 +69,7 @@ export function ToolActivityPill({
                     transition={reduce ? { duration: 0 } : { ...springs.snappy, delay: i * stagger.tight }}
                     style={{ display: 'inline-flex' }}
                   >
-                    <Chip tc={tc} reduce={!!reduce} />
+                    <Chip tc={tc} reduce={!!reduce} streaming={streaming} />
                   </motion.div>
                 ))}
               </AnimatePresence>
@@ -110,7 +110,7 @@ export function ToolActivityPill({
               {toolCalls.map((tc) => (
                 <Box key={tc.id}>
                   <HStack gap={2} wrap="wrap" mb={1}>
-                    <StatusGlyph tc={tc} reduce={!!reduce} />
+                    <StatusGlyph tc={tc} reduce={!!reduce} streaming={streaming} />
                     <Text fontSize="sm" fontWeight="semibold" fontFamily="heading">
                       {toolLabel(tc.name)}
                     </Text>
@@ -167,8 +167,9 @@ export function ToolActivityPill({
 }
 
 /** A live tool chip: friendly label + a status indicator (breathing dot / ✓ / ✕). */
-function Chip({ tc, reduce }: { tc: ToolCallSummary; reduce: boolean }) {
-  const tone = tc.isError ? 'red' : tc.done ? 'pine' : 'trail';
+function Chip({ tc, reduce, streaming }: { tc: ToolCallSummary; reduce: boolean; streaming: boolean }) {
+  const settled = !streaming && !tc.done && !tc.isError; // turn stopped/errored mid-tool (P1.1)
+  const tone = tc.isError ? 'red' : tc.done ? 'pine' : settled ? 'gray' : 'trail';
   return (
     <HStack
       gap={1.5}
@@ -180,7 +181,7 @@ function Chip({ tc, reduce }: { tc: ToolCallSummary; reduce: boolean }) {
       borderColor={tc.isError ? 'red.emphasized' : 'border'}
       flexShrink={0}
     >
-      <StatusGlyph tc={tc} reduce={reduce} />
+      <StatusGlyph tc={tc} reduce={reduce} streaming={streaming} />
       <Text fontSize="xs" fontWeight="medium" colorPalette={tone} color={`${tone}.fg`} whiteSpace="nowrap">
         {toolLabel(tc.name)}
       </Text>
@@ -188,10 +189,18 @@ function Chip({ tc, reduce }: { tc: ToolCallSummary; reduce: boolean }) {
   );
 }
 
-/** ✓ when done, ✕ on error, else a breathing dot while the tool runs. */
-function StatusGlyph({ tc, reduce }: { tc: ToolCallSummary; reduce: boolean }) {
+/** ✓ when done, ✕ on error, a breathing dot while the tool runs — and a static dot once the turn has
+ * settled without finishing (the user pressed Stop, or the turn failed mid-tool, P1.1) so a never-finished
+ * tool doesn't breathe forever. */
+function StatusGlyph({ tc, reduce, streaming }: { tc: ToolCallSummary; reduce: boolean; streaming: boolean }) {
   if (tc.isError) return <Icon as={LuX} boxSize={3} color="red.fg" flexShrink={0} />;
   if (tc.done) return <Icon as={LuCheck} boxSize={3} color="pine.fg" flexShrink={0} />;
+  if (!streaming) {
+    // Settled without output (stopped/aborted): a static muted dot, never an endless animation.
+    return (
+      <Box as="span" display="inline-block" w="7px" h="7px" borderRadius="full" bg="fg.subtle" opacity={0.5} flexShrink={0} />
+    );
+  }
   // Running: a breathing dot (opacity loop is a tween — never a spring keyframe array; gated on reduce).
   return (
     <motion.span
