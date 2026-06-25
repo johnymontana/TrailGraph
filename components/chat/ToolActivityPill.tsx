@@ -31,12 +31,17 @@ export function ToolActivityPill({
   const hasTools = toolCalls.length > 0;
   if (!hasTools && !reasoning) return null;
 
+  // Collapse superseded retries (P0.4): show only the polished final calls as chips + in the count; the
+  // superseded steps stay in the disclosure (de-emphasized) so the audit trail is never lost.
+  const shownCalls = toolCalls.filter((t) => !t.superseded);
+  const retried = toolCalls.length - shownCalls.length;
+
   const reveal = reduce ? { duration: 0 } : { duration: durations.base, ease: easings.standard };
-  const doneCount = toolCalls.filter((t) => t.done).length;
+  const doneCount = shownCalls.filter((t) => t.done).length;
   const summary = hasTools
-    ? streaming && doneCount < toolCalls.length
-      ? `Using ${toolCalls.length} tool${toolCalls.length === 1 ? '' : 's'}…`
-      : `Used ${toolCalls.length} tool${toolCalls.length === 1 ? '' : 's'}`
+    ? streaming && doneCount < shownCalls.length
+      ? `Using ${shownCalls.length} tool${shownCalls.length === 1 ? '' : 's'}…`
+      : `Used ${shownCalls.length} tool${shownCalls.length === 1 ? '' : 's'}${retried ? ` · ${retried} retried` : ''}`
     : "Ranger's reasoning";
 
   return (
@@ -59,7 +64,7 @@ export function ToolActivityPill({
           {hasTools ? (
             <HStack gap={1.5} wrap="wrap" minW={0} flex="1">
               <AnimatePresence initial={false}>
-                {toolCalls.map((tc, i) => (
+                {shownCalls.map((tc, i) => (
                   <motion.div
                     key={tc.id}
                     layout={!reduce}
@@ -108,7 +113,7 @@ export function ToolActivityPill({
           >
             <Stack gap={3} px={3} pb={3} pt={1} borderTopWidth="1px" borderColor="border">
               {toolCalls.map((tc) => (
-                <Box key={tc.id}>
+                <Box key={tc.id} opacity={tc.superseded ? 0.5 : 1}>
                   <HStack gap={2} wrap="wrap" mb={1}>
                     <StatusGlyph tc={tc} reduce={!!reduce} streaming={streaming} />
                     <Text fontSize="sm" fontWeight="semibold" fontFamily="heading">
@@ -117,6 +122,11 @@ export function ToolActivityPill({
                     <Code fontSize="2xs" colorPalette="gray" variant="surface">
                       {tc.name}
                     </Code>
+                    {tc.superseded ? (
+                      <Badge size="sm" colorPalette="gray" variant="surface">
+                        retried
+                      </Badge>
+                    ) : null}
                     {tc.resultKind ? (
                       <Badge size="sm" colorPalette="pine" variant="surface">
                         {tc.resultKind}

@@ -64,9 +64,27 @@ describe('interactive chat cards stay wired (allowlist ↔ switch ↔ onAnswer)'
     expect(chatPanel).toContain('i === messages.length - 1');
   });
 
+  it('ChatPanel falls back to rendering the ask_question card from tool INPUT (P0.1)', () => {
+    // ask_question is a passthrough that ENDS the turn, so its output may never reach output-available on
+    // the client. ChatPanel must render the question_card from the tool input so the card always surfaces.
+    // (Verified live: without this, the chips/freeform never appear — only the tool pill.)
+    expect(chatPanel).toContain("'ask_question'");
+    expect(chatPanel).toMatch(/kind="question_card"/);
+  });
+
   it('the QuestionCard tap posts the chosen option back (onAnswer(o.label))', () => {
     const fn = cards.indexOf('function QuestionCard(');
     const body = cards.slice(fn, fn + 2000);
     expect(body).toMatch(/onAnswer\?\.\(o\.label\)/);
+  });
+
+  it('the QuestionCard renders a real freeform input that posts typed text (P0.1)', () => {
+    const fn = cards.indexOf('function QuestionCard(');
+    const body = cards.slice(fn, fn + 3500);
+    // allowFreeform must gate an actual <Input>, not just a hint string…
+    expect(body).toContain('allowFreeform');
+    expect(body).toContain('<Input');
+    // …and submitting the typed value must post back via onAnswer.
+    expect(body).toMatch(/onAnswer\?\.\(draft\.trim\(\)\)/);
   });
 });

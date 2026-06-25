@@ -23,6 +23,21 @@ export default defineTool({
     stateCode: z.string().length(2).optional().describe('A specific 2-letter state code'),
     activity: z.string().optional().describe('An exact NPS activity name to require'),
     topic: z.string().optional().describe('An exact NPS topic name to require'),
+    // HARD proximity (P0.2): when the ask is anchored to a place/city AND has amenity/accessibility/vibe
+    // filters, pass these so proximity is enforced (ANDed with amenities), never dropped into the vibe
+    // string. Convert drive-time to a straight-line radius (~60 mi/hr → "within 2 hours" ≈ 120 mi) and
+    // supply lat/lng for the anchor (e.g. DC ≈ 38.90, -77.04). Do NOT put geography in `query`.
+    nearLatitude: z.number().optional().describe('Latitude of the location anchor for a "near/within X of <place>" ask'),
+    nearLongitude: z.number().optional().describe('Longitude of the location anchor'),
+    radiusMiles: z
+      .number()
+      .max(500)
+      .optional()
+      .describe('Hard cap on straight-line distance from nearLatitude/nearLongitude — REQUIRED whenever the ask is anchored to a place AND has amenity/accessibility/vibe filters, so proximity is enforced not dropped'),
+    preferNationalParks: z
+      .boolean()
+      .optional()
+      .describe('Rank National Parks above monuments/memorials when the user explicitly said "national park"'),
     // Per-query (trip-scoped) constraints (R5 §2.2): pass these to honor a need that belongs to THIS
     // trip only — e.g. a companion's wheelchair need — WITHOUT saving it as a durable global filter.
     // They layer on top of the user's saved constraints for this search only. For the user's OWN
@@ -32,7 +47,10 @@ export default defineTool({
     requiredAmenities: z.array(z.string()).optional().describe('Exact NPS amenity names to require for THIS search only (not saved)'),
     limit: z.number().max(12).default(6),
   }),
-  async execute({ query, region, stateCode, activity, topic, wheelchairAccessible, rvMaxLengthFt, requiredAmenities, limit }, ctx) {
+  async execute(
+    { query, region, stateCode, activity, topic, nearLatitude, nearLongitude, radiusMiles, preferNationalParks, wheelchairAccessible, rvMaxLengthFt, requiredAmenities, limit },
+    ctx,
+  ) {
     const stateCodes = [
       ...new Set([...regionStates(region), ...(stateCode ? [stateCode.toUpperCase()] : [])]),
     ];
@@ -59,10 +77,16 @@ export default defineTool({
       rvMaxLengthFt: merged.rvMaxLengthFt,
       wheelchairAccessible: merged.wheelchair,
       requiredAmenities: merged.requiredAmenities,
+      nearLat: nearLatitude ?? null,
+      nearLng: nearLongitude ?? null,
+      radiusMiles: radiusMiles ?? null,
+      preferNationalParks: preferNationalParks ?? false,
     });
     // Server-derived labels for the applied constraints — makes the narrowing legible (no fabricated
     // counts, no prose parsing).
     const narrowedBy: string[] = [];
+    if (nearLatitude != null && nearLongitude != null && radiusMiles != null) narrowedBy.push(`within ${radiusMiles} mi`);
+    if (preferNationalParks) narrowedBy.push('national parks (monuments ranked lower)');
     if (merged.rvMaxLengthFt) narrowedBy.push(`fits a ${merged.rvMaxLengthFt} ft RV`);
     if (merged.wheelchair) narrowedBy.push('wheelchair-accessible camping');
     for (const a of merged.requiredAmenities) narrowedBy.push(a.toLowerCase());

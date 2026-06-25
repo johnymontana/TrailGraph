@@ -75,7 +75,7 @@ export const TripActionSchema = z.object({
 export const MemoryActionSchema = z.object({
   op: z.enum([
     'deletePreference', 'deleteConsidered', 'clearConsidered', 'feedback', 'addPreference',
-    'setWeight', 'setTravelConstraints', 'clearTravelConstraints', 'recordPass', 'clearPass',
+    'setWeight', 'setTravelConstraints', 'clearTravelConstraints', 'removeRequiredAmenity', 'recordPass', 'clearPass',
     'collectStamp', 'uncollectStamp', 'setAvailability', 'clearAvailability',
   ]),
   kind: z.enum(['activity', 'topic']).optional(),

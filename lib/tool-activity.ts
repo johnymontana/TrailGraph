@@ -25,6 +25,9 @@ export interface ToolCallSummary {
   isError: boolean;
   /** True once the call has resolved (output available, errored, or denied) — i.e. no longer running. */
   done: boolean;
+  /** True when an immediately-following call of the SAME tool re-ran it (a retry), so the pill can collapse
+   * this superseded step and show only the polished final call (P0.4). Errors are never superseded. */
+  superseded?: boolean;
 }
 
 export interface ActivitySummary {
@@ -77,8 +80,19 @@ export function summarizeActivity(parts: readonly ActivityPart[]): ActivitySumma
     }
   });
 
+  const calls = order.map((id) => byId.get(id) as ToolCallSummary);
+  // Collapse an immediate retry (P0.4): a done, non-error call directly followed by another call of the
+  // SAME tool was superseded by it (the model re-ran the same tool, e.g. a narrowing find_parks retry).
+  // Conservative — only back-to-back same-name runs, so two genuinely different searches separated by
+  // other tools stay visible; errors are kept visible per the honesty norm.
+  for (let i = 0; i < calls.length - 1; i++) {
+    if (calls[i].name === calls[i + 1].name && calls[i].done && !calls[i].isError) {
+      calls[i].superseded = true;
+    }
+  }
+
   return {
-    toolCalls: order.map((id) => byId.get(id) as ToolCallSummary),
+    toolCalls: calls,
     reasoning: reasoningChunks.length ? { text: reasoningChunks.join('\n\n'), streaming: reasoningStreaming } : null,
   };
 }
@@ -109,6 +123,8 @@ const TOOL_LABELS: Record<string, string> = {
   record_pass: 'Recording a pass',
   set_availability: 'Saving your travel dates',
   recall_user_context: 'Recalling your context',
+  ask_question: 'Asking a question',
+  compare_trips: 'Comparing trips',
   // Ranger School tutor
   recall_learning_context: 'Recalling your progress',
   start_lesson: 'Opening the course',

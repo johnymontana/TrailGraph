@@ -4,6 +4,7 @@ import { Box, Heading, Stack, HStack, Text, Badge, Button, IconButton, Link as C
 import NextLink from 'next/link';
 import { LuThumbsDown, LuThumbsUp } from 'react-icons/lu';
 import type { UserMemory } from '../../lib/memory-graph';
+import { decodeEntities } from '../../lib/html-entities';
 import { emitMemoryFormed } from './MemoryFormingLayer';
 
 /**
@@ -148,7 +149,26 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
             <HStack borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={2} flexWrap="wrap" gap={2}>
               <Text>Must have:</Text>
               {mem.travel.requiredAmenities.map((a) => (
-                <Badge key={a} colorPalette="orange">{a}</Badge>
+                <Badge key={a} colorPalette="orange" display="inline-flex" alignItems="center" gap={1}>
+                  {a}
+                  {/* Per-row removal (P0.5): drop one durable accessibility/amenity need without clearing all. */}
+                  <Box
+                    as="button"
+                    aria-label={`Remove ${a}`}
+                    title={`Remove ${a}`}
+                    lineHeight="1"
+                    fontWeight="bold"
+                    px={0.5}
+                    cursor={busy ? 'default' : 'pointer'}
+                    _hover={busy ? undefined : { color: 'red.fg' }}
+                    onClick={() => {
+                      if (busy) return;
+                      act({ op: 'removeRequiredAmenity', name: a });
+                    }}
+                  >
+                    ×
+                  </Box>
+                </Badge>
               ))}
             </HStack>
           ) : null}
@@ -252,7 +272,7 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
         ) : (
           <Stack gap={2}>
             {mem.planned.map((t) => (
-              <Text key={t.tripId}>{t.name}</Text>
+              <Text key={t.tripId}>{decodeEntities(t.name)}</Text>
             ))}
           </Stack>
         )}

@@ -69,6 +69,20 @@ describeIntegration('Trip Lab (Neo4j)', () => {
     expect(['none', 'low', 'moderate', 'high']).toContain(m!.riskLabel);
   });
 
+  it('skipAlerts (P1.1) keeps drive/cost/dark-hours but reports zero risk (no NPS alert fetch)', async () => {
+    const m = await tripMetrics(userId, tripId, { skipAlerts: true });
+    expect(m).not.toBeNull();
+    // same comparable shape as the full metric, just without the external alert check…
+    expect(m!.stops).toBe(2);
+    expect(m!.parks).toBe(2);
+    expect(m!.driveMiles).toBeGreaterThan(0);
+    expect(m!.darkHoursTotal).not.toBeNull();
+    // …so the before/after edit diff is cheap. Risk is reported as none (alerts were not pulled).
+    expect(m!.alertCount).toBe(0);
+    expect(m!.riskScore).toBe(0);
+    expect(m!.riskLabel).toBe('none');
+  });
+
   it('diffs two trips side-by-side and exposes fork lineage', async () => {
     const d = await tripDiff(userId, tripId, forkId!);
     expect(d).not.toBeNull();
