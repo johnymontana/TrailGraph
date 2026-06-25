@@ -52,6 +52,29 @@ test('grade-band filter narrows the catalog (seed course is grade 6-8)', async (
   await expect(page.getByText(/No courses in this grade band/i)).toBeVisible();
 });
 
+test('catalog surfaces a cross-park trail chip (Geology spans yell + grca)', async ({ page }) => {
+  await page.goto('/learn');
+  await expect(page.getByRole('heading', { name: 'Cross-park trails', exact: true })).toBeVisible();
+  const trailChip = page.getByRole('link', { name: /Geology · \d+ parks/ });
+  await expect(trailChip).toBeVisible();
+  await expect(trailChip).toHaveAttribute('href', '/learn/topic/Geology');
+});
+
+test('cross-park trail page lists the topic across both parks', async ({ page }) => {
+  await page.goto('/learn/topic/Geology');
+  await expect(page.getByRole('heading', { name: /Learn Geology across the parks/i })).toBeVisible();
+  // Both seeded Geology courses are present, grouped by their park.
+  await expect(page.getByText('Geology of Yellowstone')).toBeVisible();
+  await expect(page.getByText('Geology of the Grand Canyon')).toBeVisible();
+  // Each course links to its syllabus.
+  await expect(page.getByRole('link', { name: /Geology of Yellowstone/ })).toHaveAttribute('href', /\/learn\/lesson-yell-geology/);
+});
+
+test('a missing topic trail 404s', async ({ page }) => {
+  const res = await page.goto('/learn/topic/NoSuchTopicZZZ');
+  expect(res?.status()).toBe(404);
+});
+
 test('certificate page offers a copy-link button', async ({ page }) => {
   await page.goto('/learn/cert/test0123456789abcd');
   await expect(page.getByRole('button', { name: /Copy share link/i })).toBeVisible();
@@ -61,6 +84,14 @@ test('park page surfaces its Ranger School courses (discovery)', async ({ page }
   await page.goto('/parks/yell');
   await expect(page.getByRole('heading', { name: 'Ranger School', exact: true })).toBeVisible();
   await expect(page.getByText('Geology of Yellowstone')).toBeVisible();
+});
+
+test('the /me page shows a Ranger School learning section for a signed-in user', async ({ page }) => {
+  await signUp(page);
+  await page.goto('/me');
+  // A fresh learner sees the section heading + a browse nudge (no progress yet).
+  await expect(page.getByRole('heading', { name: 'Ranger School', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: /Browse courses/i })).toBeVisible();
 });
 
 test('certificate share page renders a seeded certificate (public, no auth)', async ({ page }) => {

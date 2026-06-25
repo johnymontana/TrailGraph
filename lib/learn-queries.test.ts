@@ -4,7 +4,28 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('./neo4j', () => ({ readGraph: vi.fn() }));
 vi.mock('./queries', () => ({ lessonPlanContext: vi.fn() }));
 
-import { quizDifficultyForMastery, toFulltextQuery, gradeBandRange } from './learn-queries';
+import {
+  quizDifficultyForMastery,
+  toFulltextQuery,
+  gradeBandRange,
+  crossParkTopics,
+  learningTrailForTopic,
+} from './learn-queries';
+import { readGraph } from './neo4j';
+
+const readGraphMock = vi.mocked(readGraph);
+
+/** Every `$param` the Cypher references must be a key in the params object the call supplies — the
+ * exact class of bug (a referenced-but-unbound param → neo4j-driver "Expected parameter(s)") that
+ * typecheck/build can't see. Asserts on the recorded readGraph(cypher, params) call args. */
+function expectAllParamsBound(callIndex = 0): void {
+  const [cypher, params] = readGraphMock.mock.calls[callIndex] as [string, Record<string, unknown> | undefined];
+  const referenced = new Set([...cypher.matchAll(/\$(\w+)/g)].map((m) => m[1]));
+  for (const name of referenced) {
+    expect(params, `param $${name} referenced but no params object passed`).toBeDefined();
+    expect(Object.keys(params ?? {}), `param $${name} referenced but not bound`).toContain(name);
+  }
+}
 
 describe('gradeBandRange (catalog grade filter)', () => {
   it('maps known bands to [min,max], case-insensitive', () => {
@@ -36,6 +57,31 @@ describe('toFulltextQuery (catalog search sanitizer)', () => {
     expect(toFulltextQuery('')).toBe('');
     expect(toFulltextQuery('   ')).toBe('');
     expect(toFulltextQuery('!@#$%^&*()')).toBe('');
+  });
+});
+
+describe('cross-park trail reads bind every referenced Cypher param', () => {
+  it('crossParkTopics passes { limit } (default + explicit)', async () => {
+    readGraphMock.mockResolvedValue([]);
+    readGraphMock.mockClear();
+    await crossParkTopics(10);
+    expect(readGraphMock).toHaveBeenCalledTimes(1);
+    expect(readGraphMock.mock.calls[0][1]).toEqual({ limit: 10 });
+    expectAllParamsBound();
+
+    readGraphMock.mockClear();
+    await crossParkTopics(); // default 12
+    expect(readGraphMock.mock.calls[0][1]).toEqual({ limit: 12 });
+    expectAllParamsBound();
+  });
+
+  it('learningTrailForTopic passes { topic }', async () => {
+    readGraphMock.mockResolvedValue([]);
+    readGraphMock.mockClear();
+    await learningTrailForTopic('Geology');
+    expect(readGraphMock).toHaveBeenCalledTimes(1);
+    expect(readGraphMock.mock.calls[0][1]).toEqual({ topic: 'Geology' });
+    expectAllParamsBound();
   });
 });
 

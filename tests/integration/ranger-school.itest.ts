@@ -22,6 +22,8 @@ import {
   learnCatalog,
   certificateBySlug,
   searchCourses,
+  crossParkTopics,
+  learningTrailForTopic,
 } from '../../lib/learn-queries';
 import { reconcileUserLearning } from '../../lib/reconcile-memory';
 import { deriveLessonTopics } from '../../lib/sync/derive-lesson-topics';
@@ -111,8 +113,10 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
     // By now this user has enrolled (test 1), completed a lesson (test 1), and issued a certificate (above).
     const newly = await awardEarnedBadges(userId);
     expect(newly).toEqual(expect.arrayContaining(['explorer', 'ranger'])); // cadet was earned directly earlier
-    const have = (await getLearningMemory(userId)).badges.map((b) => b.id);
-    expect(have).toEqual(expect.arrayContaining(['explorer', 'cadet', 'ranger']));
+    const mem = await getLearningMemory(userId);
+    expect(mem.badges.map((b) => b.id)).toEqual(expect.arrayContaining(['explorer', 'cadet', 'ranger']));
+    // certificates carry the course title for the /me learning summary
+    expect(mem.certificates.find((c) => c.lessonPlanId === LP)?.courseTitle).toBe('Geology of Yellowstone');
     expect(await awardEarnedBadges(userId)).toEqual([]); // idempotent — nothing new on a re-run
   });
 
@@ -203,6 +207,33 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
       `MATCH (lp:LessonPlan {id: $planId}) OPTIONAL MATCH (lp)-[:CONTAINS_MODULE]->(m:Module) DETACH DELETE lp, m`,
       { planId },
     );
+  });
+
+  it('Phase 7: cross-park trails — Geology spans yell + grca; learningTrailForTopic returns both, grade-ordered', async () => {
+    // The seed grounds "Geology of Yellowstone" (yell) and "Geology of the Grand Canyon" (grca) in the
+    // same 'Geology' topic, so it surfaces as a cross-park trail (≥2 parks).
+    const topics = await crossParkTopics(20);
+    const geology = topics.find((t) => t.topic === 'Geology');
+    expect(geology).toBeDefined();
+    expect(geology!.parkCount).toBeGreaterThanOrEqual(2);
+    expect(geology!.courseCount).toBeGreaterThanOrEqual(2);
+
+    const trail = await learningTrailForTopic('Geology');
+    const ids = trail.map((c) => c.id);
+    expect(ids).toContain('lesson-yell-geology');
+    expect(ids).toContain('lesson-grca-geology');
+    // Grade-band ordering: the yell course (TARGETS GradeBand 6–8) sorts before grca (no GradeBand → 99).
+    const yellIdx = ids.indexOf('lesson-yell-geology');
+    const grcaIdx = ids.indexOf('lesson-grca-geology');
+    expect(yellIdx).toBeLessThan(grcaIdx);
+    // The decomposed yell course reports its lesson count; the grca stub has none.
+    const yellCourse = trail.find((c) => c.id === 'lesson-yell-geology')!;
+    expect(yellCourse.decomposed).toBe(true);
+    expect(yellCourse.lessonCount).toBeGreaterThanOrEqual(1);
+    expect(yellCourse.parkName).toContain('Yellowstone');
+
+    // An unknown topic yields an empty trail (page-level notFound()).
+    expect(await learningTrailForTopic('NoSuchTopicZZZ')).toEqual([]);
   });
 
   // Runs LAST: deriveLessonTopics adds 'Geology' to the seeded quiz's TESTS, which would perturb the

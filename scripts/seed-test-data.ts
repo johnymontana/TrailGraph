@@ -192,11 +192,13 @@ export async function seedTestData(): Promise<void> {
     MERGE (lp:LessonPlan {id:'lesson-yell-geology'})
       SET lp.title='Geology of Yellowstone', lp.url='https://www.nps.gov/yell/lesson1.htm',
           lp.gradeLevel='6-8', lp.gradeMin=6, lp.gradeMax=8, lp.subject='Earth Science',
-          lp.objective='Explain how the Yellowstone hotspot drives the park''s geysers and calderas.',
+          lp.objective='Explain how the Yellowstone hotspot drives the geysers and calderas of the park.',
           lp.standards='CCSS.ELA-LITERACY.RST.6-8.4', lp.image='https://www.nps.gov/common/uploads/lesson-geology.jpg',
           lp.durationMin=50
     MERGE (lp)-[:ABOUT]->(yell)
     MERGE (volc2:Topic {id:'top-volc'}) MERGE (lp)-[:RELATES_TO_TOPIC]->(volc2)
+    // Also a Geology course → the "Geology" topic spans yell + grca (cross-park trail, design §13).
+    MERGE (geol3:Topic {id:'top-geology'}) MERGE (lp)-[:RELATES_TO_TOPIC]->(geol3)
     // Ranger School: grade-band vocab node (parseGradeBand → TARGETS), the courseware spine
     // (Module → Lesson → QuizQuestion), and a park-grounded media join (CAN_USE_MEDIA).
     MERGE (gb:GradeBand {id:'6-8'}) SET gb.min=6, gb.max=8, gb.label='Grades 6–8'
@@ -210,10 +212,10 @@ export async function seedTestData(): Promise<void> {
     MERGE (mod)-[:CONTAINS_LESSON]->(les)
     MERGE (q:QuizQuestion {id:'lesson-yell-geology:m1:l1:quiz_v1:easy'})
       SET q.lessonId='lesson-yell-geology:m1:l1', q.ordinal=1,
-          q.stem='What drives Yellowstone''s geysers and calderas?',
+          q.stem='What drives the geysers and calderas of Yellowstone?',
           q.choices='[{"id":"hotspot","label":"A stationary mantle hotspot"},{"id":"glacier","label":"Retreating glaciers"},{"id":"meteor","label":"A meteor impact"}]',
           q.correctId='hotspot',
-          q.rationale='The Yellowstone hotspot is a plume of hot mantle that powers the park''s hydrothermal features.',
+          q.rationale='The Yellowstone hotspot is a plume of hot mantle that powers the hydrothermal features of the park.',
           q.difficulty='easy', q.topic='Volcanoes'
     MERGE (les)-[:HAS_QUESTION]->(q)
     MERGE (q)-[:TESTS]->(volc2)
@@ -229,6 +231,16 @@ export async function seedTestData(): Promise<void> {
       ON CREATE SET cert.id='cert:e2e-cert-user:lesson-yell-geology', cert.shareSlug='test0123456789abcd',
                     cert.score=0.95, cert.issuedAt=datetime('2026-06-20T00:00:00Z')
     MERGE (certuser)-[:ISSUED]->(cert)
+  `);
+
+  // A second Geology course on a DIFFERENT park, so the "Geology" topic spans ≥2 parks (cross-park trail).
+  await writeGraph(`
+    MATCH (grca:Park {parkCode:'grca'}), (geol:Topic {id:'top-geology'})
+    MERGE (lp2:LessonPlan {id:'lesson-grca-geology'})
+      SET lp2.title='Geology of the Grand Canyon', lp2.subject='Earth Science',
+          lp2.gradeLevel='9-12', lp2.gradeMin=9, lp2.gradeMax=12
+    MERGE (lp2)-[:ABOUT]->(grca)
+    MERGE (lp2)-[:RELATES_TO_TOPIC]->(geol)
   `);
 }
 

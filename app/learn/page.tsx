@@ -8,7 +8,7 @@ import { StatCard } from '../../components/ui/stat-card';
 import { EmptyState } from '../../components/ui/empty-state';
 import { CourseCard } from '../../components/learn/CourseCard';
 import { BadgeShelf } from '../../components/learn/BadgeShelf';
-import { learnCatalog, searchCourses, getLearnDashboard, getLearningMemory } from '../../lib/learn-queries';
+import { learnCatalog, searchCourses, getLearnDashboard, getLearningMemory, crossParkTopics } from '../../lib/learn-queries';
 import { allBadges } from '../../lib/learn-badges';
 
 export const dynamic = 'force-dynamic';
@@ -31,11 +31,12 @@ export default async function LearnPage({ searchParams }: { searchParams: Promis
   const query = (sp.q ?? '').trim();
   const grade = (sp.grade ?? '').trim();
   const userId = await getServerUserId();
-  const [courses, dashboard, memory, badges] = await Promise.all([
+  const [courses, dashboard, memory, badges, trails] = await Promise.all([
     query ? searchCourses(query, { limit: 60, gradeBand: grade }) : learnCatalog(60, grade),
     userId ? getLearnDashboard(userId) : Promise.resolve(null),
     userId ? getLearningMemory(userId) : Promise.resolve(null),
     userId ? allBadges() : Promise.resolve([]),
+    crossParkTopics(10),
   ]);
 
   // Build a chip href that preserves the current search query.
@@ -71,6 +72,24 @@ export default async function LearnPage({ searchParams }: { searchParams: Promis
                 <BadgeShelf badges={badges} earnedIds={(memory?.badges ?? []).map((b) => b.id)} />
               </Box>
             ) : null}
+          </Box>
+        ) : null}
+
+        {/* Cross-park trails — a topic taught across multiple parks (design §13). Hidden during a search. */}
+        {!query && trails.length ? (
+          <Box mb={10}>
+            <SectionHeading title="Cross-park trails" description="One topic, many parks — follow it across the system." />
+            <HStack gap={2} wrap="wrap">
+              {trails.map((t) => (
+                <CLink key={t.topic} asChild _hover={{ textDecoration: 'none' }}>
+                  <NextLink href={`/learn/topic/${encodeURIComponent(t.topic)}`}>
+                    <Badge colorPalette="trail" variant="subtle" px={3} py={1.5} cursor="pointer">
+                      {t.topic} · {t.parkCount} parks
+                    </Badge>
+                  </NextLink>
+                </CLink>
+              ))}
+            </HStack>
           </Box>
         ) : null}
 

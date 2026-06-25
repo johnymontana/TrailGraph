@@ -15,7 +15,7 @@ export interface LearningMemory {
   struggling: { topic: string; confidence: number }[];
   mastery: { topic: string; score: number }[];
   badges: { id: string; label: string; tier: string }[];
-  certificates: { lessonPlanId: string; shareSlug: string; score: number | null; issuedAt: string | null }[];
+  certificates: { lessonPlanId: string; courseTitle: string | null; shareSlug: string; score: number | null; issuedAt: string | null }[];
 }
 
 const EMPTY_LEARNING: LearningMemory = {
@@ -43,7 +43,9 @@ export async function getLearningMemory(userId: string): Promise<LearningMemory>
      WITH u, enrolled, completedLessons, struggling, mastery, collect(DISTINCT {id: b.id, label: b.label, tier: b.tier}) AS badges
      OPTIONAL MATCH (u)-[:ISSUED]->(c:Certificate)
      RETURN enrolled, completedLessons, struggling, mastery, badges,
-            collect(DISTINCT {lessonPlanId: c.lessonPlanId, shareSlug: c.shareSlug, score: c.score, issuedAt: toString(c.issuedAt)}) AS certificates`,
+            collect(DISTINCT {lessonPlanId: c.lessonPlanId,
+                              courseTitle: head([(lp:LessonPlan {id: c.lessonPlanId}) | lp.title]),
+                              shareSlug: c.shareSlug, score: c.score, issuedAt: toString(c.issuedAt)}) AS certificates`,
     { userId },
   );
   const r = rows[0];
@@ -259,6 +261,61 @@ export async function searchCourses(rawQuery: string, opts: { limit?: number; gr
      ORDER BY decomposed DESC, score DESC
      LIMIT toInteger($limit)`,
     { ft, limit, bandMin: band?.[0] ?? null, bandMax: band?.[1] ?? null },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cross-park learning trails (design §13) — a topic taught across multiple parks.
+// Query-time (like lib/queries.ts#thematicTrail), reusing (:Topic)<-[:RELATES_TO_TOPIC]-(:LessonPlan)-[:ABOUT]->(:Park).
+// ---------------------------------------------------------------------------
+
+export interface CrossParkTopic {
+  topic: string;
+  parkCount: number;
+  courseCount: number;
+}
+
+/** Topics taught across ≥2 parks — the discoverable cross-park trails. Sorted by reach then breadth. */
+export async function crossParkTopics(limit = 12): Promise<CrossParkTopic[]> {
+  return readGraph<CrossParkTopic>(
+    `MATCH (t:Topic)<-[:RELATES_TO_TOPIC]-(lp:LessonPlan)-[:ABOUT]->(p:Park)
+     WITH t, count(DISTINCT p) AS parkCount, count(DISTINCT lp) AS courseCount
+     WHERE parkCount >= 2
+     RETURN t.name AS topic, toInteger(parkCount) AS parkCount, toInteger(courseCount) AS courseCount
+     ORDER BY parkCount DESC, courseCount DESC, topic ASC
+     LIMIT toInteger($limit)`,
+    { limit },
+  );
+}
+
+export interface TrailCourse {
+  id: string;
+  title: string;
+  subject: string | null;
+  gradeLevel: string | null;
+  gradeMin: number | null;
+  parkCode: string | null;
+  parkName: string | null;
+  lessonCount: number;
+  decomposed: boolean;
+}
+
+/**
+ * The courses on a topic across every park that teaches it, ordered by grade band then park — the
+ * "learn Volcanoes across Yellowstone, Hawai'i Volcanoes, and Lassen" trail. Returns [] for an
+ * unknown/empty topic.
+ */
+export async function learningTrailForTopic(topicName: string): Promise<TrailCourse[]> {
+  return readGraph<TrailCourse>(
+    `MATCH (t:Topic {name: $topic})<-[:RELATES_TO_TOPIC]-(lp:LessonPlan)-[:ABOUT]->(p:Park)
+     OPTIONAL MATCH (lp)-[:TARGETS]->(gb:GradeBand)
+     OPTIONAL MATCH (lp)-[:CONTAINS_MODULE]->(:Module)-[:CONTAINS_LESSON]->(l:Lesson)
+     WITH lp, p, gb, count(DISTINCT l) AS lessonCount
+     RETURN lp.id AS id, lp.title AS title, lp.subject AS subject, lp.gradeLevel AS gradeLevel,
+            gb.min AS gradeMin, p.parkCode AS parkCode, p.fullName AS parkName,
+            toInteger(lessonCount) AS lessonCount, lessonCount > 0 AS decomposed
+     ORDER BY coalesce(gb.min, 99) ASC, p.fullName ASC, title ASC`,
+    { topic: topicName },
   );
 }
 
