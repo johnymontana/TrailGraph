@@ -43,8 +43,9 @@ describe('qualifyingBadgeIds (badge milestones)', () => {
     expect(qualifyingBadgeIds({ ...base, enrolled: 1 })).toContain('explorer');
     expect(qualifyingBadgeIds(base)).not.toContain('explorer');
   });
-  it('cadet on a first completed lesson', () => {
-    expect(qualifyingBadgeIds({ ...base, completedLessons: 1 })).toContain('cadet');
+  it('cadet at two completed lessons, not one (no longer fires on a single answer)', () => {
+    expect(qualifyingBadgeIds({ ...base, completedLessons: 1 })).not.toContain('cadet');
+    expect(qualifyingBadgeIds({ ...base, completedLessons: 2 })).toContain('cadet');
   });
   it('ranger at 1 certificate, senior-ranger only at 3', () => {
     expect(qualifyingBadgeIds({ ...base, certificates: 1 })).toContain('ranger');
@@ -98,7 +99,7 @@ describe('awardEarnedBadges', () => {
     getLearningMemoryMock.mockResolvedValue(
       memory({
         enrolled: 1,
-        completedLessons: 1,
+        completedLessons: 2, // ≥2 now qualifies for 'cadet'
         certificates: 3,
         mastery: [{ topic: 'Geology', score: 0.9 }],
         badges: [{ id: 'explorer' }], // already earned → must be skipped

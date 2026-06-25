@@ -15,7 +15,7 @@ export function qualifyingBadgeIds(state: {
 }): string[] {
   const ids: string[] = [];
   if (state.enrolled >= 1) ids.push('explorer'); // enroll in your first course
-  if (state.completedLessons >= 1) ids.push('cadet'); // complete your first lesson
+  if (state.completedLessons >= 2) ids.push('cadet'); // complete a couple of lessons (not a single easy question)
   if (state.certificates >= 1) ids.push('ranger'); // complete a course
   if (state.certificates >= 3) ids.push('senior-ranger'); // complete three courses
   const mastered = (match: (t: string) => boolean) => state.mastery.some((m) => m.score >= 0.8 && match(m.topic));

@@ -13,7 +13,7 @@ import { callerId } from '../../lib/agent-ctx';
  */
 export default defineTool({
   description:
-    "Grade the learner's quiz answer. Call after a quiz when their reply arrives as 'quizId:choiceId' — pass the quizId and the chosen choiceId.",
+    "Grade the learner's quiz answer. Call after a quiz when the learner taps a choice — pass the quizId and the chosen choiceId (both provided as client context alongside their reply).",
   inputSchema: z.object({
     quizId: z.string().describe('The quiz question id that was answered.'),
     choiceId: z.string().describe("The learner's chosen option id."),
@@ -24,6 +24,7 @@ export default defineTool({
     if (!truth) return { kind: 'quiz_feedback_card', data: { error: `Quiz ${quizId} not found.` } };
 
     const correct = choiceId === truth.correctId;
+    const labelFor = (id: string) => truth.choices.find((c) => c.id === id)?.label ?? null;
     await recordQuizAttempt(userId, quizId, correct, choiceId);
 
     // Record mastery (+ struggle on a miss) for EVERY topic the quiz tests. May be empty until
@@ -40,8 +41,11 @@ export default defineTool({
     return {
       kind: 'quiz_feedback_card',
       data: {
+        quizId,
         correct,
         correctId: truth.correctId,
+        correctLabel: labelFor(truth.correctId),
+        chosenLabel: labelFor(choiceId),
         rationale: truth.rationale,
         citationLessonId: truth.lessonId,
         topics: truth.topics,

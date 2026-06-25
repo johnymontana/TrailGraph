@@ -154,8 +154,8 @@ test('a signed-in learner sees the Your progress band (stat cards + badge shelf)
   // The four StatCards render even at zero for a fresh learner.
   await expect(page.getByText('Lessons completed')).toBeVisible();
   await expect(page.getByText('Certificates')).toBeVisible();
-  // The Junior Ranger badge shelf shows the (locked) taxonomy from migration 021.
-  await expect(page.getByText(/Junior Ranger badges/i)).toBeVisible();
+  // The ranger badge shelf shows the (locked) taxonomy from migration 021 (adult-reframe heading).
+  await expect(page.getByText(/Your ranger badges/i)).toBeVisible();
 });
 
 test('certificate Copy share link button switches to Copied! after a click', async ({ page, context }) => {
@@ -165,4 +165,60 @@ test('certificate Copy share link button switches to Copied! after a click', asy
   await expect(btn).toBeVisible();
   await btn.click();
   await expect(page.getByRole('button', { name: /Copied!/i })).toBeVisible();
+});
+
+// --- Catalog filters/sort (adult reframe + Item 9) ---
+
+test('catalog subject filter narrows to the subject and an unknown subject is empty', async ({ page }) => {
+  // Both seed courses are subject "Earth Science".
+  await page.goto('/learn?subject=Earth%20Science');
+  await expect(page.getByText('Geology of Yellowstone')).toBeVisible();
+  // A subject with no courses → the grounded empty state (never invented content).
+  await page.goto('/learn?subject=Underwater%20Basket%20Weaving');
+  await expect(page.getByText(/No courses/i)).toBeVisible();
+});
+
+test('catalog renders the subject + sort filter controls (no-JS GET form)', async ({ page }) => {
+  await page.goto('/learn');
+  // Native <select name=…> controls — precise locators (the label text "Subject" also appears as a Sort option).
+  await expect(page.locator('select[name="subject"]')).toBeVisible();
+  await expect(page.locator('select[name="sort"]')).toBeVisible();
+  await expect(page.locator('select[name="subject"] option', { hasText: 'All subjects' })).toBeAttached();
+  await expect(page.locator('select[name="sort"] option', { hasText: 'Most lessons' })).toBeAttached();
+});
+
+// --- Course syllabus header (Item 7) ---
+
+test('course syllabus shows a park · subject · objective header', async ({ page }) => {
+  await page.goto('/learn/lesson-yell-geology');
+  await expect(page.getByText('Earth Science')).toBeVisible(); // subject badge
+  await expect(page.getByText(/Explain how the Yellowstone hotspot/i)).toBeVisible(); // objective
+  // Topic badges surfaced from RELATES_TO_TOPIC.
+  await expect(page.getByText('Geology', { exact: true })).toBeVisible();
+});
+
+// --- Lesson player: the headline ID-leak fix + center-pane enrichment ---
+
+test('lesson tutor chips show clean human text — NO leaked lessonId (the headline fix)', async ({ page }) => {
+  await signUp(page);
+  await page.goto(LESSON_URL);
+  // The empty-state tutor prompts (chat is inert under DISABLE_EVE, so the chips render).
+  await expect(page.getByText('Quiz me on this lesson', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Teach me "The Yellowstone Hotspot"/)).toBeVisible();
+  // The OLD leak format ("…lessonId lesson-yell-geology:m1:l1") must be gone — no "lessonId" in the UI,
+  // and the raw id never appears as visible text (it rides in Eve clientContext now).
+  await expect(page.getByText(/lessonId/i)).toHaveCount(0);
+  await expect(page.getByText(/:m1:l1/)).toHaveCount(0);
+});
+
+test('lesson center pane renders Key concepts + topics and drops the trip-planning disclaimer', async ({ page }) => {
+  await signUp(page);
+  await page.goto(LESSON_URL);
+  // Decomposed module summary (was fetched but never rendered before).
+  await expect(page.getByRole('heading', { name: 'Key concepts' })).toBeVisible();
+  await expect(page.getByText(/How the Yellowstone hotspot built the caldera/i)).toBeVisible();
+  // The out-of-place trip-safety copy is gone from lessons.
+  await expect(page.getByText(/Openness and accessibility are reported by the park/i)).toHaveCount(0);
+  // Self-guided audio is relabeled so it doesn't read as required lesson material (when the park has media).
+  await expect(page.getByText(/Quiz me on this lesson/)).toBeVisible(); // sanity: shell rendered
 });

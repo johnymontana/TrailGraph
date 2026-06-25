@@ -2,8 +2,10 @@ import { Badge, Box, Button, Flex, HStack, Heading, Stack, Text, Link as CLink }
 import NextLink from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getServerUserId } from '../../../../lib/session';
-import { ChatPanel } from '../../../../components/chat/ChatPanel';
+import { ChatPanel, type ChatSuggestion } from '../../../../components/chat/ChatPanel';
+import { LessonProgressRefresher } from '../../../../components/learn/LessonProgressRefresher';
 import { lessonContent, lessonPlanProgress } from '../../../../lib/learn-queries';
+import { getTutorTranscript } from '../../../../lib/learn-transcript';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,15 +30,21 @@ export default async function LessonPlayerPage({
   const userId = await getServerUserId();
   if (!userId) redirect('/signin');
 
-  const [content, progress] = await Promise.all([
+  const [content, progress, transcript] = await Promise.all([
     lessonContent(lessonId),
     lessonPlanProgress(userId, lessonPlanId),
+    getTutorTranscript(userId, lessonId), // saved Eve event stream → restores the tutor thread (with cards) on reload
   ]);
   if (!content || !progress) notFound();
 
   const objective = content.context?.lessonPlan.objective ?? null;
   const audio = content.context?.media.audio ?? [];
   const parkName = content.context?.park?.fullName ?? null;
+  // Already fetched by lessonContent — render them (the center pane was previously near-empty). Adult-learner
+  // framing: lead with subject + topics; grade level is intentionally de-emphasized (filter, not headline).
+  const subject = content.context?.lessonPlan.subject ?? null;
+  const topics = content.context?.lessonPlan.topics ?? [];
+  const moduleSummary = content.module.summary;
   const lessonHref = (id: string) => `/learn/${encodeURIComponent(lessonPlanId)}/${encodeURIComponent(id)}`;
   // Linear prev/next across the flattened course spine.
   const flatLessons = progress.modules.flatMap((m) => m.lessons);
@@ -44,15 +52,23 @@ export default async function LessonPlayerPage({
   const prevLesson = idx > 0 ? flatLessons[idx - 1] : null;
   const nextLesson = idx >= 0 && idx < flatLessons.length - 1 ? flatLessons[idx + 1] : null;
 
-  // Lesson-seeded tutor prompts: the lessonId is embedded so the model grounds tutor_step/generate_quiz.
-  const suggestions = [
-    `Teach me "${content.lesson.title}" (lessonId: ${lessonId})`,
-    `Quiz me on lessonId ${lessonId}`,
-    'How am I doing in this course?',
+  // Lesson-seeded tutor prompts. The chip + the user's bubble show clean human text; the lessonId /
+  // lessonPlanId ride in Eve's ephemeral `clientContext` (model-only, never persisted, never a bubble) so
+  // the tutor grounds tutor_step/generate_quiz without leaking UUIDs into the learner UI.
+  const suggestions: ChatSuggestion[] = [
+    {
+      label: `Teach me "${content.lesson.title}"`,
+      message: `Teach me "${content.lesson.title}"`,
+      clientContext: { lessonId, lessonPlanId },
+    },
+    { label: 'Quiz me on this lesson', message: 'Quiz me on this lesson', clientContext: { lessonId, lessonPlanId } },
+    { label: 'How am I doing in this course?', message: 'How am I doing in this course?', clientContext: { lessonPlanId } },
   ];
 
   return (
     <Flex position="fixed" top="57px" left={0} right={0} bottom={0} direction={{ base: 'column', md: 'row' }} data-fullscreen>
+      {/* Refresh the server-rendered progress rail when the tutor grades a quiz (no reload). */}
+      <LessonProgressRefresher />
       <Heading as="h1" srOnly>
         {content.lesson.title} — {progress.title}
       </Heading>
@@ -90,16 +106,31 @@ export default async function LessonPlayerPage({
       {/* Center: park-grounded lesson content */}
       <Box flex="1" minH={0} h={{ base: '50%', md: '100%' }} overflowY="auto" p={{ base: 4, md: 8 }}>
         <Text fontSize="xs" color="fg.muted" mb={1}>{content.module.title}</Text>
-        <Heading as="h2" size="xl" fontFamily="heading" mb={4}>{content.lesson.title}</Heading>
+        <Heading as="h2" size="xl" fontFamily="heading" mb={2}>{content.lesson.title}</Heading>
+        {subject || topics.length ? (
+          <HStack gap={2} wrap="wrap" mb={4}>
+            {subject ? <Badge colorPalette="pine" size="sm">{subject}</Badge> : null}
+            {topics.slice(0, 4).map((t) => (
+              <Badge key={t} colorPalette="trail" size="sm">{t}</Badge>
+            ))}
+          </HStack>
+        ) : null}
         {objective ? (
           <Box bg="brand.subtle" borderRadius="l2" p={4} mb={6}>
             <Text fontSize="xs" fontWeight="semibold" color="accent.fg" textTransform="uppercase" letterSpacing="0.05em" mb={1}>Objective</Text>
             <Text fontSize="sm">{objective}</Text>
           </Box>
         ) : null}
+        {moduleSummary ? (
+          <Box mb={6}>
+            <Heading as="h3" size="sm" mb={2}>Key concepts</Heading>
+            <Text fontSize="sm" color="fg.muted">{moduleSummary}</Text>
+          </Box>
+        ) : null}
         {audio.length ? (
           <Box mb={6}>
-            <Heading as="h3" size="md" mb={2}>🎧 Audio from {parkName ?? 'the park'}</Heading>
+            <Heading as="h3" size="md" mb={1}>🎧 Self-guided audio from {parkName ?? 'this park'}</Heading>
+            <Text fontSize="xs" color="fg.muted" mb={2}>More from this park&apos;s NPS audio tours — related listening, not required for the lesson.</Text>
             <Stack gap={2}>
               {audio.map((a) => (
                 <Text key={a.id} fontSize="sm">
@@ -112,7 +143,7 @@ export default async function LessonPlayerPage({
         ) : null}
         <Text fontSize="sm" color="fg.muted">
           Ask the Ranger on the right to teach this lesson, quiz you, and track your progress — everything is
-          grounded in this course. Openness and accessibility are reported by the park; verify before a visit.
+          grounded in this course.
         </Text>
 
         {/* Linear prev/next across the course */}
@@ -145,11 +176,17 @@ export default async function LessonPlayerPage({
       {/* Right: lesson-seeded tutor chat (mounted exactly once) */}
       <Box w={{ base: '100%', md: '400px' }} h={{ base: '50%', md: '100%' }} minH={0} borderLeftWidth={{ md: '1px' }} borderTopWidth={{ base: '1px', md: 0 }} borderColor="border">
         <ChatPanel
+          key={lessonId}
           title="Ranger · your tutor"
           subtitle="Grounded in this lesson"
           emptyHint="Tap a prompt to start learning this lesson."
           placeholder="Ask about this lesson…"
           suggestions={suggestions}
+          // Replay the saved event stream so the thread restores WITH its cards. We deliberately do NOT resume
+          // the Eve session (initialSession): a new turn starts a fresh server session and the tutor re-grounds
+          // via its tools + per-turn injected memory — avoids the "session not found" trap if it has expired.
+          initialEvents={transcript.events}
+          persistUrl={`/api/learn/transcript/${encodeURIComponent(lessonId)}`}
         />
       </Box>
     </Flex>

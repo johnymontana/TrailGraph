@@ -123,6 +123,32 @@ export async function lessonPlanProgress(userId: string, lessonPlanId: string): 
   return { title: rows[0].title, done: allLessons.filter((l) => l.completed).length, total: allLessons.length, modules };
 }
 
+export interface LessonPlanHeader {
+  subject: string | null;
+  gradeLevel: string | null;
+  objective: string | null;
+  parkCode: string | null;
+  parkName: string | null;
+  topics: string[];
+}
+
+/**
+ * Lightweight course header (park · subject · grade · objective · topics) for the syllabus page — a dedicated
+ * read so the hot `lessonPlanProgress` query stays lean. Returns null if the lesson plan doesn't exist.
+ */
+export async function lessonPlanHeader(lessonPlanId: string): Promise<LessonPlanHeader | null> {
+  const rows = await readGraph<LessonPlanHeader>(
+    `MATCH (lp:LessonPlan {id: $lessonPlanId})
+     OPTIONAL MATCH (lp)-[:ABOUT]->(p:Park)
+     OPTIONAL MATCH (lp)-[:RELATES_TO_TOPIC]->(t:Topic)
+     RETURN lp.subject AS subject, lp.gradeLevel AS gradeLevel, lp.objective AS objective,
+            p.parkCode AS parkCode, p.fullName AS parkName,
+            [x IN collect(DISTINCT t.name) WHERE x IS NOT NULL] AS topics`,
+    { lessonPlanId },
+  );
+  return rows[0] ?? null;
+}
+
 export interface TopicMastery {
   topic: string;
   mastery: number; // rolling correctness 0..1 over the recent window
@@ -179,25 +205,62 @@ export function gradeBandRange(band: string | null | undefined): [number, number
   return GRADE_BANDS[band.toLowerCase()] ?? null;
 }
 
+/** Catalog sort options (whitelisted → safe to interpolate into ORDER BY; never user-supplied SQL/Cypher). */
+export type CatalogSort = 'park' | 'grade' | 'subject' | 'lessons';
+const CATALOG_SORTS: Record<CatalogSort, string> = {
+  park: 'parkCode ASC, title ASC',
+  grade: 'coalesce(lp.gradeMin, 99) ASC, title ASC',
+  subject: 'coalesce(subject, "zzz") ASC, title ASC',
+  lessons: 'lessonCount DESC, title ASC',
+};
+// Default keeps teachable (decomposed) courses ahead of catalog-only ones, then park + title.
+const DEFAULT_CATALOG_SORT = 'decomposed DESC, parkCode ASC, title ASC';
+function catalogSortClause(sort?: string): string {
+  return (sort && CATALOG_SORTS[sort as CatalogSort]) || DEFAULT_CATALOG_SORT;
+}
+
+export interface CatalogOpts {
+  subject?: string;
+  sort?: CatalogSort;
+  page?: number; // 0-based; SKIP = page * limit
+}
+
+/** Distinct subjects across lesson plans — the catalog's subject-filter facet. */
+export async function subjectFacets(): Promise<string[]> {
+  const rows = await readGraph<{ subject: string }>(
+    `MATCH (lp:LessonPlan) WHERE lp.subject IS NOT NULL AND lp.subject <> ''
+     RETURN DISTINCT lp.subject AS subject ORDER BY subject ASC`,
+  );
+  return rows.map((r) => r.subject);
+}
+
 /**
- * Catalog of courses (lesson plans) across parks for `/learn`, optionally filtered to a grade band. Sorted
- * decomposed-first (teachable courses surface ahead of catalog-only ones), then by park + title.
+ * Catalog of courses (lesson plans) across parks for `/learn`, optionally filtered to a grade band + subject,
+ * sorted (default decomposed-first then park+title), and paginated (0-based `page`). ~1,357 plans, so the
+ * catalog page paginates rather than dumping everything.
  */
-export async function learnCatalog(limit = 60, gradeBand?: string): Promise<LearnCourseCard[]> {
+export async function learnCatalog(limit = 60, gradeBand?: string, opts: CatalogOpts = {}): Promise<LearnCourseCard[]> {
   const band = gradeBandRange(gradeBand);
   return readGraph<LearnCourseCard>(
     `MATCH (lp:LessonPlan)
-     WHERE $bandMin IS NULL OR (lp.gradeMin IS NOT NULL AND lp.gradeMax IS NOT NULL
-                                AND lp.gradeMin <= $bandMax AND lp.gradeMax >= $bandMin)
+     WHERE ($bandMin IS NULL OR (lp.gradeMin IS NOT NULL AND lp.gradeMax IS NOT NULL
+                                 AND lp.gradeMin <= $bandMax AND lp.gradeMax >= $bandMin))
+       AND ($subject IS NULL OR lp.subject = $subject)
      OPTIONAL MATCH (lp)-[:ABOUT]->(p:Park)
      OPTIONAL MATCH (lp)-[:CONTAINS_MODULE]->(:Module)-[:CONTAINS_LESSON]->(l:Lesson)
      WITH lp, p, count(DISTINCT l) AS lessonCount
      RETURN lp.id AS id, lp.title AS title, lp.subject AS subject, lp.gradeLevel AS gradeLevel,
             p.parkCode AS parkCode, p.fullName AS parkName,
             toInteger(lessonCount) AS lessonCount, lessonCount > 0 AS decomposed
-     ORDER BY decomposed DESC, parkCode ASC, title ASC
-     LIMIT toInteger($limit)`,
-    { limit, bandMin: band?.[0] ?? null, bandMax: band?.[1] ?? null },
+     ORDER BY ${catalogSortClause(opts.sort)}
+     SKIP toInteger($skip) LIMIT toInteger($limit)`,
+    {
+      limit,
+      skip: Math.max(0, opts.page ?? 0) * limit,
+      bandMin: band?.[0] ?? null,
+      bandMax: band?.[1] ?? null,
+      subject: opts.subject ?? null,
+    },
   );
 }
 
@@ -244,24 +307,38 @@ export function toFulltextQuery(raw: string): string {
  * `learnCatalog` for an empty query, so the catalog page can use one code path. Essential at scale — there
  * are ~1,357 lesson plans.
  */
-export async function searchCourses(rawQuery: string, opts: { limit?: number; gradeBand?: string } = {}): Promise<LearnCourseCard[]> {
+export async function searchCourses(
+  rawQuery: string,
+  opts: { limit?: number; gradeBand?: string } & CatalogOpts = {},
+): Promise<LearnCourseCard[]> {
   const limit = opts.limit ?? 60;
   const ft = toFulltextQuery(rawQuery);
-  if (!ft) return learnCatalog(limit, opts.gradeBand);
+  // Empty query → the catalog path (one code path), forwarding all facets/sort/page.
+  if (!ft) return learnCatalog(limit, opts.gradeBand, opts);
   const band = gradeBandRange(opts.gradeBand);
+  // A typed sort overrides relevance; default keeps relevance (decomposed-first then score).
+  const order = opts.sort ? catalogSortClause(opts.sort) : 'decomposed DESC, score DESC';
   return readGraph<LearnCourseCard>(
     `CALL db.index.fulltext.queryNodes('lessonplan_fulltext', $ft) YIELD node AS lp, score
-     WHERE $bandMin IS NULL OR (lp.gradeMin IS NOT NULL AND lp.gradeMax IS NOT NULL
-                                AND lp.gradeMin <= $bandMax AND lp.gradeMax >= $bandMin)
+     WHERE ($bandMin IS NULL OR (lp.gradeMin IS NOT NULL AND lp.gradeMax IS NOT NULL
+                                 AND lp.gradeMin <= $bandMax AND lp.gradeMax >= $bandMin))
+       AND ($subject IS NULL OR lp.subject = $subject)
      OPTIONAL MATCH (lp)-[:ABOUT]->(p:Park)
      OPTIONAL MATCH (lp)-[:CONTAINS_MODULE]->(:Module)-[:CONTAINS_LESSON]->(l:Lesson)
      WITH lp, p, score, count(DISTINCT l) AS lessonCount
      RETURN lp.id AS id, lp.title AS title, lp.subject AS subject, lp.gradeLevel AS gradeLevel,
             p.parkCode AS parkCode, p.fullName AS parkName,
             toInteger(lessonCount) AS lessonCount, lessonCount > 0 AS decomposed
-     ORDER BY decomposed DESC, score DESC
-     LIMIT toInteger($limit)`,
-    { ft, limit, bandMin: band?.[0] ?? null, bandMax: band?.[1] ?? null },
+     ORDER BY ${order}
+     SKIP toInteger($skip) LIMIT toInteger($limit)`,
+    {
+      ft,
+      limit,
+      skip: Math.max(0, opts.page ?? 0) * limit,
+      bandMin: band?.[0] ?? null,
+      bandMax: band?.[1] ?? null,
+      subject: opts.subject ?? null,
+    },
   );
 }
 
@@ -372,36 +449,69 @@ export interface QuizGradeData {
   difficulty: string;
   lessonId: string;
   topics: string[]; // all TESTS topics (empty until deriveLessonTopics grounds the course in its park's topics)
+  choices: { id: string; label: string }[]; // parsed — lets grade_answer map ids → human labels for the feedback card
 }
 
-/** SERVER-ONLY grading ground truth (`correctId` + rationale + every TESTS topic). Never sent to the client. */
+/** SERVER-ONLY grading ground truth (`correctId` + rationale + choices + every TESTS topic). Never sent to the
+ * client pre-answer; `choices` is fine post-grade (the feedback card reveals the correct answer's label). */
 export async function quizGradeData(quizId: string): Promise<QuizGradeData | null> {
-  const rows = await readGraph<QuizGradeData>(
+  const rows = await readGraph<{
+    correctId: string;
+    rationale: string | null;
+    difficulty: string;
+    lessonId: string;
+    topics: string[];
+    choices: string | null;
+  }>(
     `MATCH (q:QuizQuestion {id: $quizId})
      OPTIONAL MATCH (q)-[:TESTS]->(t:Topic)
      RETURN q.correctId AS correctId, q.rationale AS rationale, q.difficulty AS difficulty,
-            q.lessonId AS lessonId, [x IN collect(DISTINCT t.name) WHERE x IS NOT NULL] AS topics`,
+            q.lessonId AS lessonId, q.choices AS choices, [x IN collect(DISTINCT t.name) WHERE x IS NOT NULL] AS topics`,
     { quizId },
   );
-  return rows[0] ?? null;
+  if (!rows.length) return null;
+  const r = rows[0];
+  return {
+    correctId: r.correctId,
+    rationale: r.rationale,
+    difficulty: r.difficulty,
+    lessonId: r.lessonId,
+    topics: r.topics,
+    choices: parseChoices(r.choices),
+  };
 }
 
 /**
- * Pick a cached quiz for a lesson, preferring the given difficulty (the spine caps one quiz per
- * (lesson, difficulty)); falls back to any quiz for the lesson so a learner is never stuck. Client-safe.
+ * Pick a cached quiz for a lesson, preferring the given difficulty and SKIPPING `excludeIds` (recently-served
+ * questions) so re-quizzing a lesson serves a fresh item / climbs difficulty rather than repeating. Falls back
+ * to any non-excluded quiz so a learner is never stuck. Client-safe (no correctId).
  */
-export async function pickQuizForLesson(lessonId: string, difficulty?: string): Promise<ClientQuiz | null> {
+export async function pickQuizForLesson(lessonId: string, difficulty?: string, excludeIds: string[] = []): Promise<ClientQuiz | null> {
   const rows = await readGraph<{ id: string; stem: string; choices: string; difficulty: string }>(
     `MATCH (l:Lesson {id: $lessonId})-[:HAS_QUESTION]->(q:QuizQuestion)
+     WHERE NOT q.id IN $excludeIds
      RETURN q.id AS id, q.stem AS stem, q.choices AS choices, q.difficulty AS difficulty
      ORDER BY CASE WHEN $difficulty IS NOT NULL AND q.difficulty = $difficulty THEN 0 ELSE 1 END, q.ordinal ASC
      LIMIT 1`,
-    { lessonId, difficulty: difficulty ?? null },
+    { lessonId, difficulty: difficulty ?? null, excludeIds },
   );
   if (!rows.length) return null;
   const choices = parseChoices(rows[0].choices);
   if (!choices.length) return null;
   return { id: rows[0].id, stem: rows[0].stem, choices, difficulty: rows[0].difficulty, lessonId };
+}
+
+/**
+ * The quiz ids a learner most-recently ANSWERED for a lesson (newest first) — fed to `pickQuizForLesson` as
+ * `excludeIds` so the tutor doesn't immediately re-serve a question they just answered.
+ */
+export async function recentQuizIdsForLesson(userId: string, lessonId: string, limit = 5): Promise<string[]> {
+  const rows = await readGraph<{ id: string }>(
+    `MATCH (:User {userId: $userId})-[a:ANSWERED]->(q:QuizQuestion)<-[:HAS_QUESTION]-(:Lesson {id: $lessonId})
+     RETURN q.id AS id ORDER BY a.at DESC LIMIT toInteger($limit)`,
+    { userId, lessonId, limit },
+  );
+  return rows.map((r) => r.id);
 }
 
 export interface LessonContent {

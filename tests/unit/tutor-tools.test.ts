@@ -20,6 +20,7 @@ vi.mock('../../lib/learning-bridges', () => ({
 vi.mock('../../lib/learn-queries', () => ({
   quizGradeData: vi.fn(),
   pickQuizForLesson: vi.fn(),
+  recentQuizIdsForLesson: vi.fn(),
   masteryByTopic: vi.fn(),
   quizDifficultyForMastery: vi.fn(),
   lessonContent: vi.fn(),
@@ -60,6 +61,7 @@ describe('grade_answer', () => {
       difficulty: 'easy',
       lessonId: 'l1',
       topics: ['Geology', 'Volcanoes'],
+      choices: [{ id: 'a', label: 'Hotspot' }, { id: 'b', label: 'Glacier' }],
     });
     vi.mocked(bridges.recordMastery).mockResolvedValue({ previous: null, score: 1 });
   });
@@ -85,7 +87,7 @@ describe('grade_answer', () => {
   });
 
   it('handles a topic-less quiz gracefully (no mastery/struggle, still records + completes on correct)', async () => {
-    vi.mocked(lq.quizGradeData).mockResolvedValue({ correctId: 'a', rationale: null, difficulty: 'easy', lessonId: 'l1', topics: [] });
+    vi.mocked(lq.quizGradeData).mockResolvedValue({ correctId: 'a', rationale: null, difficulty: 'easy', lessonId: 'l1', topics: [], choices: [{ id: 'a', label: 'Hotspot' }] });
     const out = await exec(gradeAnswer, { quizId: 'q1', choiceId: 'a' });
     expect(out.data.correct).toBe(true);
     expect(bridges.recordMastery).not.toHaveBeenCalled();
@@ -122,6 +124,7 @@ describe('grade_answer', () => {
     vi.mocked(ctx.callerId).mockReturnValue('u1');
     vi.mocked(lq.quizGradeData).mockResolvedValue({
       correctId: 'a', rationale: 'Because the hotspot.', difficulty: 'easy', lessonId: 'l1', topics: ['Geology', 'Volcanoes'],
+      choices: [{ id: 'a', label: 'Hotspot' }, { id: 'b', label: 'Glacier' }],
     });
     vi.mocked(bridges.recordMastery).mockResolvedValue({ previous: null, score: 0 });
     vi.mocked(learnBadges.awardEarnedBadges).mockResolvedValue(['topic-geology']);
@@ -131,16 +134,19 @@ describe('grade_answer', () => {
     expect(wrongOut.data.earnedBadges).toEqual(['topic-geology']); // topic-mastery badge possible on a miss
   });
 
-  it('reveals correctId + rationale + citationLessonId on the feedback card (post-answer reveal is intended)', async () => {
+  it('reveals correctId/labels + rationale + citationLessonId on the feedback card (post-answer reveal is intended)', async () => {
     const out = await exec(gradeAnswer, { quizId: 'q1', choiceId: 'b' });
     expect(out.data.correctId).toBe('a'); // WITHHELD pre-answer (generate_quiz) but revealed in feedback
+    expect(out.data.correctLabel).toBe('Hotspot'); // mapped id → human label for the card reveal
+    expect(out.data.chosenLabel).toBe('Glacier'); // what the learner picked
+    expect(out.data.quizId).toBe('q1'); // surfaced for the rangerschool:quiz-graded announce dedup
     expect(out.data.rationale).toBe('Because the hotspot.');
     expect(out.data.citationLessonId).toBe('l1');
     expect(out.data.topics).toEqual(['Geology', 'Volcanoes']);
   });
 
   it('leaves mastery null when recordMastery returns null for a non-topic and still completes the lesson', async () => {
-    vi.mocked(lq.quizGradeData).mockResolvedValue({ correctId: 'a', rationale: null, difficulty: 'easy', lessonId: 'l1', topics: ['NotATopic'] });
+    vi.mocked(lq.quizGradeData).mockResolvedValue({ correctId: 'a', rationale: null, difficulty: 'easy', lessonId: 'l1', topics: ['NotATopic'], choices: [{ id: 'a', label: 'Hotspot' }] });
     vi.mocked(bridges.recordMastery).mockResolvedValue(null as never); // canonicalize miss
     const out = await exec(gradeAnswer, { quizId: 'q1', choiceId: 'a' });
     expect(out.data.correct).toBe(true);
@@ -172,6 +178,22 @@ describe('recommend_next', () => {
     expect(out.kind).toBe('next_step_card');
     expect(out.data.recommendation).toBe('advance');
     expect(out.data.lessonId).toBe('l2');
+    expect(bridges.issueCertificate).not.toHaveBeenCalled();
+  });
+
+  it('RETRY: the just-finished lesson is still incomplete (missed the quiz) → review THIS lesson, never a contradictory advance', async () => {
+    vi.mocked(lq.lessonPlanProgress).mockResolvedValue({
+      title: 'Course', done: 0, total: 2,
+      modules: [{ id: 'm1', ordinal: 1, title: 'M1', lessons: [
+        { id: 'l1', ordinal: 1, title: 'What Is Pollution?', completed: false }, // just attempted, answered wrong
+        { id: 'l2', ordinal: 2, title: 'L2', completed: false },
+      ] }],
+    });
+    const out = await exec(recommendNext, { lessonId: 'l1' });
+    expect(out.data.recommendation).toBe('retry'); // not 'advance'
+    expect(out.data.lessonId).toBe('l1'); // points back to the SAME lesson
+    expect(out.data.lessonTitle).toBe('What Is Pollution?');
+    expect(out.data.reason).toMatch(/review .*try again/i);
     expect(bridges.issueCertificate).not.toHaveBeenCalled();
   });
 
@@ -260,6 +282,7 @@ describe('generate_quiz', () => {
     vi.mocked(lq.pickQuizForLesson).mockResolvedValue({
       id: 'q1', stem: 'What drives geysers?', choices: [{ id: 'a', label: 'Hotspot' }], difficulty: 'hard', lessonId: 'l1',
     });
+    vi.mocked(lq.recentQuizIdsForLesson).mockResolvedValue([]);
   });
 
   it('emits a quiz_card WITHOUT the correct answer (anti-cheat) and STOPS', async () => {
@@ -277,19 +300,27 @@ describe('generate_quiz', () => {
     vi.mocked(lq.quizDifficultyForMastery).mockReturnValue('easy');
     await exec(generateQuiz, { lessonId: 'l1' });
     expect(lq.quizDifficultyForMastery).toHaveBeenCalledWith(0.3); // the minimum mastery
-    expect(lq.pickQuizForLesson).toHaveBeenCalledWith('l1', 'easy');
+    expect(lq.pickQuizForLesson).toHaveBeenCalledWith('l1', 'easy', []); // 3rd arg = excludeIds (recently served)
   });
 
   it('honors an explicit difficulty override (skips mastery)', async () => {
     await exec(generateQuiz, { lessonId: 'l1', difficulty: 'medium' });
     expect(lq.masteryByTopic).not.toHaveBeenCalled();
-    expect(lq.pickQuizForLesson).toHaveBeenCalledWith('l1', 'medium');
+    expect(lq.pickQuizForLesson).toHaveBeenCalledWith('l1', 'medium', []);
   });
 
-  it('falls back to easy for an anonymous caller (callerId throws)', async () => {
+  it('excludes the learner’s recently-answered questions so a re-quiz serves a fresh item', async () => {
+    vi.mocked(lq.recentQuizIdsForLesson).mockResolvedValue(['l1:quiz_v2:easy']);
+    await exec(generateQuiz, { lessonId: 'l1', difficulty: 'easy' });
+    expect(lq.recentQuizIdsForLesson).toHaveBeenCalledWith('u1', 'l1', 5);
+    expect(lq.pickQuizForLesson).toHaveBeenCalledWith('l1', 'easy', ['l1:quiz_v2:easy']);
+  });
+
+  it('falls back to easy for an anonymous caller (callerId throws) and skips exclusions', async () => {
     vi.mocked(ctx.callerId).mockImplementation(() => { throw new Error('unauthenticated'); });
     await exec(generateQuiz, { lessonId: 'l1' });
-    expect(lq.pickQuizForLesson).toHaveBeenCalledWith('l1', 'easy');
+    expect(lq.recentQuizIdsForLesson).not.toHaveBeenCalled(); // no userId → no exclusion read
+    expect(lq.pickQuizForLesson).toHaveBeenCalledWith('l1', 'easy', []);
   });
 
   it('returns an error card when no quiz exists', async () => {
@@ -313,7 +344,7 @@ describe('generate_quiz', () => {
     vi.mocked(lq.quizDifficultyForMastery).mockReturnValue('easy');
     await exec(generateQuiz, { lessonId: 'l1' }); // no difficulty override
     expect(lq.quizDifficultyForMastery).toHaveBeenCalledWith(null); // `mastery.length ? ... : null`
-    expect(lq.pickQuizForLesson).toHaveBeenCalledWith('l1', 'easy');
+    expect(lq.pickQuizForLesson).toHaveBeenCalledWith('l1', 'easy', []);
   });
 });
 

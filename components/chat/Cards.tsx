@@ -13,7 +13,7 @@ import { WATCH_CAP } from '../../lib/watch-cap';
 /** Renders a tool's `{kind,data}` output as a structured card (ADR-013, D5). Graph-grounded only.
  * `onAnswer` is passed only for interactive cards (the `question_card`) and only on the latest turn — it
  * sends the user's chosen option back to the ranger as their next message. */
-export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: unknown; onAnswer?: (text: string) => void }) {
+export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: unknown; onAnswer?: (text: string, clientContext?: Record<string, string>) => void }) {
   const data = (raw ?? {}) as Record<string, unknown>;
   // Surface tool errors instead of silently dropping them (R2 §3.1 — the blank "save as trip" turn).
   if (typeof data.error === 'string') {
@@ -190,7 +190,7 @@ function NodeResults({ data }: { data: Record<string, unknown> }) {
 /** Interactive clarifying question (ask_question tool). Tapping an option sends its label back to the
  * ranger as the user's next message via `onAnswer`; chips disable after a pick so a question isn't
  * answered twice. `onAnswer` is absent for stale (non-latest) turns, leaving the card read-only. */
-function QuestionCard({ data, onAnswer }: { data: Record<string, unknown>; onAnswer?: (text: string) => void }) {
+function QuestionCard({ data, onAnswer }: { data: Record<string, unknown>; onAnswer?: (text: string, clientContext?: Record<string, string>) => void }) {
   const prompt = data.prompt as string | undefined;
   const options = (data.options ?? []) as { id: string; label: string; description?: string }[];
   const allowFreeform = !!data.allowFreeform;
@@ -235,7 +235,7 @@ function QuestionCard({ data, onAnswer }: { data: Record<string, unknown>; onAns
   );
 }
 
-function ItineraryCard({ data, onAnswer }: { data: Record<string, unknown>; onAnswer?: (text: string) => void }) {
+function ItineraryCard({ data, onAnswer }: { data: Record<string, unknown>; onAnswer?: (text: string, clientContext?: Record<string, string>) => void }) {
   const [saving, setSaving] = useState(false);
   const trip = data.trip as
     | { name: string; stops: ({ name?: string; parkName?: string; driveTo?: { miles: number; minutes: number } } | null)[] }
@@ -677,15 +677,18 @@ function ExplanationCard({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-/** Interactive quiz (generate_quiz) — forks QuestionCard; a tap sends "quizId:choiceId" back as the next
- * message for grade_answer. Disables after one pick; read-only on stale (non-latest) turns. */
-function QuizCard({ data, onAnswer }: { data: Record<string, unknown>; onAnswer?: (text: string) => void }) {
+/** Interactive quiz (generate_quiz) — forks QuestionCard. A tap sends the chosen answer's LABEL as the next
+ * message (the human bubble), with `quizId`/`choiceId` carried in clientContext for grade_answer. Highlights
+ * the chosen option and disables after one pick; read-only on stale (non-latest) turns. The correct answer
+ * is NOT revealed here (anti-cheat) — it surfaces in the QuizFeedbackCard after grading. */
+function QuizCard({ data, onAnswer }: { data: Record<string, unknown>; onAnswer?: (text: string, clientContext?: Record<string, string>) => void }) {
   const quizId = data.quizId as string | undefined;
   const stem = data.stem as string | undefined;
   const choices = (data.choices ?? []) as { id: string; label: string }[];
   const difficulty = data.difficulty as string | undefined;
-  const [answered, setAnswered] = useState(false);
+  const [chosenId, setChosenId] = useState<string | null>(null);
   if (!quizId || !stem || !choices.length) return null;
+  const answered = chosenId !== null;
   const disabled = answered || !onAnswer;
   return (
     <Card.Root variant="subtle" size="sm" my={2}>
@@ -696,29 +699,34 @@ function QuizCard({ data, onAnswer }: { data: Record<string, unknown>; onAnswer?
         </HStack>
         <Text fontSize="sm" mb={2}>{stem}</Text>
         <Stack gap={2} align="stretch">
-          {choices.map((c) => (
-            <Box
-              key={c.id}
-              as="button"
-              textAlign="start"
-              borderWidth="1px"
-              borderColor="border"
-              borderRadius="l2"
-              px={3}
-              py={2}
-              opacity={answered ? 0.55 : 1}
-              cursor={disabled ? 'default' : 'pointer'}
-              transition="background 0.15s, border-color 0.15s"
-              _hover={disabled ? undefined : { bg: 'brand.muted', borderColor: 'brand.solid' }}
-              onClick={() => {
-                if (disabled) return;
-                setAnswered(true);
-                onAnswer?.(`${quizId}:${c.id}`);
-              }}
-            >
-              <Text fontWeight="medium">{c.label}</Text>
-            </Box>
-          ))}
+          {choices.map((c) => {
+            const chosen = c.id === chosenId;
+            return (
+              <Box
+                key={c.id}
+                as="button"
+                textAlign="start"
+                borderWidth="1px"
+                borderColor={chosen ? 'brand.solid' : 'border'}
+                bg={chosen ? 'brand.muted' : undefined}
+                borderRadius="l2"
+                px={3}
+                py={2}
+                // After answering, dim the options NOT chosen so the learner's pick stays legible.
+                opacity={answered && !chosen ? 0.55 : 1}
+                cursor={disabled ? 'default' : 'pointer'}
+                transition="background 0.15s, border-color 0.15s"
+                _hover={disabled ? undefined : { bg: 'brand.muted', borderColor: 'brand.solid' }}
+                onClick={() => {
+                  if (disabled) return;
+                  setChosenId(c.id);
+                  onAnswer?.(c.label, { quizId, choiceId: c.id });
+                }}
+              >
+                <Text fontWeight="medium">{c.label}</Text>
+              </Box>
+            );
+          })}
         </Stack>
       </Card.Body>
     </Card.Root>
@@ -739,9 +747,12 @@ function EarnedBadges({ ids }: { ids?: unknown }) {
   );
 }
 
-/** Deterministic grading feedback (grade_answer): green/red + the lesson's cited rationale + topic mastery. */
+/** Deterministic grading feedback (grade_answer): green/red + (on a miss) what they chose and the correct
+ * answer + the lesson's cited rationale + topic mastery. The correct label is revealed only POST-grade. */
 function QuizFeedbackCard({ data }: { data: Record<string, unknown> }) {
   const correct = data.correct as boolean | undefined;
+  const correctLabel = data.correctLabel as string | null | undefined;
+  const chosenLabel = data.chosenLabel as string | null | undefined;
   const rationale = data.rationale as string | null | undefined;
   const mastery = data.mastery as number | null | undefined;
   return (
@@ -750,6 +761,14 @@ function QuizFeedbackCard({ data }: { data: Record<string, unknown> }) {
         <Text fontWeight="semibold" fontFamily="heading" color="colorPalette.fg" mb={1}>
           {correct ? '✅ Correct!' : '❌ Not quite'}
         </Text>
+        {!correct && (chosenLabel || correctLabel) ? (
+          <Stack gap={0.5} mb={rationale ? 1 : 0}>
+            {chosenLabel ? <Text fontSize="sm" color="fg.muted">You chose: {chosenLabel}</Text> : null}
+            {correctLabel ? (
+              <Text fontSize="sm">Correct answer: <Text as="span" fontWeight="medium">{correctLabel}</Text></Text>
+            ) : null}
+          </Stack>
+        ) : null}
         {rationale ? <Text fontSize="sm">{rationale}</Text> : null}
         {typeof mastery === 'number' ? (
           <Text fontSize="xs" color="fg.muted" mt={2}>Topic mastery: {Math.round(mastery * 100)}%</Text>
@@ -765,8 +784,12 @@ function NextStepCard({ data }: { data: Record<string, unknown> }) {
   const rec = data.recommendation as string | undefined;
   const reason = data.reason as string | undefined;
   const cert = data.certificate as { shareSlug?: string } | null | undefined;
-  const label = rec === 'complete' ? '🎓 Course complete' : rec === 'remediate' ? '🔁 Review' : '➡️ Next up';
-  const palette = rec === 'complete' ? 'pine' : rec === 'remediate' ? 'sand' : 'trail';
+  const label =
+    rec === 'complete' ? '🎓 Course complete'
+    : rec === 'remediate' ? '🔁 Review'
+    : rec === 'retry' ? '🔁 Review this lesson'
+    : '➡️ Next up';
+  const palette = rec === 'complete' ? 'pine' : rec === 'remediate' || rec === 'retry' ? 'sand' : 'trail';
   return (
     <Card.Root variant="subtle" size="sm" my={2}>
       <Card.Body p={3}>

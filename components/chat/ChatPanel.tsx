@@ -14,9 +14,20 @@ const DEFAULT_SUGGESTIONS = [
   'Fewer crowds, waterfalls, kid-friendly',
 ];
 
+/**
+ * A starter chip / interactive answer. A plain string is shown verbatim and sent verbatim (the legacy
+ * shape, used by the main ranger chat). The object form decouples the human-visible `label`/`message`
+ * (what the user sees in the chip and their chat bubble) from `clientContext` — Eve's EPHEMERAL,
+ * not-persisted side-channel that carries ids (lessonId, quizId, choiceId) to the model WITHOUT putting
+ * them in the visible message. Lets the Ranger School tutor ground to a lesson without leaking UUIDs.
+ */
+export type ChatSuggestion =
+  | string
+  | { label: string; message: string; clientContext?: Record<string, string> };
+
 export interface ChatPanelProps {
   /** Starter prompt chips on the empty state (e.g. lesson-seeded tutor prompts for the lesson player). */
-  suggestions?: string[];
+  suggestions?: ChatSuggestion[];
   /** Header identity (defaults to "The Ranger" / "Plans around what you love"). */
   title?: string;
   subtitle?: string;
@@ -24,6 +35,16 @@ export interface ChatPanelProps {
   emptyHint?: string;
   /** Input placeholder. */
   placeholder?: string;
+  /**
+   * Full-fidelity transcript replay (lesson player). Seed the chat with a previously-saved Eve event stream
+   * (`initialEvents`) + resumable session cursor (`initialSession`), and POST a snapshot to `persistUrl` after
+   * each turn so the thread — WITH its interactive quiz/feedback cards — survives a reload. Defaults (all
+   * undefined) preserve the main ranger chat exactly. NB: these seed the store ONCE at mount, so remount the
+   * panel (e.g. `key={lessonId}`) to load a different lesson's transcript.
+   */
+  initialEvents?: unknown[];
+  initialSession?: unknown;
+  persistUrl?: string;
 }
 
 /**
@@ -40,8 +61,27 @@ export function ChatPanel({
   subtitle = 'Plans around what you love',
   emptyHint = 'Ask the ranger to plan a trip, find parks, or check conditions.',
   placeholder = 'Plan a trip with the ranger…',
+  initialEvents,
+  initialSession,
+  persistUrl,
 }: ChatPanelProps = {}) {
-  const agent = useEveAgent();
+  const agent = useEveAgent({
+    // Replay a saved transcript on mount (lesson player); undefined for the main chat → fresh session.
+    initialEvents: initialEvents as never,
+    initialSession: initialSession as never,
+    // After each completed turn, persist the authoritative event stream + session cursor so a reload restores
+    // the full thread (cards included). Fire-and-forget; `keepalive` lets it survive a navigation/unload.
+    onFinish: persistUrl
+      ? (snap) => {
+          void fetch(persistUrl, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ events: snap.events, session: snap.session }),
+            keepalive: true,
+          }).catch(() => {});
+        }
+      : undefined,
+  });
   const [input, setInput] = useState('');
   // `stopped` = the user pressed Stop on the in-flight turn (P1.1). Eve's store aborts the client stream
   // and settles `status` back to `ready`, but we flip the UI to "settled" immediately rather than waiting
@@ -53,6 +93,7 @@ export function ChatPanel({
   const messages = agent.data.messages;
   const bottomRef = useRef<HTMLDivElement>(null);
   const announcedTrips = useRef<Set<string>>(new Set());
+  const announcedGrades = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -75,13 +116,35 @@ export function ChatPanel({
     }
   }, [messages]);
 
-  async function send(text?: string) {
+  // When the tutor grades a quiz (a quiz_feedback_card), announce it so the lesson player's progress rail
+  // refreshes without a reload (docs/RANGER_SCHOOL_DESIGN.md §8). grade_answer writes COMPLETED synchronously
+  // before the card streams, so the listener's router.refresh() always reads post-write state. Dedup per
+  // graded turn by the assistant message id (re-grading is a new turn → a new id → a fresh announce).
+  useEffect(() => {
+    for (const m of messages as { id?: string; role: string; parts: { type?: string; state?: string; output?: unknown }[] }[]) {
+      const mid = m.id;
+      if (m.role !== 'assistant' || !mid || announcedGrades.current.has(mid)) continue;
+      for (const p of m.parts) {
+        if (p.type !== 'dynamic-tool' || p.state !== 'output-available') continue;
+        const out = p.output as { kind?: string; data?: { quizId?: string; correct?: boolean } } | undefined;
+        if (out?.kind !== 'quiz_feedback_card') continue;
+        announcedGrades.current.add(mid);
+        window.dispatchEvent(
+          new CustomEvent('rangerschool:quiz-graded', { detail: { quizId: out.data?.quizId, correct: out.data?.correct } }),
+        );
+        break;
+      }
+    }
+  }, [messages]);
+
+  async function send(text?: string, clientContext?: Record<string, string>) {
     const msg = (text ?? input).trim();
     if (!msg || busy) return;
     setStopped(false);
     setInput('');
-    // Swallow the rare "already processing" rejection if a send races a just-aborted turn settling.
-    await agent.send({ message: msg }).catch(() => {});
+    // `clientContext` rides ephemerally to the model only (ids for tutor grounding) — never persisted, never
+    // shown as a bubble. Swallow the rare "already processing" rejection if a send races a just-aborted turn.
+    await agent.send({ message: msg, ...(clientContext ? { clientContext } : {}) }).catch(() => {});
   }
 
   /** Stop watching the in-flight turn (P1.1). Aborts the client stream via Eve's store; the server turn
@@ -106,7 +169,7 @@ export function ChatPanel({
   function renderAssistant(
     parts: { type: string; text?: string; state?: string; output?: unknown }[],
     streaming: boolean,
-    onAnswer?: (text: string) => void,
+    onAnswer?: (text: string, clientContext?: Record<string, string>) => void,
   ): ReactNode {
     const seenParks = new Set<string>();
     const seenSig = new Set<string>();
@@ -192,23 +255,28 @@ export function ChatPanel({
           <Stack gap={3} color="fg.muted" pt={4}>
             <Text>{emptyHint}</Text>
             <Stack gap={2} align="start">
-              {suggestions.map((s) => (
-                <Badge
-                  key={s}
-                  as="button"
-                  colorPalette="pine"
-                  variant="subtle"
-                  cursor="pointer"
-                  px={3}
-                  py={1.5}
-                  textAlign="start"
-                  whiteSpace="normal"
-                  _hover={{ bg: 'brand.muted' }}
-                  onClick={() => send(s)}
-                >
-                  {s}
-                </Badge>
-              ))}
+              {suggestions.map((s) => {
+                // Normalize: a plain string is shown + sent verbatim; the object form shows `label`, sends
+                // `message`, and slips ids to the model via the ephemeral `clientContext` (never a bubble).
+                const sg = typeof s === 'string' ? { label: s, message: s, clientContext: undefined } : s;
+                return (
+                  <Badge
+                    key={sg.label}
+                    as="button"
+                    colorPalette="pine"
+                    variant="subtle"
+                    cursor="pointer"
+                    px={3}
+                    py={1.5}
+                    textAlign="start"
+                    whiteSpace="normal"
+                    _hover={{ bg: 'brand.muted' }}
+                    onClick={() => send(sg.message, sg.clientContext)}
+                  >
+                    {sg.label}
+                  </Badge>
+                );
+              })}
             </Stack>
           </Stack>
         ) : null}
@@ -239,8 +307,11 @@ export function ChatPanel({
                     m.parts as never[],
                     streaming,
                     // Only the latest turn's question card is interactive — tapping sends the choice
-                    // back as the user's next message; stale cards stay read-only.
-                    i === messages.length - 1 ? (text: string) => void send(text) : undefined,
+                    // back as the user's next message (clean label) with ids carried in clientContext;
+                    // stale cards stay read-only.
+                    i === messages.length - 1
+                      ? (text: string, clientContext?: Record<string, string>) => void send(text, clientContext)
+                      : undefined,
                   )}
                 </Box>
               </Box>
