@@ -46,6 +46,8 @@ import { embedParks } from './embed-parks';
 import { embedPlaces, embedPeople, embedArticles } from './embed-nodes';
 import { deriveNear } from './derive-near';
 import { deriveSharedEdges } from './derive-shared';
+import { deriveLessonJoins } from './derive-lesson-joins';
+import { decomposeLessons } from './decompose-lessons';
 
 /**
  * NPS sync orchestrator (ADR-007).
@@ -334,10 +336,17 @@ export async function runSlowSync(): Promise<StepResult[]> {
       upsertLessonPlans,
     ),
   );
+  // Ranger School (Phase 2): AI-decompose lesson plans into the cached Module/Lesson/QuizQuestion spine.
+  // Opt-in (spends model tokens) + content-hash gated, like EMBED_ARTICLES. See docs/RANGER_SCHOOL_DESIGN.md §3.
+  if (process.env.DECOMPOSE_LESSONPLANS === '1') {
+    out.push(await step('decompose-lessons', 'slow', async () => decomposeLessons()));
+  }
 
   // Derivations run last (need the full corpus): NEAR proximity (F9) + materialized shared-topic/activity (bonus).
   out.push(await step('derive-near', 'slow', async () => deriveNear()));
   out.push(await step('derive-shared', 'slow', async () => deriveSharedEdges()));
+  // Ranger School (F6 cross-feature join): (:LessonPlan)-[:CAN_USE_MEDIA]->(media ABOUT the same park).
+  out.push(await step('derive-lesson-joins', 'slow', async () => deriveLessonJoins()));
 
   return out;
 }

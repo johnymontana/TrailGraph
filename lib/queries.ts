@@ -946,6 +946,73 @@ export async function lessonPlansForPark(parkCode: string, limit = 12): Promise<
   );
 }
 
+export interface LessonPlanContext {
+  lessonPlan: LessonPlanSummary;
+  park: { parkCode: string; fullName: string } | null;
+  media: ParkMedia; // F6 audio/galleries/videos ABOUT the lesson's park
+  events: Awaited<ReturnType<typeof eventsForPark>>; // F4, with inWindow for field-trip alignment
+  openWindow: OpenCheck | null; // F1 feasibility on window.start (null if no date given)
+}
+
+/**
+ * The "park-grounded lesson" join (Ranger School, docs/RANGER_SCHOOL_DESIGN.md §4): a lesson plan + its
+ * anchor park + the park's NPS media (F6), events (F4, optionally intersected with a field-trip window),
+ * and open/closed feasibility (F1) — in one struct. Reuses `mediaForPark`/`eventsForPark`/`checkOpen`
+ * verbatim (no new data), so it answers "teach this lesson with the park's audio tour, and is the park
+ * open for my Oct 1–15 field trip?". Returns null if the lesson plan doesn't exist.
+ */
+export async function lessonPlanContext(
+  lessonPlanId: string,
+  window: { start: string | null; end: string | null } = { start: null, end: null },
+): Promise<LessonPlanContext | null> {
+  const rows = await readGraph<{
+    id: string;
+    title: string;
+    url: string | null;
+    subject: string | null;
+    gradeLevel: string | null;
+    objective: string | null;
+    durationMin: number | null;
+    image: string | null;
+    topics: string[];
+    parkCode: string | null;
+    parkName: string | null;
+  }>(
+    `MATCH (lp:LessonPlan {id: $id})
+     OPTIONAL MATCH (lp)-[:ABOUT]->(p:Park)
+     OPTIONAL MATCH (lp)-[:RELATES_TO_TOPIC]->(t:Topic)
+     WITH lp, collect(DISTINCT p)[0] AS park, collect(DISTINCT t.name) AS topics
+     RETURN lp.id AS id, lp.title AS title, lp.url AS url, lp.subject AS subject,
+            lp.gradeLevel AS gradeLevel, lp.objective AS objective, lp.durationMin AS durationMin,
+            lp.image AS image, [x IN topics WHERE x IS NOT NULL] AS topics,
+            park.parkCode AS parkCode, park.fullName AS parkName`,
+    { id: lessonPlanId },
+  );
+  if (!rows.length) return null;
+  const r = rows[0];
+  const lessonPlan: LessonPlanSummary = {
+    id: r.id,
+    title: r.title,
+    url: r.url,
+    subject: r.subject,
+    gradeLevel: r.gradeLevel,
+    objective: r.objective,
+    durationMin: r.durationMin,
+    image: r.image,
+    topics: r.topics,
+  };
+  if (!r.parkCode) {
+    return { lessonPlan, park: null, media: { audio: [], galleries: [], videos: [] }, events: [], openWindow: null };
+  }
+  // Anchor the lesson on its park and reuse the shipped F6/F4/F1 read layer.
+  const [media, events, openWindow] = await Promise.all([
+    mediaForPark(r.parkCode),
+    eventsForPark(r.parkCode, window),
+    window.start ? checkOpen(r.parkCode, window.start) : Promise.resolve(null),
+  ]);
+  return { lessonPlan, park: { parkCode: r.parkCode, fullName: r.parkName ?? r.parkCode }, media, events, openWindow };
+}
+
 /** Parking lots at a park (NPS-expansion P3): arrival logistics + accessibility. */
 export async function parkingForPark(
   parkCode: string,

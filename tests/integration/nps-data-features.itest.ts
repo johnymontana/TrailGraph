@@ -15,6 +15,7 @@ import {
   searchParks,
   closureWarningsForTrip,
   parksInRegion,
+  lessonPlanContext,
 } from '../../lib/queries';
 import {
   upsertCampgrounds,
@@ -27,6 +28,7 @@ import { applyRegions } from '../../lib/datasources/regions';
 import { applyAccessibilityTaxonomy } from '../../lib/datasources/accessibility';
 import { deriveNear } from '../../lib/sync/derive-near';
 import { deriveSharedEdges } from '../../lib/sync/derive-shared';
+import { deriveLessonJoins } from '../../lib/sync/derive-lesson-joins';
 
 /**
  * NPS data-features domain layer (plan F1–F10 + bonuses): the new graph reads (hours/open-closed, fees +
@@ -292,6 +294,37 @@ describeIntegration('NPS data features (Neo4j)', () => {
     expect(rows[0].media).toBe(true);
     // quiz ground truth lives on the node (deterministic, offline-capable grading) — never shipped to the client
     expect(rows[0].correctId).toBe('hotspot');
+  });
+
+  it('Ranger School Phase 1: deriveLessonJoins rebuilds CAN_USE_MEDIA idempotently from the shared park', async () => {
+    const countEdges = async () =>
+      (
+        await readGraph<{ n: number }>(
+          `MATCH (:LessonPlan {id:'lesson-yell-geology'})-[r:CAN_USE_MEDIA]->(:AudioFile {id:'audio-yell-oldfaithful'})
+           RETURN count(r) AS n`,
+        )
+      )[0].n;
+    // Derive twice: the edge is rebuilt from (:LessonPlan)-[:ABOUT]->(:Park)<-[:ABOUT]-(:AudioFile),
+    // and a second pass must not duplicate it (DELETE-then-MERGE).
+    const first = await deriveLessonJoins();
+    expect(first.edges).toBeGreaterThanOrEqual(1);
+    expect(await countEdges()).toBe(1);
+    await deriveLessonJoins();
+    expect(await countEdges()).toBe(1);
+  });
+
+  it('Ranger School Phase 1: lessonPlanContext joins the lesson to its park media (F6) + open window (F1)', async () => {
+    const ctx = await lessonPlanContext('lesson-yell-geology', { start: '2026-09-21', end: '2026-09-25' });
+    expect(ctx).not.toBeNull();
+    expect(ctx!.lessonPlan.id).toBe('lesson-yell-geology');
+    expect(ctx!.park?.parkCode).toBe('yell');
+    // F6: the park's NPS audio tour surfaces on the lesson (park-grounded media).
+    expect(ctx!.media.audio.some((a) => a.id === 'audio-yell-oldfaithful')).toBe(true);
+    // F1: a field-trip date yields an open/closed feasibility check (never null when a date is given).
+    expect(ctx!.openWindow).not.toBeNull();
+    expect(ctx!.openWindow!.parkCode).toBe('yell');
+    // missing lesson plan → null (honest empty, never fabricated)
+    expect(await lessonPlanContext('does-not-exist')).toBeNull();
   });
 });
 
