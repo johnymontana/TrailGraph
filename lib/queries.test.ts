@@ -100,6 +100,22 @@ describe('vibeSearch constraint-aware candidates (ADR-046, Friction #2)', () => 
     expect(q).toContain("CASE WHEN p.designation CONTAINS 'National Park' THEN 0 ELSE 1 END");
     expect(q).toContain('score DESC');
   });
+
+  it('P0.2 guard: an anchor WITHOUT a radius disables proximity (never `< null` → exclude-all)', async () => {
+    await vibeSearch('overlooks', { limit: 6, nearLat: 38.9, nearLng: -77.04 }); // no radiusMiles
+    const [, params] = mockRead.mock.calls[0] as [string, Record<string, unknown>];
+    // anchor is dropped so the WHERE short-circuits on `$nearLng IS NULL` (no filter)…
+    expect(params).toMatchObject({ nearLat: null, nearLng: null, radiusMeters: null });
+    // …and proximity doesn't bump the candidate pull when it isn't actually applied.
+    expect(params.k).toBe(6 * 2);
+  });
+
+  it('P0.2: omitting preferNationalParks keeps the plain ORDER BY score (no designation CASE)', async () => {
+    await vibeSearch('alpine lakes', { limit: 6 });
+    const [q] = mockRead.mock.calls[0] as [string, Record<string, unknown>];
+    expect(q).not.toContain("CASE WHEN p.designation CONTAINS 'National Park'");
+    expect(q).toContain('ORDER BY score DESC');
+  });
 });
 
 describe('tripBudget (F2)', () => {

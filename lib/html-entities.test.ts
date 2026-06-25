@@ -27,4 +27,14 @@ describe('decodeEntities', () => {
     expect(decodeEntities('a &bogus; b')).toBe('a &bogus; b');
     expect(decodeEntities('Q & A')).toBe('Q & A'); // bare ampersand, not an entity
   });
+
+  it('decodes ONE level per pass (a once-escaped legacy row → clean text in one call)', () => {
+    // Render-side decode (P2.2) fixes legacy rows stored as a single entity in one pass…
+    expect(decodeEntities('Stars &amp; Skies')).toBe('Stars & Skies');
+    // …but a DOUBLE-escaped value (`&amp;amp;`) only peels one layer per call (documents the contingency:
+    // if `&amp;` still shows after a render-side decode, the stored value was double-escaped).
+    expect(decodeEntities('Stars &amp;amp; Skies')).toBe('Stars &amp; Skies');
+    // A second pass finishes it — so the decode is safe to apply repeatedly.
+    expect(decodeEntities(decodeEntities('Stars &amp;amp; Skies'))).toBe('Stars & Skies');
+  });
 });

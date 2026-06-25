@@ -78,6 +78,8 @@ describe('MemoryActionSchema', () => {
   it('accepts valid actions', () => {
     expect(MemoryActionSchema.safeParse({ op: 'addPreference', category: 'activity', value: 'hiking' }).success).toBe(true);
     expect(MemoryActionSchema.safeParse({ op: 'setTravelConstraints', wheelchair: true, requiredAmenities: ['Restrooms'] }).success).toBe(true);
+    // P0.5: per-row removal of a single durable accessibility/amenity need.
+    expect(MemoryActionSchema.safeParse({ op: 'removeRequiredAmenity', name: 'Audio Description' }).success).toBe(true);
   });
 
   it('bounds arrays + numeric ranges and rejects unknown ops', () => {

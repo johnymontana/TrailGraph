@@ -1138,7 +1138,9 @@ export async function vibeSearch(
   // (R4 §2.3: intent-aware ranking — semantic candidates narrowed by region/activity/topic + travel
   // constraints, then ranked by score).
   const hasConstraints = rvMaxLengthFt != null || wheelchairAccessible || requiredAmenities.length > 0 || maxBortle != null;
-  const hasProximity = nearLat != null && nearLng != null;
+  // Proximity needs ALL of lat/lng/radius — a point with no radius would make `point.distance(...) < null`
+  // exclude every park, so a missing radius means "no proximity filter" (the anchor is ignored).
+  const hasProximity = nearLat != null && nearLng != null && radiusMiles != null;
   const hasFacets = (stateCodes?.length ?? 0) > 0 || !!activity || !!topic || hasConstraints || hasProximity;
   // A tight proximity ∩ amenity intersection prunes hard from both sides, so over-fetch even more candidates.
   const k = limit * (hasProximity && hasConstraints ? 10 : hasFacets ? 6 : 2);
@@ -1171,9 +1173,11 @@ export async function vibeSearch(
       wheelchair: wheelchairAccessible,
       required: requiredAmenities,
       maxBortle,
-      nearLat,
-      nearLng,
-      radiusMeters: radiusMiles != null ? radiusMiles * 1609.344 : null,
+      // Pass the anchor only when proximity is fully specified, so the WHERE short-circuits to the
+      // `$nearLng IS NULL` branch (no filter) when a radius is missing.
+      nearLat: hasProximity ? nearLat : null,
+      nearLng: hasProximity ? nearLng : null,
+      radiusMeters: hasProximity ? radiusMiles * 1609.344 : null,
     },
   );
 }
