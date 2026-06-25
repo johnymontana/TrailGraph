@@ -359,7 +359,9 @@ export async function previewTourFromTour(
     WITH tr, ts, target ORDER BY ts.ordinal ASC
     RETURN tr.title AS title, collect(CASE WHEN ts IS NULL THEN null ELSE {
       ordinal: coalesce(ts.ordinal, 0),
-      name: target.name
+      // Place stores its label in .title; VisitorCenter/Campground use .name — coalesce so a tour's
+      // Place stops are not silently dropped from the preview (the saved trip shows them).
+      name: coalesce(target.name, target.title)
     } END) AS stops
     `,
     { tourId },

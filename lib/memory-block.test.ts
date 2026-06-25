@@ -92,4 +92,33 @@ describe('renderMemoryBlock', () => {
     );
     expect(out).not.toContain('Travel constraints:');
   });
+
+  it('summarizes a single constraint without dangling separators', () => {
+    expect(renderMemoryBlock(mem({ travel: { wheelchair: true, rvMaxLengthFt: null, requiredAmenities: [] } })))
+      .toContain('Travel constraints: needs wheelchair-accessible sites');
+    const rvOnly = renderMemoryBlock(mem({ travel: { wheelchair: false, rvMaxLengthFt: 28, requiredAmenities: [] } }));
+    expect(rvOnly).toContain('Travel constraints: RV ≤ 28 ft');
+    expect(rvOnly).not.toContain('·'); // no leading/trailing separator for a single item
+    expect(renderMemoryBlock(mem({ travel: { wheelchair: false, rvMaxLengthFt: null, requiredAmenities: ['flush toilets'] } })))
+      .toContain('required amenities: flush toilets');
+  });
+
+  it('renders partial availability windows (start-only / end-only)', () => {
+    // Availability is the line-initial clause here, so capitalize() uppercases it ("Availability:").
+    expect(renderMemoryBlock(mem({ availability: { start: '2026-09-21', end: null } }))).toContain('Availability: from 2026-09-21');
+    expect(renderMemoryBlock(mem({ availability: { start: null, end: '2026-09-30' } }))).toContain('Availability: until 2026-09-30');
+  });
+
+  it('renders a passes-only user (no availability) without an empty availability clause', () => {
+    const out = renderMemoryBlock(mem({ passes: [{ id: 'atb', name: 'America the Beautiful' }] }));
+    expect(out).toContain('Passes held: America the Beautiful');
+    expect(out).not.toContain('availability:');
+  });
+
+  it('sorts passes so identical holdings render identically (cache stability)', () => {
+    const a = renderMemoryBlock(mem({ passes: [{ id: '2', name: 'Zion' }, { id: '1', name: 'Acadia' }] }));
+    const b = renderMemoryBlock(mem({ passes: [{ id: '1', name: 'Acadia' }, { id: '2', name: 'Zion' }] }));
+    expect(a).toBe(b);
+    expect(a).toContain('Passes held: Acadia, Zion');
+  });
 });
