@@ -1,8 +1,8 @@
 'use client';
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import { Box, Stack, Text, Input, IconButton, Flex, HStack, Icon, Badge, Link as CLink } from '@chakra-ui/react';
+import { Box, Stack, Text, Input, IconButton, Button, Flex, HStack, Icon, Badge, Link as CLink } from '@chakra-ui/react';
 import { useEveAgent } from 'eve/react';
-import { LuSend, LuSparkles } from 'react-icons/lu';
+import { LuSend, LuSparkles, LuSquare, LuRotateCcw, LuTriangleAlert } from 'react-icons/lu';
 import { ToolCard, isRenderableToolOutput } from './Cards';
 import { Markdown } from './Markdown';
 import { ToolActivityPill } from './ToolActivityPill';
@@ -43,7 +43,13 @@ export function ChatPanel({
 }: ChatPanelProps = {}) {
   const agent = useEveAgent();
   const [input, setInput] = useState('');
+  // `stopped` = the user pressed Stop on the in-flight turn (P1.1). Eve's store aborts the client stream
+  // and settles `status` back to `ready`, but we flip the UI to "settled" immediately rather than waiting
+  // a tick — `active` is the user-facing "still generating" signal. NB: Stop only stops *watching*; the
+  // server turn still completes (tokens spent, full reply persists server-side) — we don't claim otherwise.
+  const [stopped, setStopped] = useState(false);
   const busy = agent.status === 'submitted' || agent.status === 'streaming';
+  const active = busy && !stopped;
   const messages = agent.data.messages;
   const bottomRef = useRef<HTMLDivElement>(null);
   const announcedTrips = useRef<Set<string>>(new Set());
@@ -72,8 +78,29 @@ export function ChatPanel({
   async function send(text?: string) {
     const msg = (text ?? input).trim();
     if (!msg || busy) return;
+    setStopped(false);
     setInput('');
-    await agent.send({ message: msg });
+    // Swallow the rare "already processing" rejection if a send races a just-aborted turn settling.
+    await agent.send({ message: msg }).catch(() => {});
+  }
+
+  /** Stop watching the in-flight turn (P1.1). Aborts the client stream via Eve's store; the server turn
+   * still finishes, so no transcript cleanup is needed. `stopped` flips the UI to settled immediately. */
+  function stopTurn() {
+    agent.stop();
+    setStopped(true);
+  }
+
+  /** Inline error recovery (P0.2): re-send the last user message. It stays visible (never reordered), and
+   * the retried turn renders in chronological position after it. */
+  function retry() {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        const text = messages[i].parts.map((p) => (p.type === 'text' ? (p as { text?: string }).text ?? '' : '')).join('');
+        if (text.trim()) void send(text);
+        return;
+      }
+    }
   }
 
   function renderAssistant(
@@ -187,7 +214,7 @@ export function ChatPanel({
         ) : null}
 
         {messages.map((m, i) => {
-          const streaming = busy && i === messages.length - 1 && m.role === 'assistant';
+          const streaming = active && i === messages.length - 1 && m.role === 'assistant';
           if (m.role === 'user') {
             return (
               <Box key={i} alignSelf="flex-end" maxW="85%" minW={0}>
@@ -221,8 +248,8 @@ export function ChatPanel({
           );
         })}
 
-        {/* "Ranger is thinking…" — only before the assistant turn starts streaming. */}
-        {agent.status === 'submitted' || (busy && lastIsUser) ? (
+        {/* "Ranger is thinking…" — only before the assistant turn starts streaming (and not once stopped). */}
+        {active && (agent.status === 'submitted' || lastIsUser) ? (
           <HStack align="center" gap={2.5}>
             <Box boxSize={7} borderRadius="full" bg="brand.muted" color="brand.fg" display="flex" alignItems="center" justifyContent="center">
               <Icon as={LuSparkles} boxSize={3.5} />
@@ -238,8 +265,14 @@ export function ChatPanel({
           </HStack>
         ) : null}
 
-        {agent.error ? (
-          <Text color="red.fg" fontSize="sm">The ranger hit an error. Try again.</Text>
+        {agent.status === 'error' ? (
+          <HStack borderWidth="1px" borderColor="orange.emphasized" bg="orange.subtle" borderRadius="l2" p={3} gap={3} align="center">
+            <Icon as={LuTriangleAlert} color="orange.fg" flexShrink={0} />
+            <Text fontSize="sm" color="orange.fg" flex="1">Something went wrong on my end — your message is safe.</Text>
+            <Button size="sm" colorPalette="orange" variant="surface" onClick={retry} flexShrink={0}>
+              <LuRotateCcw /> Retry
+            </Button>
+          </HStack>
         ) : null}
         <div ref={bottomRef} />
       </Stack>
@@ -254,9 +287,15 @@ export function ChatPanel({
           borderRadius="full"
           bg="bg.canvas"
         />
-        <IconButton aria-label="Send message" colorPalette="pine" borderRadius="full" onClick={() => send()} loading={busy} disabled={!input.trim()}>
-          <LuSend />
-        </IconButton>
+        {active ? (
+          <IconButton aria-label="Stop generating" colorPalette="red" borderRadius="full" onClick={stopTurn}>
+            <LuSquare />
+          </IconButton>
+        ) : (
+          <IconButton aria-label="Send message" colorPalette="pine" borderRadius="full" onClick={() => send()} loading={busy} disabled={busy || !input.trim()}>
+            <LuSend />
+          </IconButton>
+        )}
       </Flex>
     </Flex>
   );

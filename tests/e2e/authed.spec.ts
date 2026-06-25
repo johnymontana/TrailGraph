@@ -127,3 +127,13 @@ test('onboarding ?welcome=1 bounces a returning user with preferences to /explor
   await page.goto('/onboarding?welcome=1');
   await expect(page).toHaveURL(/\/explore/);
 });
+
+test('“How you travel” on /me explains durable vs one-trip scope (P1.2 scope-on-save clarity)', async ({ page }) => {
+  await signUp(page);
+  await page.goto('/me');
+  // The travel-constraints section is framed as STANDING/durable, and tells the user a companion's
+  // one-trip need is NOT saved here — the read-side reinforcement of the scope-confirm flow.
+  await expect(page.getByRole('heading', { name: /How you travel/ })).toBeVisible();
+  await expect(page.getByText(/Durable constraints that apply to/i)).toBeVisible();
+  await expect(page.getByText(/one-trip need isn.t saved here/i)).toBeVisible();
+});

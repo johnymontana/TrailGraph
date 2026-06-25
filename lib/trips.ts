@@ -342,6 +342,38 @@ export async function createTripFromTour(
   return { tripId, name, stops: count };
 }
 
+/**
+ * Read-only PREVIEW of the trip a tour would seed — same ordered traversal as createTripFromTour but
+ * writes nothing (P1.3 confirm-before-save). Returns the tour name + ordered stop names so the ranger can
+ * render a draft `itinerary_preview` with a Save button before persisting. Null when the tour has no usable
+ * named stops (mirrors createTripFromTour's empty-tour guard).
+ */
+export async function previewTourFromTour(
+  tourId: string,
+): Promise<{ name: string; stops: { name: string }[] } | null> {
+  const rows = await readGraph<{ title: string | null; stops: { ordinal: number; name: string | null }[] }>(
+    `
+    MATCH (tr:Tour {id: $tourId})
+    OPTIONAL MATCH (tr)-[:HAS_STOP]->(ts:TourStop)
+    OPTIONAL MATCH (ts)-[:AT]->(target)
+    WITH tr, ts, target ORDER BY ts.ordinal ASC
+    RETURN tr.title AS title, collect(CASE WHEN ts IS NULL THEN null ELSE {
+      ordinal: coalesce(ts.ordinal, 0),
+      // Place stores its label in .title; VisitorCenter/Campground use .name — coalesce so a tour's
+      // Place stops are not silently dropped from the preview (the saved trip shows them).
+      name: coalesce(target.name, target.title)
+    } END) AS stops
+    `,
+    { tourId },
+  );
+  if (!rows.length || !rows[0].title) return null;
+  const stops = (rows[0].stops ?? [])
+    .filter((s): s is { ordinal: number; name: string } => !!s && !!s.name)
+    .map((s) => ({ name: s.name }));
+  if (!stops.length) return null;
+  return { name: `${rows[0].title} (tour)`, stops };
+}
+
 export interface TripCost {
   perPark: { parkCode: string; parkName: string; fee: number }[];
   total: number;

@@ -19,3 +19,14 @@ export function callerId(ctx: ToolContext): string {
 export function sessionId(ctx: ToolContext): string {
   return ctx.session.id;
 }
+
+/**
+ * Nullable server-bound principal for NON-tool contexts (the dynamic-instructions resolver, which receives
+ * a `DynamicResolveContext`, not a `ToolContext`). Structurally typed so it accepts both; returns null for
+ * an anonymous session instead of throwing, so callers can skip injecting a memory block (P1.4).
+ */
+export function principalIdOrNull(
+  ctx: { session?: { auth?: { current?: { principalId?: string | null } | null } | null } | null },
+): string | null {
+  return ctx.session?.auth?.current?.principalId ?? null;
+}
