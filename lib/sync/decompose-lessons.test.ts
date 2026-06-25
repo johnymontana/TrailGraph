@@ -100,7 +100,7 @@ describe('buildCourseSpine', () => {
       HASH,
     );
     expect(mods[0].lessons[0].quiz[0].difficulty).toBe('medium');
-    expect(mods[0].lessons[0].quiz[0].id).toBe('lp:m1:l1:quiz_v1:medium');
+    expect(mods[0].lessons[0].quiz[0].id).toBe('lp:m1:l1:quiz_v2:medium'); // default DECOMPOSE_VERSION is v2
   });
 
   it('returns [] for empty/garbage input', () => {
@@ -220,11 +220,43 @@ describe('buildCourseSpine', () => {
     expect(build(undefined)).toBeNull();
     expect(build(12.6)).toBe(13); // Math.round on a positive number
   });
+
+  it('builds a one-per-difficulty bank from a quiz array, ordered easy→hard with sequential ordinals', () => {
+    const ch = [{ id: 'a', label: 'x' }, { id: 'b', label: 'y' }];
+    const course: GenCourse = {
+      modules: [
+        {
+          title: 'M',
+          lessons: [
+            {
+              title: 'L',
+              quiz: [
+                { stem: 'Hard?', choices: ch, correctId: 'a', difficulty: 'hard' },
+                { stem: 'Easy?', choices: ch, correctId: 'a', difficulty: 'easy' },
+                { stem: 'Easy two?', choices: ch, correctId: 'a', difficulty: 'easy' }, // dup difficulty → dropped
+                { stem: 'Medium?', choices: ch, correctId: 'a', difficulty: 'medium' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const quiz = buildCourseSpine(course, 'lp', HASH, 'v2')[0].lessons[0].quiz;
+    expect(quiz.map((q) => q.difficulty)).toEqual(['easy', 'medium', 'hard']); // one per difficulty, sorted
+    expect(quiz.map((q) => q.id)).toEqual(['lp:m1:l1:quiz_v2:easy', 'lp:m1:l1:quiz_v2:medium', 'lp:m1:l1:quiz_v2:hard']);
+    expect(quiz.map((q) => q.ordinal)).toEqual([1, 2, 3]);
+    expect(quiz[0].stem).toBe('Easy?'); // first 'easy' wins; the duplicate is dropped
+  });
+
+  it('still accepts a single quiz object (back-compat) as a one-item bank', () => {
+    const mods = buildCourseSpine(validCourse, 'lp1', HASH, 'v2');
+    expect(mods[0].lessons[0].quiz.map((q) => q.id)).toEqual(['lp1:m1:l1:quiz_v2:easy']);
+  });
 });
 
 // --- decomposeLessons orchestration: mock the DB + model, assert cost-discipline + counts ---
 
-const DECOMPOSE_VERSION = 'v1'; // mirrors the module default (no env override in tests)
+const DECOMPOSE_VERSION = 'v2'; // mirrors the module default (no env override in tests)
 
 function sha(s: string): string {
   return createHash('sha256').update(s).digest('hex');
@@ -329,8 +361,8 @@ describe('decomposeLessons', () => {
 
     expect(result).toEqual({ generated: 1, skipped: 0, failed: 1 });
     expect(mGen).toHaveBeenCalledTimes(2);
-    // persist() runs only for the second (successful) plan → spine + topic-grounding = 2 writes.
-    expect(mWrite).toHaveBeenCalledTimes(2);
+    // persist() runs only for the second (successful) plan → spine + topic-grounding + prune = 3 writes.
+    expect(mWrite).toHaveBeenCalledTimes(3);
     expect(mWrite.mock.calls.every((c) => (c[1] as { lpId: string }).lpId === 'lp4')).toBe(true);
   });
 
@@ -361,7 +393,7 @@ describe('decomposeLessons', () => {
     const result = await decomposeLessons();
 
     expect(result).toEqual({ generated: 1, skipped: 0, failed: 0 });
-    expect(mWrite).toHaveBeenCalledTimes(2);
+    expect(mWrite).toHaveBeenCalledTimes(3);
 
     // First write: the spine MERGE with deterministic ids from the validated buildCourseSpine output.
     const [spineCypher, spineParams] = mWrite.mock.calls[0] as [string, { lpId: string; modules: Array<{ id: string; lessons: Array<{ id: string; quiz: Array<{ id: string }> }> }> }];
@@ -369,11 +401,17 @@ describe('decomposeLessons', () => {
     expect(spineParams.lpId).toBe('lp9');
     expect(spineParams.modules[0].id).toBe('lp9:m1');
     expect(spineParams.modules[0].lessons[0].id).toBe('lp9:m1:l1');
-    expect(spineParams.modules[0].lessons[0].quiz[0].id).toBe('lp9:m1:l1:quiz_v1:easy');
+    expect(spineParams.modules[0].lessons[0].quiz[0].id).toBe('lp9:m1:l1:quiz_v2:easy');
 
     // Second write: the RELATES_TO_TOPIC → TESTS grounding, keyed only by lpId.
     const [topicCypher, topicParams] = mWrite.mock.calls[1] as [string, { lpId: string }];
     expect(topicCypher).toContain('MERGE (qq)-[:TESTS]->(t)');
     expect(topicParams).toEqual({ lpId: 'lp9' });
+
+    // Third write: prune superseded progress-free quizzes, keyed by lpId + the kept ids.
+    const [pruneCypher, pruneParams] = mWrite.mock.calls[2] as [string, { lpId: string; keepIds: string[] }];
+    expect(pruneCypher).toContain('DETACH DELETE q');
+    expect(pruneParams.lpId).toBe('lp9');
+    expect(pruneParams.keepIds).toContain('lp9:m1:l1:quiz_v2:easy');
   });
 });

@@ -30,6 +30,7 @@ import {
 import { reconcileUserLearning } from '../../lib/reconcile-memory';
 import { deriveLessonTopics } from '../../lib/sync/derive-lesson-topics';
 import { awardEarnedBadges } from '../../lib/learn-badges';
+import { getTutorTranscript, saveTutorTranscript } from '../../lib/learn-transcript';
 
 /**
  * Ranger School Phase 3 — learning bridges + progress/mastery reads, against the seeded
@@ -51,7 +52,8 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
       `MATCH (u:User {userId: $userId})
        OPTIONAL MATCH (u)-[:ISSUED]->(c:Certificate)
        OPTIONAL MATCH (u)-[:SUPPRESSED]->(d:DeletedFact)
-       DETACH DELETE u, c, d`,
+       OPTIONAL MATCH (u)-[:HAS_TRANSCRIPT]->(tt:TutorTranscript)
+       DETACH DELETE u, c, d, tt`,
       { userId },
     );
     await closeDriver();
@@ -92,6 +94,25 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
 
     const mastery = await masteryByTopic(userId, LP);
     expect(mastery.find((x) => x.topic === 'Volcanoes')?.mastery).toBe(0); // one wrong answer → 0 correctness
+  });
+
+  it('tutor transcript round-trips per (user, lesson) and overwrites on re-save', async () => {
+    expect(await getTutorTranscript(userId, LESSON)).toEqual({ events: [], session: null });
+
+    const events = [{ type: 'message.received', data: { message: 'Quiz me on this lesson' } }];
+    await saveTutorTranscript(userId, LESSON, { events, session: { sessionId: 'eve:abc' } });
+    const loaded = await getTutorTranscript(userId, LESSON);
+    expect(loaded.events).toEqual(events);
+    expect(loaded.session).toEqual({ sessionId: 'eve:abc' });
+
+    // A second save overwrites in place (MERGE on the composite id) — no duplicate node.
+    await saveTutorTranscript(userId, LESSON, { events: [{ type: 'x' }], session: null });
+    expect((await getTutorTranscript(userId, LESSON)).events).toEqual([{ type: 'x' }]);
+    const count = await readGraph<{ n: number }>(
+      `MATCH (:User {userId: $userId})-[:HAS_TRANSCRIPT]->(t:TutorTranscript) RETURN count(t) AS n`,
+      { userId },
+    );
+    expect(count[0].n).toBe(1);
   });
 
   it('earnBadge returns true on first award, false after (idempotent EARNED)', async () => {

@@ -4,8 +4,10 @@ import type { LearnCourseCard } from '../../lib/learn-queries';
 
 /**
  * A Ranger School course tile (a `:LessonPlan`). A ParkCard variant without a hero image (NPS lesson plans
- * carry no image): a branded pine band + title + subject/grade/lesson badges + park. The card-in-grid
- * gotcha applies — `display=block w=full` on the link, `minW=0 w=full` on the Card.Root.
+ * carry no image): a branded pine band + title + subject/lesson badges + park. Grade level is intentionally
+ * OMITTED here (adult-learner framing — it lives in the catalog's filter, not on every card, and its long
+ * raw string clipped badly). The card-in-grid gotcha applies — `display=block w=full` on the link,
+ * `minW=0 w=full` on the Card.Root.
  */
 export function CourseCard({ course }: { course: LearnCourseCard }) {
   return (
@@ -17,12 +19,12 @@ export function CourseCard({ course }: { course: LearnCourseCard }) {
             <Text fontFamily="heading" fontWeight="semibold" lineClamp={2}>{course.title}</Text>
             <HStack gap={2} wrap="wrap">
               {course.subject ? <Badge colorPalette="pine" size="sm">{course.subject}</Badge> : null}
-              {course.gradeLevel ? <Badge colorPalette="trail" size="sm">{course.gradeLevel}</Badge> : null}
               {course.decomposed ? (
                 <Badge colorPalette="sand" size="sm">{course.lessonCount} {course.lessonCount === 1 ? 'lesson' : 'lessons'}</Badge>
               ) : null}
             </HStack>
-            {course.parkName ? <Text fontSize="sm" color="fg.muted" lineClamp={1}>{course.parkName}</Text> : null}
+            {/* Park name wraps to two lines rather than clipping a long name mid-word ("Abraham Lincoln Birthplace…"). */}
+            {course.parkName ? <Text fontSize="sm" color="fg.muted" lineClamp={2}>{course.parkName}</Text> : null}
           </Card.Body>
         </Card.Root>
       </NextLink>

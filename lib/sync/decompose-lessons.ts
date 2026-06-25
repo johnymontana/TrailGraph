@@ -22,7 +22,7 @@ import { generateJson } from '../generate';
  * nodes linger with a stale hash. A future prune step can drop generated nodes that carry no user progress.
  */
 
-const DECOMPOSE_VERSION = process.env.DECOMPOSE_VERSION || 'v1';
+const DECOMPOSE_VERSION = process.env.DECOMPOSE_VERSION || 'v2';
 const DECOMPOSE_MODEL = process.env.DECOMPOSE_MODEL || undefined; // undefined → generate.ts default (agent model)
 
 function sha(s: string): string {
@@ -44,7 +44,7 @@ interface GenQuiz {
 interface GenLesson {
   title?: unknown;
   durationMin?: unknown;
-  quiz?: GenQuiz | null;
+  quiz?: GenQuiz | GenQuiz[] | null; // v2: a small bank (one per difficulty) — tolerate a single object too
 }
 interface GenModule {
   title?: unknown;
@@ -84,6 +84,7 @@ export interface SpineModule {
 }
 
 const DIFFICULTIES = ['easy', 'medium', 'hard'];
+const DIFF_ORDER: Record<string, number> = { easy: 1, medium: 2, hard: 3 };
 
 function buildQuiz(q: GenQuiz | null | undefined, lessonId: string, genHash: string, version: string): SpineQuiz | null {
   if (!q || typeof q.stem !== 'string' || !q.stem.trim()) return null;
@@ -106,6 +107,24 @@ function buildQuiz(q: GenQuiz | null | undefined, lessonId: string, genHash: str
 }
 
 /**
+ * Build a lesson's small quiz bank from one-or-many model quizzes: keep at most ONE per difficulty (the
+ * difficulty-keyed id caps cardinality and keeps ids stable), ordered easy→hard with ordinals to match. This
+ * gives the tutor difficulty-escalation variety (a learner re-quizzed at the same lesson gets a different
+ * question as `generate_quiz`/`pickQuizForLesson` skip already-served ones and climb difficulty).
+ */
+function buildQuizzes(raw: GenQuiz | GenQuiz[] | null | undefined, lessonId: string, genHash: string, version: string): SpineQuiz[] {
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  const byDifficulty = new Map<string, SpineQuiz>();
+  for (const q of list) {
+    const quiz = buildQuiz(q, lessonId, genHash, version);
+    if (quiz && !byDifficulty.has(quiz.difficulty)) byDifficulty.set(quiz.difficulty, quiz); // first per difficulty wins
+  }
+  return [...byDifficulty.values()]
+    .sort((a, b) => (DIFF_ORDER[a.difficulty] ?? 9) - (DIFF_ORDER[b.difficulty] ?? 9))
+    .map((q, i) => ({ ...q, ordinal: i + 1 }));
+}
+
+/**
  * Validate + normalize a raw model course into the deterministic spine. Pure (unit-tested): drops malformed
  * modules/lessons/quizzes rather than trusting model output. Returns [] when nothing valid survives.
  */
@@ -123,14 +142,13 @@ export function buildCourseSpine(
     (Array.isArray(m.lessons) ? m.lessons : []).forEach((l, j) => {
       if (!l || typeof l.title !== 'string' || !l.title.trim()) return;
       const lessonId = `${moduleId}:l${j + 1}`;
-      const quiz = buildQuiz(l.quiz, lessonId, genHash, version);
       lessons.push({
         id: lessonId,
         moduleId,
         ordinal: j + 1,
         title: l.title.trim(),
         durationMin: typeof l.durationMin === 'number' && l.durationMin > 0 ? Math.round(l.durationMin) : null,
-        quiz: quiz ? [quiz] : [],
+        quiz: buildQuizzes(l.quiz, lessonId, genHash, version), // 0-to-3 (one per difficulty)
       });
     });
     if (!lessons.length) return; // a module with no usable lessons is dropped
@@ -168,9 +186,9 @@ function composeLessonSource(lp: {
 const SYSTEM = [
   'You are a U.S. National Park education designer building a short, accurate micro-course from ONE NPS lesson plan.',
   'Derive EVERYTHING strictly from the provided lesson text. Do not introduce facts the text does not support.',
-  'Produce 1-3 modules; each module has 1-3 lessons; each lesson has exactly one multiple-choice quiz question with 3-4 options.',
-  'The quiz rationale must explain the correct answer using only the lesson content.',
-  'Output JSON of shape: {"modules":[{"title":string,"summary":string,"lessons":[{"title":string,"durationMin":number,"quiz":{"stem":string,"choices":[{"id":string,"label":string}],"correctId":string,"difficulty":"easy"|"medium"|"hard","rationale":string}}]}]}',
+  'Produce 1-3 modules; each module has 1-3 lessons; each lesson has 1-3 multiple-choice quiz questions (3-4 options each) at DIFFERENT difficulties — ideally one easy, one medium, and one hard — so the tutor can adapt and re-quiz.',
+  'Each quiz rationale must explain its correct answer using only the lesson content.',
+  'Output JSON of shape: {"modules":[{"title":string,"summary":string,"lessons":[{"title":string,"durationMin":number,"quiz":[{"stem":string,"choices":[{"id":string,"label":string}],"correctId":string,"difficulty":"easy"|"medium"|"hard","rationale":string}]}]}]}',
   'choice ids are short slugs like "a","b","c"; correctId must equal one of the choice ids.',
 ].join('\n');
 
@@ -203,6 +221,15 @@ async function persist(lessonPlanId: string, modules: SpineModule[]): Promise<vo
      MATCH (lp)-[:CONTAINS_MODULE]->(:Module)-[:CONTAINS_LESSON]->(:Lesson)-[:HAS_QUESTION]->(qq:QuizQuestion)
      MERGE (qq)-[:TESTS]->(t)`,
     { lpId: lessonPlanId },
+  );
+  // Prune superseded quizzes (e.g. a prior DECOMPOSE_VERSION's single question) that this regeneration
+  // replaced — but ONLY ones with no learner progress, so `ANSWERED`/mastery history is never destroyed.
+  const keepIds = modules.flatMap((m) => m.lessons.flatMap((l) => l.quiz.map((q) => q.id)));
+  await writeGraph(
+    `MATCH (lp:LessonPlan {id: $lpId})-[:CONTAINS_MODULE]->(:Module)-[:CONTAINS_LESSON]->(:Lesson)-[:HAS_QUESTION]->(q:QuizQuestion)
+     WHERE NOT q.id IN $keepIds AND NOT EXISTS { (:User)-[:ANSWERED]->(q) }
+     DETACH DELETE q`,
+    { lpId: lessonPlanId, keepIds },
   );
 }
 

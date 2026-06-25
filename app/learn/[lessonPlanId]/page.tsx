@@ -1,9 +1,9 @@
-import { Box, Button, Container, HStack, Stack, Text, Link as CLink } from '@chakra-ui/react';
+import { Badge, Box, Button, Container, HStack, Stack, Text, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
 import { notFound } from 'next/navigation';
 import { getServerUserId } from '../../../lib/session';
 import { PageHeader } from '../../../components/ui/page-header';
-import { lessonPlanProgress } from '../../../lib/learn-queries';
+import { lessonPlanProgress, lessonPlanHeader } from '../../../lib/learn-queries';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +16,10 @@ export default async function CourseSyllabusPage({ params }: { params: Promise<{
   const { lessonPlanId } = await params;
   const userId = await getServerUserId();
   // An empty userId matches no :User, so completion flags are all false for anonymous browsers.
-  const progress = await lessonPlanProgress(userId ?? '', lessonPlanId);
+  const [progress, header] = await Promise.all([
+    lessonPlanProgress(userId ?? '', lessonPlanId),
+    lessonPlanHeader(lessonPlanId),
+  ]);
   if (!progress) notFound();
 
   const lessonHref = (id: string) => `/learn/${encodeURIComponent(lessonPlanId)}/${encodeURIComponent(id)}`;
@@ -43,6 +46,24 @@ export default async function CourseSyllabusPage({ params }: { params: Promise<{
         }
       />
       <Container maxW="3xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 10 }}>
+        {header ? (
+          <Stack gap={2} mb={8}>
+            <HStack gap={3} wrap="wrap">
+              {header.subject ? <Badge colorPalette="pine">{header.subject}</Badge> : null}
+              {header.topics.slice(0, 3).map((t) => (
+                <Badge key={t} colorPalette="trail" size="sm">{t}</Badge>
+              ))}
+              {header.parkName && header.parkCode ? (
+                <CLink asChild fontSize="sm" color="brand.fg" fontWeight="medium">
+                  <NextLink href={`/parks/${header.parkCode}`}>{header.parkName} ↗</NextLink>
+                </CLink>
+              ) : null}
+            </HStack>
+            {header.objective ? <Text color="fg.muted">{header.objective}</Text> : null}
+            {/* Grade level is sourced from K-12 lesson plans but de-emphasized for the adult-learner framing. */}
+            {header.gradeLevel ? <Text fontSize="xs" color="fg.subtle">Recommended level: {header.gradeLevel}</Text> : null}
+          </Stack>
+        ) : null}
         {progress.total === 0 ? (
           <Text color="fg.muted">
             This course isn&apos;t broken into lessons yet — ask the Ranger to teach it in chat.

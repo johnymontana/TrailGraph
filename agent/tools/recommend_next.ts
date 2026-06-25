@@ -43,8 +43,26 @@ export default defineTool({
       };
     }
 
+    const flat = progress.modules.flatMap((m) => m.lessons);
+
+    // The just-finished lesson is still incomplete → the learner missed its quiz (a correct answer is the
+    // only thing that writes COMPLETED). Recommend REVIEW of THIS lesson, never a contradictory "advance".
+    const justFinished = flat.find((l) => l.id === lessonId);
+    if (justFinished && !justFinished.completed) {
+      return {
+        kind: 'next_step_card',
+        data: {
+          recommendation: 'retry',
+          lessonId: justFinished.id,
+          lessonTitle: justFinished.title,
+          courseTitle: progress.title,
+          reason: `Let's review "${justFinished.title}" and try again before moving on.`,
+        },
+      };
+    }
+
     // Next uncompleted lesson in the spine.
-    const next = progress.modules.flatMap((m) => m.lessons).find((l) => !l.completed);
+    const next = flat.find((l) => !l.completed);
     if (next) {
       return {
         kind: 'next_step_card',

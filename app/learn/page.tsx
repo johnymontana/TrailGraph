@@ -1,4 +1,4 @@
-import { Badge, Box, Button, Container, HStack, Input, SimpleGrid, Text, Link as CLink } from '@chakra-ui/react';
+import { Badge, Box, Button, Container, Field, HStack, Input, NativeSelect, SimpleGrid, Stack, Text, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
 import { LuGraduationCap, LuBookOpen, LuCircleCheck, LuAward } from 'react-icons/lu';
 import { getServerUserId } from '../../lib/session';
@@ -8,52 +8,76 @@ import { StatCard } from '../../components/ui/stat-card';
 import { EmptyState } from '../../components/ui/empty-state';
 import { CourseCard } from '../../components/learn/CourseCard';
 import { BadgeShelf } from '../../components/learn/BadgeShelf';
-import { learnCatalog, searchCourses, getLearnDashboard, getLearningMemory, crossParkTopics } from '../../lib/learn-queries';
+import { learnCatalog, searchCourses, subjectFacets, getLearnDashboard, getLearningMemory, crossParkTopics, type CatalogSort } from '../../lib/learn-queries';
 import { allBadges } from '../../lib/learn-badges';
 
 export const dynamic = 'force-dynamic';
 
+const PAGE_SIZE = 24;
+
 const GRADE_CHIPS: { id: string; label: string }[] = [
-  { id: '', label: 'All grades' },
+  { id: '', label: 'All levels' },
   { id: 'k-2', label: 'K–2' },
   { id: '3-5', label: '3–5' },
   { id: '6-8', label: '6–8' },
   { id: '9-12', label: '9–12' },
 ];
 
+const SORT_OPTIONS: { id: string; label: string }[] = [
+  { id: '', label: 'Best match' },
+  { id: 'park', label: 'Park (A–Z)' },
+  { id: 'subject', label: 'Subject' },
+  { id: 'lessons', label: 'Most lessons' },
+  { id: 'grade', label: 'Reading level' },
+];
+const VALID_SORTS = new Set(['park', 'grade', 'subject', 'lessons']);
+
 /**
  * Ranger School catalog + (when signed in) a progress band. Public — anyone can browse courses; the
- * dashboard stats only render for an authenticated learner (no redirect). A GET search form (`?q=`) +
- * grade-band chips (`?grade=`) make the ~1,357-course catalog navigable (progressive-enhancement, no JS).
+ * dashboard stats only render for an authenticated learner (no redirect). A GET form (`?q=`/`?subject=`/
+ * `?sort=`) + grade-band chips (`?grade=`) + pagination (`?page=`) make the ~1,357-course catalog navigable
+ * (progressive-enhancement, no JS). Framed for adult lifelong-learners; reading level is a filter, not a headline.
  */
-export default async function LearnPage({ searchParams }: { searchParams: Promise<{ q?: string; grade?: string }> }) {
+export default async function LearnPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; grade?: string; subject?: string; sort?: string; page?: string }>;
+}) {
   const sp = await searchParams;
   const query = (sp.q ?? '').trim();
   const grade = (sp.grade ?? '').trim();
+  const subject = (sp.subject ?? '').trim();
+  const sort = VALID_SORTS.has((sp.sort ?? '').trim()) ? (sp.sort!.trim() as CatalogSort) : undefined;
+  const page = Math.max(0, Number.parseInt(sp.page ?? '0', 10) || 0);
+  const opts = { limit: PAGE_SIZE, gradeBand: grade, subject: subject || undefined, sort, page };
   const userId = await getServerUserId();
-  const [courses, dashboard, memory, badges, trails] = await Promise.all([
-    query ? searchCourses(query, { limit: 60, gradeBand: grade }) : learnCatalog(60, grade),
+  const [courses, subjects, dashboard, memory, badges, trails] = await Promise.all([
+    query ? searchCourses(query, opts) : learnCatalog(PAGE_SIZE, grade, opts),
+    subjectFacets(),
     userId ? getLearnDashboard(userId) : Promise.resolve(null),
     userId ? getLearningMemory(userId) : Promise.resolve(null),
     userId ? allBadges() : Promise.resolve([]),
     crossParkTopics(10),
   ]);
+  const hasNextPage = courses.length === PAGE_SIZE; // a full page → there's probably more
 
-  // Build a chip href that preserves the current search query.
-  const chipHref = (band: string) => {
-    const params = new URLSearchParams();
-    if (query) params.set('q', query);
-    if (band) params.set('grade', band);
-    const qs = params.toString();
+  // Build an href preserving the current filters, with overrides (undefined drops a param).
+  const buildHref = (overrides: Record<string, string | undefined>) => {
+    const merged: Record<string, string> = {};
+    const base = { q: query, grade, subject, sort: sort ?? '', page: page > 0 ? String(page) : '' };
+    for (const [k, v] of Object.entries({ ...base, ...overrides })) if (v) merged[k] = v;
+    const qs = new URLSearchParams(merged).toString();
     return qs ? `/learn?${qs}` : '/learn';
   };
+  // Changing a grade chip resets pagination back to the first page.
+  const chipHref = (band: string) => buildHref({ grade: band || undefined, page: undefined });
 
   return (
     <Box>
       <PageHeader
         eyebrow="RANGER SCHOOL"
         title="Learn the parks"
-        subtitle="Park-grounded courses, taught by the Ranger. Ask the ranger in chat to teach any course."
+        subtitle="Self-paced, park-grounded courses — taught by the Ranger. Pick a topic and learn the story behind any park."
         contour
       />
       <Container maxW="6xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 10 }}>
@@ -68,7 +92,7 @@ export default async function LearnPage({ searchParams }: { searchParams: Promis
             </SimpleGrid>
             {badges.length ? (
               <Box mt={6}>
-                <Text fontSize="sm" fontWeight="semibold" color="fg.muted" mb={3}>Junior Ranger badges</Text>
+                <Text fontSize="sm" fontWeight="semibold" color="fg.muted" mb={3}>Your ranger badges</Text>
                 <BadgeShelf badges={badges} earnedIds={(memory?.badges ?? []).map((b) => b.id)} />
               </Box>
             ) : null}
@@ -95,24 +119,51 @@ export default async function LearnPage({ searchParams }: { searchParams: Promis
 
         <SectionHeading
           title={query ? `Results for “${query}”` : 'All courses'}
-          description={query ? `${courses.length} course${courses.length === 1 ? '' : 's'} match your search.` : 'Every NPS lesson plan, grounded in its park.'}
+          description={query ? 'Most relevant courses first.' : 'Every NPS lesson plan, grounded in its park.'}
           action={query ? { href: '/learn', label: 'Clear search' } : undefined}
         />
 
-        {/* GET search — submitting navigates to /learn?q=… (no client JS needed) */}
-        <Box mb={6} maxW="2xl">
+        {/* GET search + filters — submitting navigates to /learn?q=…&subject=…&sort=… (no client JS needed). */}
+        <Box mb={6} maxW="3xl">
           <form action="/learn">
-            <HStack gap={2}>
-              <Input
-                name="q"
-                defaultValue={query}
-                placeholder="Search courses — e.g. geology, wildlife, Yellowstone…"
-                bg="bg.panel"
-                borderRadius="full"
-              />
-              {grade ? <input type="hidden" name="grade" value={grade} /> : null}
-              <Button type="submit" colorPalette="pine" borderRadius="full" px={6}>Search</Button>
-            </HStack>
+            <Stack gap={3}>
+              <HStack gap={2}>
+                <Input
+                  name="q"
+                  defaultValue={query}
+                  placeholder="Search courses — e.g. geology, wildlife, Yellowstone…"
+                  bg="bg.panel"
+                  borderRadius="full"
+                />
+                <Button type="submit" colorPalette="pine" borderRadius="full" px={6}>Search</Button>
+              </HStack>
+              <HStack gap={3} wrap="wrap" align="end">
+                <Field.Root w={{ base: 'full', sm: '230px' }}>
+                  <Field.Label fontSize="xs" color="fg.muted">Subject</Field.Label>
+                  <NativeSelect.Root size="sm">
+                    <NativeSelect.Field name="subject" defaultValue={subject}>
+                      <option value="">All subjects</option>
+                      {subjects.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </NativeSelect.Field>
+                    <NativeSelect.Indicator />
+                  </NativeSelect.Root>
+                </Field.Root>
+                <Field.Root w={{ base: 'full', sm: '190px' }}>
+                  <Field.Label fontSize="xs" color="fg.muted">Sort</Field.Label>
+                  <NativeSelect.Root size="sm">
+                    <NativeSelect.Field name="sort" defaultValue={sort ?? ''}>
+                      {SORT_OPTIONS.map((o) => (
+                        <option key={o.id} value={o.id}>{o.label}</option>
+                      ))}
+                    </NativeSelect.Field>
+                    <NativeSelect.Indicator />
+                  </NativeSelect.Root>
+                </Field.Root>
+                {grade ? <input type="hidden" name="grade" value={grade} /> : null}
+              </HStack>
+            </Stack>
           </form>
         </Box>
 
@@ -136,11 +187,32 @@ export default async function LearnPage({ searchParams }: { searchParams: Promis
         </HStack>
 
         {courses.length ? (
-          <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={4}>
-            {courses.map((c) => (
-              <CourseCard key={c.id} course={c} />
-            ))}
-          </SimpleGrid>
+          <>
+            <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={4}>
+              {courses.map((c) => (
+                <CourseCard key={c.id} course={c} />
+              ))}
+            </SimpleGrid>
+            {page > 0 || hasNextPage ? (
+              <HStack justify="space-between" mt={8}>
+                {page > 0 ? (
+                  <CLink asChild color="brand.fg">
+                    <NextLink href={buildHref({ page: page - 1 > 0 ? String(page - 1) : undefined })}>← Previous</NextLink>
+                  </CLink>
+                ) : (
+                  <Box />
+                )}
+                <Text fontSize="sm" color="fg.muted">Page {page + 1}</Text>
+                {hasNextPage ? (
+                  <CLink asChild color="brand.fg">
+                    <NextLink href={buildHref({ page: String(page + 1) })}>Next →</NextLink>
+                  </CLink>
+                ) : (
+                  <Box />
+                )}
+              </HStack>
+            ) : null}
+          </>
         ) : (
           <EmptyState
             icon={<LuGraduationCap />}
@@ -153,7 +225,7 @@ export default async function LearnPage({ searchParams }: { searchParams: Promis
                   : 'Courses appear here once lesson plans sync.'
             }
           >
-            {query || grade ? (
+            {query || grade || subject || page > 0 ? (
               <CLink asChild color="brand.fg">
                 <NextLink href="/learn">Clear filters</NextLink>
               </CLink>

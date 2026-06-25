@@ -17,6 +17,7 @@ import {
   getLearningMemory,
   lessonPlanProgress,
   pickQuizForLesson,
+  recentQuizIdsForLesson,
   certificateBySlug,
   getLearnDashboard,
   quizGradeData,
@@ -137,7 +138,7 @@ describe('learnCatalog (grade-band filter binding)', () => {
     readGraphMock.mockReset();
     readGraphMock.mockResolvedValue([]);
     await learnCatalog();
-    expect(readGraphMock.mock.calls[0][1]).toEqual({ limit: 60, bandMin: null, bandMax: null });
+    expect(readGraphMock.mock.calls[0][1]).toEqual({ limit: 60, skip: 0, bandMin: null, bandMax: null, subject: null });
     expectAllParamsBound();
   });
 
@@ -145,7 +146,7 @@ describe('learnCatalog (grade-band filter binding)', () => {
     readGraphMock.mockReset();
     readGraphMock.mockResolvedValue([]);
     await learnCatalog(20, '6-8');
-    expect(readGraphMock.mock.calls[0][1]).toEqual({ limit: 20, bandMin: 6, bandMax: 8 });
+    expect(readGraphMock.mock.calls[0][1]).toEqual({ limit: 20, skip: 0, bandMin: 6, bandMax: 8, subject: null });
     expectAllParamsBound();
   });
 
@@ -153,7 +154,7 @@ describe('learnCatalog (grade-band filter binding)', () => {
     readGraphMock.mockReset();
     readGraphMock.mockResolvedValue([]);
     await learnCatalog(60, 'bogus');
-    expect(readGraphMock.mock.calls[0][1]).toEqual({ limit: 60, bandMin: null, bandMax: null });
+    expect(readGraphMock.mock.calls[0][1]).toEqual({ limit: 60, skip: 0, bandMin: null, bandMax: null, subject: null });
     expectAllParamsBound();
   });
 });
@@ -166,7 +167,7 @@ describe('searchCourses (fulltext vs catalog fallback)', () => {
     expect(readGraphMock).toHaveBeenCalledTimes(1);
     const [cypher, params] = readGraphMock.mock.calls[0] as [string, Record<string, unknown>];
     expect(cypher).not.toContain('db.index.fulltext');
-    expect(params).toEqual({ limit: 60, bandMin: 6, bandMax: 8 });
+    expect(params).toEqual({ limit: 60, skip: 0, bandMin: 6, bandMax: 8, subject: null });
     expectAllParamsBound();
   });
 
@@ -177,7 +178,7 @@ describe('searchCourses (fulltext vs catalog fallback)', () => {
     expect(readGraphMock).toHaveBeenCalledTimes(1);
     const [cypher, params] = readGraphMock.mock.calls[0] as [string, Record<string, unknown>];
     expect(cypher).not.toContain('db.index.fulltext');
-    expect(params).toEqual({ limit: 60, bandMin: null, bandMax: null });
+    expect(params).toEqual({ limit: 60, skip: 0, bandMin: null, bandMax: null, subject: null });
     expectAllParamsBound();
   });
 
@@ -188,7 +189,7 @@ describe('searchCourses (fulltext vs catalog fallback)', () => {
     expect(readGraphMock).toHaveBeenCalledTimes(1);
     const [cypher, params] = readGraphMock.mock.calls[0] as [string, Record<string, unknown>];
     expect(cypher).toContain('db.index.fulltext.queryNodes');
-    expect(params).toEqual({ ft: 'yellowstone* geology*', limit: 60, bandMin: null, bandMax: null });
+    expect(params).toEqual({ ft: 'yellowstone* geology*', limit: 60, skip: 0, bandMin: null, bandMax: null, subject: null });
     expectAllParamsBound();
   });
 });
@@ -359,7 +360,7 @@ describe('pickQuizForLesson (cached quiz pick)', () => {
     readGraphMock.mockReset();
     readGraphMock.mockResolvedValue([]);
     await pickQuizForLesson('l1');
-    expect(readGraphMock.mock.calls[0][1]).toEqual({ lessonId: 'l1', difficulty: null });
+    expect(readGraphMock.mock.calls[0][1]).toEqual({ lessonId: 'l1', difficulty: null, excludeIds: [] });
     expectAllParamsBound();
   });
 
@@ -367,7 +368,7 @@ describe('pickQuizForLesson (cached quiz pick)', () => {
     readGraphMock.mockReset();
     readGraphMock.mockResolvedValue([]);
     await pickQuizForLesson('l1', 'hard');
-    expect(readGraphMock.mock.calls[0][1]).toEqual({ lessonId: 'l1', difficulty: 'hard' });
+    expect(readGraphMock.mock.calls[0][1]).toEqual({ lessonId: 'l1', difficulty: 'hard', excludeIds: [] });
     expectAllParamsBound();
   });
 
@@ -398,6 +399,32 @@ describe('pickQuizForLesson (cached quiz pick)', () => {
       difficulty: 'easy',
       lessonId: 'l-arg',
     });
+  });
+
+  it('filters excludeIds in the query and binds them (default [])', async () => {
+    readGraphMock.mockReset();
+    readGraphMock.mockResolvedValue([]);
+    await pickQuizForLesson('l1', 'easy', ['q-old']);
+    const [cypher, params] = readGraphMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(cypher).toContain('NOT q.id IN $excludeIds');
+    expect(params).toEqual({ lessonId: 'l1', difficulty: 'easy', excludeIds: ['q-old'] });
+    expectAllParamsBound();
+
+    readGraphMock.mockReset();
+    readGraphMock.mockResolvedValue([]);
+    await pickQuizForLesson('l1');
+    expect(readGraphMock.mock.calls[0][1]).toEqual({ lessonId: 'l1', difficulty: null, excludeIds: [] });
+  });
+});
+
+describe('recentQuizIdsForLesson', () => {
+  it('returns the answered quiz ids newest-first and binds { userId, lessonId, limit }', async () => {
+    readGraphMock.mockReset();
+    readGraphMock.mockResolvedValue([{ id: 'q2' }, { id: 'q1' }] as never);
+    const ids = await recentQuizIdsForLesson('u1', 'l1', 3);
+    expect(ids).toEqual(['q2', 'q1']);
+    expect(readGraphMock.mock.calls[0][1]).toEqual({ userId: 'u1', lessonId: 'l1', limit: 3 });
+    expectAllParamsBound();
   });
 });
 
