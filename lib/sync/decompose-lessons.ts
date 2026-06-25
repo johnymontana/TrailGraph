@@ -87,7 +87,7 @@ const DIFFICULTIES = ['easy', 'medium', 'hard'];
 
 function buildQuiz(q: GenQuiz | null | undefined, lessonId: string, genHash: string, version: string): SpineQuiz | null {
   if (!q || typeof q.stem !== 'string' || !q.stem.trim()) return null;
-  const choices = (q.choices ?? []).filter(
+  const choices = (Array.isArray(q.choices) ? q.choices : []).filter(
     (c): c is { id: string; label: string } => !!c && typeof c.id === 'string' && typeof c.label === 'string' && !!c.label.trim(),
   );
   if (choices.length < 2) return null; // need a real multiple choice
@@ -116,11 +116,11 @@ export function buildCourseSpine(
   version: string = DECOMPOSE_VERSION,
 ): SpineModule[] {
   const modules: SpineModule[] = [];
-  (course?.modules ?? []).forEach((m, i) => {
+  (Array.isArray(course?.modules) ? course.modules : []).forEach((m, i) => {
     if (!m || typeof m.title !== 'string' || !m.title.trim()) return;
     const moduleId = `${lessonPlanId}:m${i + 1}`;
     const lessons: SpineLesson[] = [];
-    (m.lessons ?? []).forEach((l, j) => {
+    (Array.isArray(m.lessons) ? m.lessons : []).forEach((l, j) => {
       if (!l || typeof l.title !== 'string' || !l.title.trim()) return;
       const lessonId = `${moduleId}:l${j + 1}`;
       const quiz = buildQuiz(l.quiz, lessonId, genHash, version);

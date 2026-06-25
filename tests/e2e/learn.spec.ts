@@ -120,3 +120,49 @@ test('a signed-in learner sees the lesson player shell + content', async ({ page
   // Right pane: the lesson-seeded tutor chat header.
   await expect(page.getByText(/Ranger · your tutor/)).toBeVisible();
 });
+
+test('lesson player resolves a URL-ENCODED (%3A) colon lesson id (production params regression)', async ({ page }) => {
+  // Regression for the prod-only bug: next build hands dynamic params still percent-encoded, so the lesson
+  // id "<plan>:m1:l1" arrives as %3A and must be decodeURIComponent'd before the graph lookup (else 404).
+  await signUp(page);
+  await page.goto('/learn/lesson-yell-geology/lesson-yell-geology%3Am1%3Al1');
+  await expect(page.getByRole('heading', { name: 'The Yellowstone Hotspot', exact: true })).toBeVisible();
+});
+
+test('syllabus of a course with no lesson spine shows the not-decomposed message and no Start CTA', async ({ page }) => {
+  // The seeded "Geology of the Grand Canyon" course is ABOUT grca with NO Module/Lesson spine.
+  await page.goto('/learn/lesson-grca-geology');
+  await expect(page.getByRole('heading', { name: /Geology of the Grand Canyon/i })).toBeVisible();
+  await expect(page.getByText(/isn.t broken into lessons yet/i)).toBeVisible();
+  // No "Start learning"/"Continue learning" CTA when there are no lessons to start.
+  await expect(page.getByRole('button', { name: /Start learning|Continue learning/i })).toHaveCount(0);
+});
+
+test('catalog combines a grade-band filter with a search query', async ({ page }) => {
+  // Both seed Geology courses match "geology"; the grade band must narrow to the 6–8 one (yell), excluding
+  // the 9–12 Grand Canyon course.
+  await page.goto('/learn?q=geology&grade=6-8');
+  await expect(page.getByRole('heading', { name: /Results for/i })).toBeVisible();
+  await expect(page.getByText('Geology of Yellowstone')).toBeVisible();
+  await expect(page.getByText('Geology of the Grand Canyon')).toHaveCount(0);
+});
+
+test('a signed-in learner sees the Your progress band (stat cards + badge shelf) on /learn', async ({ page }) => {
+  await signUp(page);
+  await page.goto('/learn');
+  await expect(page.getByText(/Your progress/i)).toBeVisible();
+  // The four StatCards render even at zero for a fresh learner.
+  await expect(page.getByText('Lessons completed')).toBeVisible();
+  await expect(page.getByText('Certificates')).toBeVisible();
+  // The Junior Ranger badge shelf shows the (locked) taxonomy from migration 021.
+  await expect(page.getByText(/Junior Ranger badges/i)).toBeVisible();
+});
+
+test('certificate Copy share link button switches to Copied! after a click', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-write']); // localhost is a secure context, so writeText resolves
+  await page.goto('/learn/cert/test0123456789abcd');
+  const btn = page.getByRole('button', { name: /Copy share link/i });
+  await expect(btn).toBeVisible();
+  await btn.click();
+  await expect(page.getByRole('button', { name: /Copied!/i })).toBeVisible();
+});

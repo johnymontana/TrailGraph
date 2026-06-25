@@ -6,6 +6,8 @@ import {
   enrollIn,
   completeLesson,
   recordQuizAttempt,
+  recordMastery,
+  recordStruggle,
   earnBadge,
   issueCertificate,
   deleteStruggle,
@@ -259,5 +261,154 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
     // quizGradeData now surfaces it (alongside the seed's Volcanoes) for mastery tracking.
     const grade = await quizGradeData(QUIZ);
     expect(grade!.topics).toContain('Geology');
+  });
+});
+
+/**
+ * Phase 8 — bridge semantics + read edge-cases, fully ISOLATED from the sequential suite above (its own
+ * userId + ad-hoc nodes, cleaned in afterAll). Proves the graph-level invariants that the pure unit tests
+ * can't: MERGE-latest cardinality, EWMA blending against a real prior, the masteryByTopic recency window,
+ * the difficulty fallback, canonicalize-miss no-ops, idempotent completion, and cross-park single-park
+ * exclusion.
+ */
+const u8 = `test-rs8-${Math.random().toString(36).slice(2, 10)}`;
+
+describeIntegration('Ranger School Phase 8 — bridge semantics + read edge-cases (isolated)', () => {
+  beforeAll(async () => {
+    await seedTestData();
+  });
+
+  afterAll(async () => {
+    // Remove the test user + the ad-hoc windowing fixtures (quizzes wq:* + the throwaway topic).
+    await writeGraph(
+      `MATCH (u:User {userId: $u8}) DETACH DELETE u`,
+      { u8 },
+    );
+    await writeGraph(
+      `MATCH (q:QuizQuestion) WHERE q.id STARTS WITH 'wq:' DETACH DELETE q`,
+    );
+    await writeGraph(`MATCH (t:Topic {id: 'top-windowtest'}) DETACH DELETE t`);
+    await closeDriver();
+  });
+
+  it('recordQuizAttempt is MERGE-latest: re-answering one quiz keeps ONE edge and increments attempt', async () => {
+    await recordQuizAttempt(u8, QUIZ, false, 'glacier'); // attempt 1, wrong
+    await recordQuizAttempt(u8, QUIZ, true, 'hotspot'); // attempt 2, right (overwrites)
+    const rows = await readGraph<{ edges: number; attempt: number; correct: boolean; score: number }>(
+      `MATCH (:User {userId:$u8})-[a:ANSWERED]->(:QuizQuestion {id:$q})
+       RETURN count(a) AS edges, a.attempt AS attempt, a.correct AS correct, a.score AS score`,
+      { u8, q: QUIZ },
+    );
+    expect(rows[0].edges).toBe(1); // bounded — never CREATE-per-attempt
+    expect(rows[0].attempt).toBe(2);
+    expect(rows[0].correct).toBe(true); // latest answer wins
+    expect(rows[0].score).toBe(1); // FLOAT 1.0 for a correct answer
+  });
+
+  it('recordMastery blends successive samples via EWMA (not a flat overwrite)', async () => {
+    const first = await recordMastery(u8, 'Volcanoes', 1.0);
+    expect(first).toEqual({ previous: null, score: 1 }); // first observation seeds the sample
+    const second = await recordMastery(u8, 'Volcanoes', 0.0);
+    expect(second!.previous).toBe(1);
+    expect(second!.score).toBeCloseTo(0.7, 6); // 0.3*0 + 0.7*1 — NOT a flat 0
+    // and the stored edge reflects the blended score
+    const mem = await getLearningMemory(u8);
+    expect(mem.mastery.find((m) => m.topic === 'Volcanoes')?.score).toBeCloseTo(0.7, 6);
+  });
+
+  it('recordStruggle writes nothing (returns false) for a topic that does not canonicalize', async () => {
+    const ok = await recordStruggle(u8, 'ZzzNotARealTopicXyz', 0.9);
+    expect(ok).toBe(false);
+    const rows = await readGraph<{ n: number }>(
+      `MATCH (:User {userId:$u8})-[r:STRUGGLES_WITH]->(:Topic {name:'ZzzNotARealTopicXyz'}) RETURN count(r) AS n`,
+      { u8 },
+    );
+    expect(rows[0].n).toBe(0); // no guessing — no edge to a non-existent topic
+  });
+
+  it('completeLesson is idempotent — re-completion updates the score on the single COMPLETED edge', async () => {
+    await completeLesson(u8, LESSON, 0.5);
+    await completeLesson(u8, LESSON, 0.9);
+    const rows = await readGraph<{ edges: number; score: number }>(
+      `MATCH (:User {userId:$u8})-[r:COMPLETED]->(:Lesson {id:$l})
+       RETURN count(r) AS edges, r.score AS score`,
+      { u8, l: LESSON },
+    );
+    expect(rows[0].edges).toBe(1);
+    expect(rows[0].score).toBeCloseTo(0.9, 6); // latest score, not a second edge
+  });
+
+  it('issueCertificate returns null for a non-existent lesson plan (no orphan certificate)', async () => {
+    const cert = await issueCertificate(u8, 'no-such-lesson-plan', 0.5);
+    expect(cert).toBeNull();
+    const rows = await readGraph<{ n: number }>(
+      `MATCH (c:Certificate {lessonPlanId:'no-such-lesson-plan'}) RETURN count(c) AS n`,
+    );
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('pickQuizForLesson falls back to any quiz when the preferred difficulty is absent', async () => {
+    // The seed lesson has only an EASY quiz; asking for HARD must still return it (never strand a learner).
+    const hard = await pickQuizForLesson(LESSON, 'hard');
+    expect(hard).not.toBeNull();
+    expect(hard!.id).toBe(QUIZ);
+    expect(hard!.difficulty).toBe('easy'); // the actual stored difficulty, not the requested one
+  });
+
+  it('masteryByTopic windows to the most-recent N answers (default 10) and computes a FLOAT ratio', async () => {
+    // 12 quizzes on a throwaway topic; the 2 OLDEST answers are wrong, the 10 newest correct. With the
+    // default window of 10, only the 10 newest count → mastery 1.0, attempts 10 (the 2 wrong fall outside).
+    await writeGraph(
+      `MERGE (t:Topic {id:'top-windowtest'}) SET t.name = 'WindowTopic'
+       MERGE (u:User {userId:$u8})
+       WITH t, u
+       UNWIND range(0,11) AS i
+       MERGE (q:QuizQuestion {id: 'wq:' + toString(i)})
+         SET q.lessonId='wlesson', q.stem='Q', q.choices='[]', q.correctId='a', q.difficulty='easy', q.ordinal=i
+       MERGE (q)-[:TESTS]->(t)
+       MERGE (u)-[a:ANSWERED]->(q)
+         SET a.correct = (i >= 2), a.at = datetime('2026-01-01T00:00:00Z') + duration({seconds: i})`,
+      { u8 },
+    );
+    const m = await masteryByTopic(u8);
+    const wt = m.find((x) => x.topic === 'WindowTopic');
+    expect(wt).toBeDefined();
+    expect(wt!.attempts).toBe(10); // windowed to 10, NOT all 12
+    expect(wt!.mastery).toBeCloseTo(1.0, 6); // the newest 10 are all correct (FLOAT, not integer-divided)
+
+    // Scoped to a lesson plan that doesn't contain these quizzes → the topic drops out entirely.
+    const scoped = await masteryByTopic(u8, LP);
+    expect(scoped.find((x) => x.topic === 'WindowTopic')).toBeUndefined();
+  });
+
+  it('crossParkTopics excludes a single-park topic (Volcanoes = yell only) but keeps a 2-park topic (Geology)', async () => {
+    const topics = await crossParkTopics(50);
+    const names = topics.map((t) => t.topic);
+    expect(names).toContain('Geology'); // yell + grca
+    expect(names).not.toContain('Volcanoes'); // only the yell lesson relates to it → 1 park, excluded
+    // every surfaced topic genuinely spans >= 2 parks
+    expect(topics.every((t) => t.parkCount >= 2)).toBe(true);
+  });
+
+  it('reconcileUserLearning creates a struggle for a non-tombstoned topic but never resurrects a tombstoned one', async () => {
+    // Self-contained: the seed QUIZ TESTS Volcanoes; ALSO ground it in a second topic (Geology) here so we
+    // don't depend on the other suite having run deriveLessonTopics. Answer WRONG, dismiss ONLY Volcanoes,
+    // then reconcile: it must (a) roll up mastery, (b) recreate the Geology struggle (non-tombstoned), but
+    // (c) leave the dismissed Volcanoes struggle gone.
+    await writeGraph(
+      `MATCH (q:QuizQuestion {id:$q}) MERGE (g:Topic {id:'top-geology'}) ON CREATE SET g.name='Geology'
+       MERGE (q)-[:TESTS]->(g)`,
+      { q: QUIZ },
+    );
+    await recordQuizAttempt(u8, QUIZ, false, 'glacier'); // wrong → both topics get a wrongRatio of 1.0
+    await deleteStruggle(u8, 'Volcanoes'); // dismiss ONLY Volcanoes (tombstone)
+    const res = await reconcileUserLearning(u8);
+    expect(res.mastery).toBeGreaterThanOrEqual(1); // mastery rolled up
+    expect(res.struggles).toBeGreaterThanOrEqual(1); // at least the non-tombstoned Geology struggle written
+
+    const mem = await getLearningMemory(u8);
+    const struggling = mem.struggling.map((s) => s.topic);
+    expect(struggling).toContain('Geology'); // freely (re)created — depends on reconcile actually running
+    expect(struggling).not.toContain('Volcanoes'); // tombstone held despite the wrong answer
   });
 });

@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { isRenderableToolOutput } from './tool-output';
 
 /**
@@ -120,5 +123,78 @@ describe('isRenderableToolOutput', () => {
     // next_step_card
     expect(isRenderableToolOutput('next_step_card', { recommendation: 'advance' })).toBe(true);
     expect(isRenderableToolOutput('next_step_card', {})).toBe(false);
+  });
+
+  /**
+   * Structural guard (anti-drift): the renderability allowlist in tool-output.ts and the `switch (kind)`
+   * in components/chat/Cards.tsx are two hand-maintained lists that MUST stay in lock-step for the LEARN
+   * (Ranger School Phase 4) cards — a kind that ToolCard renders but the guard rejects is a silently
+   * dropped card; the reverse renders an empty shell. Rather than hardcode a list that goes stale, parse
+   * the actual `case '<kind>':` lines out of Cards.tsx so this test fails the moment a new learn card is
+   * added to the switch without being taught to isRenderableToolOutput.
+   */
+  describe('structural guard vs components/chat/Cards.tsx', () => {
+    // Parse the switch cases from the real Cards.tsx source (node env: fs is available).
+    const cardsPath = resolve(dirname(fileURLToPath(import.meta.url)), '../components/chat/Cards.tsx');
+    const cardsSrc = readFileSync(cardsPath, 'utf8');
+    // Map each `case 'x': return <Component ...>` arm to the component it renders (simple single-return arms).
+    const caseComponent = new Map<string, string>();
+    for (const m of cardsSrc.matchAll(/case\s+'([a-z_]+)'\s*:\s*return\s+<([A-Za-z0-9]+)/g)) {
+      caseComponent.set(m[1], m[2]);
+    }
+    // The learn-card components are everything DECLARED under the "Ranger School (Phase 4)" section marker —
+    // so we discover learn kinds from the real source rather than a hand-kept list that silently goes stale.
+    const phase4Idx = cardsSrc.indexOf('Ranger School (Phase 4)');
+    const learnComponents = new Set(
+      phase4Idx >= 0
+        ? [...cardsSrc.slice(phase4Idx).matchAll(/(?:function|const)\s+([A-Z]\w+)/g)].map((m) => m[1])
+        : [],
+    );
+    // Learn kinds = switch cases whose rendered component lives in the Phase-4 section.
+    const learnSwitchKinds = [...caseComponent.entries()]
+      .filter(([, comp]) => learnComponents.has(comp))
+      .map(([kind]) => kind);
+
+    // Minimal renderable payload per learn kind (must mirror the per-kind predicate in tool-output.ts).
+    const learnRenderable: Record<string, Record<string, unknown>> = {
+      lesson_card: { lessonPlanId: 'lp1' },
+      explanation_card: { title: 'Hotspot volcanism' },
+      quiz_card: { stem: 'Q?', choices: [{ id: 'a', label: 'A' }] },
+      quiz_feedback_card: { correct: true },
+      next_step_card: { recommendation: 'advance' },
+    };
+
+    it('discovers the learn cards from the parsed switch + Phase-4 section (parse sanity)', () => {
+      expect(learnComponents.size).toBeGreaterThan(0); // marker + components found
+      // The known core learn kinds must be discovered (guards the parsing itself, not a stale list).
+      expect(learnSwitchKinds).toEqual(expect.arrayContaining(['lesson_card', 'quiz_card', 'quiz_feedback_card', 'next_step_card', 'explanation_card']));
+    });
+
+    it('every LEARN card kind in the switch has a renderable allowlist entry (and rejects empty data)', () => {
+      // Drives off learnSwitchKinds (DERIVED from the source), so a NEW learn case added to Cards.tsx without
+      // a fixture + isRenderableToolOutput entry fails here — the real anti-drift guard.
+      for (const kind of learnSwitchKinds) {
+        expect(learnRenderable, `add a renderable fixture for the new learn card '${kind}'`).toHaveProperty(kind);
+        // present in allowlist: a minimal valid payload is accepted (would be `return false` if missing)...
+        expect(
+          isRenderableToolOutput(kind, learnRenderable[kind]),
+          `'${kind}' is rendered by Cards.tsx but missing/false in isRenderableToolOutput`,
+        ).toBe(true);
+        // ...and empty data is rejected — a real predicate, not a blanket `return true` (empty shell).
+        expect(
+          isRenderableToolOutput(kind, {}),
+          `'${kind}' should reject empty data (avoid rendering an empty shell)`,
+        ).toBe(false);
+      }
+    });
+  });
+
+  it("map_snippet is intentionally NOT renderable (recall_learning_context model-context envelope)", () => {
+    // recall_learning_context returns a `map_snippet` envelope meant for the model's context window, not
+    // a chat card — so it must fall through to `return false` even with a full, valid-looking payload.
+    expect(isRenderableToolOutput('map_snippet', { enrolled: [], mastery: [], badges: [] })).toBe(false);
+    expect(isRenderableToolOutput('map_snippet', { enrolled: [{ courseId: 'c1' }], mastery: [{ topic: 't', score: 0.8 }] })).toBe(false);
+    // ...but the universal error envelope still renders, even for a non-card kind (errors are never dropped).
+    expect(isRenderableToolOutput('map_snippet', { error: 'lookup failed' })).toBe(true);
   });
 });
