@@ -57,6 +57,34 @@ describe('summarizeActivity', () => {
     expect(summarizeActivity(parts).toolCalls[0].id).toBe('get_weather:0');
   });
 
+  it('marks a back-to-back same-tool retry as superseded (P0.4), keeping the final call', () => {
+    const parts: ActivityPart[] = [
+      { type: 'dynamic-tool', toolCallId: 'a', toolName: 'find_parks', state: 'output-available', output: { kind: 'park_card' } },
+      { type: 'dynamic-tool', toolCallId: 'b', toolName: 'find_parks', state: 'output-available', output: { kind: 'park_card' } },
+    ];
+    const calls = summarizeActivity(parts).toolCalls;
+    expect(calls.map((c) => c.superseded)).toEqual([true, undefined]);
+  });
+
+  it('does NOT supersede the same tool when separated by another tool (distinct searches stay visible)', () => {
+    const parts: ActivityPart[] = [
+      { type: 'dynamic-tool', toolCallId: 'a', toolName: 'find_parks', state: 'output-available', output: { kind: 'park_card' } },
+      { type: 'dynamic-tool', toolCallId: 'x', toolName: 'accessibility_scorecard', state: 'output-available', output: { kind: 'accessibility_card' } },
+      { type: 'dynamic-tool', toolCallId: 'b', toolName: 'find_parks', state: 'output-available', output: { kind: 'park_card' } },
+    ];
+    const calls = summarizeActivity(parts).toolCalls;
+    expect(calls.every((c) => !c.superseded)).toBe(true);
+  });
+
+  it('never supersedes an errored call (honesty: keep error chips visible)', () => {
+    const parts: ActivityPart[] = [
+      { type: 'dynamic-tool', toolCallId: 'a', toolName: 'find_parks', state: 'output-error' },
+      { type: 'dynamic-tool', toolCallId: 'b', toolName: 'find_parks', state: 'output-available', output: { kind: 'park_card' } },
+    ];
+    const calls = summarizeActivity(parts).toolCalls;
+    expect(calls[0].superseded).toBeUndefined();
+  });
+
   it('concatenates reasoning chunks as steps and tracks streaming', () => {
     const parts: ActivityPart[] = [
       { type: 'reasoning', text: 'Step one.', state: 'done' },

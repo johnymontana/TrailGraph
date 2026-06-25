@@ -35,6 +35,10 @@ type Better = 'low' | 'high' | 'none';
 export function TripDiffCard({ data }: { data: Record<string, unknown> }) {
   const a = data.a as Metrics | undefined;
   const b = data.b as Metrics | undefined;
+  // Optional column labels (P1.1): a before/after edit snapshot reuses the same trip name on both sides, so
+  // 'Before'/'After' read clearer than two identical names. compare_trips passes none → fall back to m.name.
+  const aLabel = data.aLabel as string | undefined;
+  const bLabel = data.bLabel as string | undefined;
   if (!a || !b) return null;
 
   const rows: { label: string; a: string; b: string; aVal: number | null; bVal: number | null; better: Better }[] = [
@@ -65,12 +69,12 @@ export function TripDiffCard({ data }: { data: Record<string, unknown> }) {
     return aWins ? 'a' : 'b';
   };
 
-  const head = (m: Metrics) => (
+  const head = (m: Metrics, label?: string) => (
     <HStack gap={2} wrap="wrap">
       <Text fontWeight="semibold" fontFamily="heading" fontSize="sm">
-        {m.name}
+        {label ?? m.name}
       </Text>
-      {m.parentId ? (
+      {!label && m.parentId ? (
         <Badge colorPalette="sand" size="sm">
           fork · v{m.version}
         </Badge>
@@ -86,8 +90,8 @@ export function TripDiffCard({ data }: { data: Record<string, unknown> }) {
         </Text>
         <Grid templateColumns="minmax(70px, auto) 1fr 1fr" gap={2} alignItems="center">
           <Box />
-          {head(a)}
-          {head(b)}
+          {head(a, aLabel)}
+          {head(b, bLabel)}
           {rows.map((r) => {
             const w = winner(r.aVal, r.bVal, r.better);
             return (

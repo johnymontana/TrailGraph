@@ -6,6 +6,8 @@ import { TripMap } from './TripMap';
 import { ParkSearchInput } from './ParkSearchInput';
 import { toast } from '../../lib/toast';
 import { TripDashboardCard } from '../conditions/ConditionCards';
+import { AlertList } from '../chat/Cards';
+import { decodeEntities } from '../../lib/html-entities';
 import type { TripDashboard } from '../../lib/conditions';
 
 /** Itinerary builder (C1-C4) — drives the Trip service via /api/trips. Fully functional without the agent. */
@@ -28,6 +30,8 @@ const stopLabel = (s: Stop): string =>
 interface Trip {
   id: string;
   name: string;
+  startDate?: string | null;
+  endDate?: string | null;
   stops: (Stop | null)[];
 }
 
@@ -78,6 +82,19 @@ export function TripBuilder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Broadcast the open trip's id + dates to the ranger chat (P2.1). ChatPanel attaches them as ephemeral
+  // Eve client context on every send, so dated dark-sky/astro/best-time answers reflect the trip window
+  // (the best night in it) instead of "tonight". Fires on open/create/rename/deselect (all call setTrip).
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent('trailgraph:active-trip', {
+        detail: trip
+          ? { id: trip.id, name: trip.name, startDate: trip.startDate ?? null, endDate: trip.endDate ?? null }
+          : null,
+      }),
+    );
+  }, [trip?.id, trip?.name, trip?.startDate, trip?.endDate]);
+
   async function openTrip(id: string) {
     if (trip?.id === id) return; // idempotent: re-clicking the open trip is a no-op, never deselects (§4.6)
     const res = await fetch(`/api/trips/${id}`);
@@ -89,6 +106,18 @@ export function TripBuilder() {
     setDashboard(null);
     setDayMap({});
     setEditingName(false);
+    // Auto-load Closure/Danger alerts on open so safety items pin to the trip artifact without an extra
+    // click (P1.2). openTrip is idempotent (early-returns on the same id), so this never loops.
+    fetch(`/api/trips/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op: 'alerts' }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d && Array.isArray(d.alerts)) setAlerts(d.alerts);
+      })
+      .catch(() => {});
   }
 
   async function rename() {
@@ -286,7 +315,7 @@ export function TripBuilder() {
       <HStack wrap="wrap">
         {trips.map((t) => (
           <Button key={t.id} size="xs" variant={trip?.id === t.id ? 'solid' : 'outline'} onClick={() => openTrip(t.id)}>
-            {t.name} ({t.stops})
+            {decodeEntities(t.name)} ({t.stops})
           </Button>
         ))}
       </HStack>
@@ -308,13 +337,22 @@ export function TripBuilder() {
             </HStack>
           ) : (
             <HStack>
-              <Heading size="sm">{trip.name}</Heading>
+              <Heading size="sm">{decodeEntities(trip.name)}</Heading>
+              {(() => {
+                // Persistent alert-count badge on the trip header (P1.2) so safety items are visible at a glance.
+                const n = alerts ? alerts.reduce((sum, a) => sum + a.alerts.length, 0) : 0;
+                return n > 0 ? (
+                  <Badge colorPalette="red" variant="solid" title="Active Closure/Danger alerts">
+                    {n} alert{n === 1 ? '' : 's'}
+                  </Badge>
+                ) : null;
+              })()}
               <Button
                 size="xs"
                 variant="ghost"
                 aria-label="Rename trip"
                 onClick={() => {
-                  setNameDraft(trip.name);
+                  setNameDraft(decodeEntities(trip.name));
                   setEditingName(true);
                 }}
               >
@@ -402,25 +440,8 @@ export function TripBuilder() {
               ) : null}
             </Stack>
           ) : null}
-          {alerts ? (
-            alerts.length === 0 ? (
-              <Text fontSize="sm" color="green.fg">No active Closure/Danger alerts. ✓</Text>
-            ) : (
-              <Stack gap={1}>
-                {alerts.map((a, i) => (
-                  <Box key={i}>
-                    <Text fontSize="sm" fontWeight="semibold">{a.park}</Text>
-                    {a.alerts.map((al, j) => (
-                      <HStack key={j}>
-                        <Badge colorPalette={al.category === 'Danger' ? 'red' : 'orange'}>{al.category}</Badge>
-                        <Text fontSize="xs">{al.title}</Text>
-                      </HStack>
-                    ))}
-                  </Box>
-                ))}
-              </Stack>
-            )
-          ) : null}
+          {/* Structured, shared alert card (P1.2) — same component the chat uses, instead of a bespoke list. */}
+          {alerts ? <AlertList data={{ parks: alerts }} /> : null}
           {cost ? (
             <Box borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={3}>
               <HStack mb={1}>

@@ -41,6 +41,7 @@ export function DarkSkyCard({ data }: { data: Record<string, unknown> }) {
   const d = data as {
     park?: string;
     bortleScale?: number | null;
+    darkSkyCertified?: boolean;
     rating?: { stars: number; label: string } | null;
     sqmEstimate?: number | null;
     bestMonths?: string | null;
@@ -75,6 +76,12 @@ export function DarkSkyCard({ data }: { data: Record<string, unknown> }) {
               hint={`${d.rating.label}${d.bortleScale != null ? ` · Bortle ${d.bortleScale}` : ''}`}
               icon={LuSparkles}
               tone="accent"
+              source={{
+                label: d.darkSkyCertified ? 'Certified Dark-Sky Park' : 'Estimated rating',
+                detail: d.darkSkyCertified
+                  ? 'Certified International Dark Sky Park. Bortle/SQM are still modeled estimates for relative comparison.'
+                  : 'Estimated from light-pollution mapping (Bortle scale) — reported for relative comparison, not certified ground-truth. Verify at darksky.org.',
+              }}
             />
           ) : (
             // P2.2: be explicit about a missing Bortle rating (the Great Basin gap) rather than silently

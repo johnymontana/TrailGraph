@@ -1,6 +1,6 @@
 import { getUserId } from '../../../lib/session';
 import { getUserMemory } from '../../../lib/memory-graph';
-import { deletePreference, deleteConsidered, deleteAllConsidered, setPreferenceFeedback, setPreferenceWeight, recordPreference, setTravelConstraints, clearTravelConstraints, recordPass, clearPass, collectStamp, uncollectStamp, setAvailability, clearAvailability } from '../../../lib/bridges';
+import { deletePreference, deleteConsidered, deleteAllConsidered, setPreferenceFeedback, setPreferenceWeight, recordPreference, setTravelConstraints, clearTravelConstraints, removeRequiredAmenity, recordPass, clearPass, collectStamp, uncollectStamp, setAvailability, clearAvailability } from '../../../lib/bridges';
 import { parseBody, MemoryActionSchema } from '../../../lib/validation';
 
 /** "Your memory" API (E3/E4). All actions userId-scoped from the session (R4). */
@@ -29,6 +29,10 @@ export async function POST(req: Request) {
       break;
     case 'clearTravelConstraints':
       await clearTravelConstraints(userId);
+      break;
+    case 'removeRequiredAmenity':
+      if (!body.name) return Response.json({ error: 'name required' }, { status: 400 });
+      await removeRequiredAmenity(userId, body.name);
       break;
     case 'recordPass':
       await recordPass(userId, body.passId);

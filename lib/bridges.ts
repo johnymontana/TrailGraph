@@ -251,6 +251,19 @@ export async function clearTravelConstraints(userId: string): Promise<void> {
 }
 
 /**
+ * Remove a single durable accessibility/amenity need (P0.5 — per-row removal on /me): drop one
+ * `(:User)-[:REQUIRES]->(:Amenity {name})` edge by amenity name. Amenity needs are set explicitly
+ * (set_travel_constraints / set_accessibility_needs), not auto-extracted from chat, so a plain edge
+ * delete suffices — no tombstone needed. Leaves the TRAVELS_WITH wheelchair/RV constraint untouched.
+ */
+export async function removeRequiredAmenity(userId: string, name: string): Promise<void> {
+  await writeGraph(
+    `MATCH (:User {userId:$userId})-[r:REQUIRES]->(:Amenity {name:$name}) DELETE r`,
+    { userId, name },
+  );
+}
+
+/**
  * Passes the user holds (NPS-expansion P2 #9): `(:User)-[:HOLDS]->(:EntrancePass)`. Defaults to the
  * canonical national "America the Beautiful" annual pass (`atb-annual`), which the cost model uses for
  * break-even. The pass node is created by the `entrancepasses` sync step; we MERGE it here too so

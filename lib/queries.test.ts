@@ -72,6 +72,33 @@ describe('vibeSearch constraint-aware candidates (ADR-046, Friction #2)', () => 
     const [, params] = mockRead.mock.calls[0] as [string, Record<string, unknown>];
     expect(params).toMatchObject({ rv: null, wheelchair: false, required: [], maxBortle: null });
     expect(params.k).toBe(10 * 2);
+    // No anchor → proximity params are null and the predicate short-circuits.
+    expect(params).toMatchObject({ nearLat: null, nearLng: null, radiusMeters: null });
+  });
+
+  it('P0.2: ANDs a HARD proximity predicate together with the amenity filter (both prune)', async () => {
+    await vibeSearch('science museums and visitor centers', {
+      limit: 6,
+      nearLat: 38.9,
+      nearLng: -77.04,
+      radiusMiles: 120,
+      requiredAmenities: ['Audio Description'],
+    });
+    const [q, params] = mockRead.mock.calls[0] as [string, Record<string, unknown>];
+    // proximity predicate lives in the SAME WHERE block as the amenity ALL(...) clause
+    expect(q).toContain('point.distance(p.location, point({latitude:$nearLat, longitude:$nearLng})) < $radiusMeters');
+    expect(q).toContain('ALL(req IN $required');
+    expect(params).toMatchObject({ nearLat: 38.9, nearLng: -77.04, required: ['Audio Description'] });
+    expect(params.radiusMeters).toBeCloseTo(120 * 1609.344, 3);
+    // tight proximity ∩ amenity → over-fetch even more candidates
+    expect(params.k).toBe(6 * 10);
+  });
+
+  it('P0.2: preferNationalParks injects the designation CASE into ORDER BY', async () => {
+    await vibeSearch('field trip', { limit: 6, preferNationalParks: true });
+    const [q] = mockRead.mock.calls[0] as [string, Record<string, unknown>];
+    expect(q).toContain("CASE WHEN p.designation CONTAINS 'National Park' THEN 0 ELSE 1 END");
+    expect(q).toContain('score DESC');
   });
 });
 

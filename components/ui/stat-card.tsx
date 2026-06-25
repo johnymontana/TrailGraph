@@ -1,6 +1,7 @@
 import { Box, HStack, Icon, Stack, Text } from '@chakra-ui/react';
 import type { ReactNode } from 'react';
 import type { IconType } from 'react-icons';
+import { SourceInfo } from './SourceInfo';
 
 export interface StatCardProps {
   /** Small uppercase eyebrow, e.g. "Dark sky", "Entrance fee". */
@@ -13,6 +14,8 @@ export interface StatCardProps {
   icon?: IconType;
   /** Tints the icon + value to convey status. Defaults to neutral. */
   tone?: 'brand' | 'accent' | 'neutral';
+  /** Optional source/confidence affordance (P1.4): a small ⓘ next to the label revealing provenance. */
+  source?: { label?: string; detail: string };
 }
 
 const toneColor = { brand: 'brand.fg', accent: 'accent.fg', neutral: 'fg' } as const;
@@ -22,7 +25,7 @@ const toneColor = { brand: 'brand.fg', accent: 'accent.fg', neutral: 'fg' } as c
  * Pure presentational; lay them out in a SimpleGrid. Renders the icon as a child (not `as={fn}`) so it
  * stays serializable when used inside Server Components (RSC can't pass a function to a client Icon).
  */
-export function StatCard({ label, value, hint, icon, tone = 'neutral' }: StatCardProps) {
+export function StatCard({ label, value, hint, icon, tone = 'neutral', source }: StatCardProps) {
   const IconComp = icon;
   return (
     <Box borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={4}>
@@ -35,6 +38,7 @@ export function StatCard({ label, value, hint, icon, tone = 'neutral' }: StatCar
         <Text fontSize="xs" fontWeight="semibold" color="fg.subtle" textTransform="uppercase" letterSpacing="0.05em">
           {label}
         </Text>
+        {source ? <SourceInfo label={source.label} detail={source.detail} /> : null}
       </HStack>
       <Stack gap={0.5}>
         <Text fontFamily="heading" fontSize="lg" fontWeight="semibold" lineHeight="1.2" color={toneColor[tone]}>

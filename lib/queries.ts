@@ -1107,6 +1107,14 @@ export async function vibeSearch(
     wheelchairAccessible?: boolean;
     requiredAmenities?: string[];
     maxBortle?: number | null;
+    // Hard point-proximity (P0.2): when nearLat/nearLng are set, parks must be within radiusMiles of the
+    // anchor — a HARD WHERE clause ANDed with the amenity/region filters so a "near X" ask can never
+    // return a far-away park (the Yellowstone-for-DC bug). Reuses the point.distance pattern from nearbyParks.
+    nearLat?: number | null;
+    nearLng?: number | null;
+    radiusMiles?: number | null;
+    // Soft de-prioritization of monuments/memorials when the user explicitly wants a "national park".
+    preferNationalParks?: boolean;
     // Precomputed query vector to embed once and reuse across searches (audit C5). Omit to use the cache.
     vector?: number[];
   } = {},
@@ -1120,13 +1128,24 @@ export async function vibeSearch(
     wheelchairAccessible = false,
     requiredAmenities = [],
     maxBortle = null,
+    nearLat = null,
+    nearLng = null,
+    radiusMiles = null,
+    preferNationalParks = false,
   } = opts;
   const vector = opts.vector ?? (await embedQuery(query));
   // Pull more vector candidates when facets/constraints will prune them, so enough survive the filter
   // (R4 §2.3: intent-aware ranking — semantic candidates narrowed by region/activity/topic + travel
   // constraints, then ranked by score).
   const hasConstraints = rvMaxLengthFt != null || wheelchairAccessible || requiredAmenities.length > 0 || maxBortle != null;
-  const hasFacets = (stateCodes?.length ?? 0) > 0 || !!activity || !!topic || hasConstraints;
+  const hasProximity = nearLat != null && nearLng != null;
+  const hasFacets = (stateCodes?.length ?? 0) > 0 || !!activity || !!topic || hasConstraints || hasProximity;
+  // A tight proximity ∩ amenity intersection prunes hard from both sides, so over-fetch even more candidates.
+  const k = limit * (hasProximity && hasConstraints ? 10 : hasFacets ? 6 : 2);
+  // Soft de-prioritization (P0.2): rank National Parks above monuments/memorials when intent is a "national park".
+  const order = preferNationalParks
+    ? `ORDER BY (CASE WHEN p.designation CONTAINS 'National Park' THEN 0 ELSE 1 END), score DESC`
+    : 'ORDER BY score DESC';
   return readGraph<ParkSummary & { score: number }>(
     `CALL db.index.vector.queryNodes('park_embedding', toInteger($k), $vector) YIELD node AS p, score
      WHERE ($stateCodes IS NULL OR EXISTS { (p)-[:LOCATED_IN]->(s:State) WHERE s.code IN $stateCodes })
@@ -1135,14 +1154,15 @@ export async function vibeSearch(
        AND ($rv IS NULL OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.rvMaxLengthFt >= $rv })
        AND (NOT $wheelchair OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.wheelchairAccessible = true })
        AND ($maxBortle IS NULL OR coalesce(p.bortleScale, 99) <= $maxBortle)
+       AND ($nearLng IS NULL OR (p.location IS NOT NULL AND point.distance(p.location, point({latitude:$nearLat, longitude:$nearLng})) < $radiusMeters))
        AND ALL(req IN $required WHERE
              EXISTS { (p)-[:HAS_PLACE]->(:Place)-[:HAS_AMENITY]->(:Amenity {name: req}) }
              OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) }
              OR EXISTS { (p)<-[:IN_PARK]-(:Campground)-[:HAS_AMENITY]->(:Amenity {name: req}) })
-     RETURN ${PARK_SUMMARY_RETURN}, score ORDER BY score DESC LIMIT toInteger($limit)`,
+     RETURN ${PARK_SUMMARY_RETURN}, score ${order} LIMIT toInteger($limit)`,
     {
       vector,
-      k: limit * (hasFacets ? 6 : 2),
+      k,
       limit,
       stateCodes: stateCodes?.length ? stateCodes : null,
       activity: activity ?? null,
@@ -1151,6 +1171,9 @@ export async function vibeSearch(
       wheelchair: wheelchairAccessible,
       required: requiredAmenities,
       maxBortle,
+      nearLat,
+      nearLng,
+      radiusMeters: radiusMiles != null ? radiusMiles * 1609.344 : null,
     },
   );
 }

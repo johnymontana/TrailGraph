@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Badge, Box, Card, Icon, Text, Stack, HStack, Link as CLink } from '@chakra-ui/react';
+import { Badge, Box, Card, Icon, Input, Text, Stack, HStack, Link as CLink } from '@chakra-ui/react';
 import NextLink from 'next/link';
 import { LuTriangleAlert } from 'react-icons/lu';
 import { DarkSkyCard, WeatherCard, AstroCard, ConditionsCard, TripDashboardCard } from '../conditions/ConditionCards';
@@ -8,6 +8,8 @@ import { TripDiffCard } from '../plan/TripDiffCard';
 import { SkyLeaderboard, type LeaderboardEntry } from '../collective/SkyLeaderboard';
 import { DigestItems, type DigestItemView } from '../inbox/DigestItems';
 import { ProvenanceEdges } from '../parks/ProvenanceEdges';
+import { SourceInfo } from '../ui/SourceInfo';
+import { decodeEntities } from '../../lib/html-entities';
 import { WATCH_CAP } from '../../lib/watch-cap';
 
 /** Renders a tool's `{kind,data}` output as a structured card (ADR-013, D5). Graph-grounded only.
@@ -195,8 +197,15 @@ function QuestionCard({ data, onAnswer }: { data: Record<string, unknown>; onAns
   const options = (data.options ?? []) as { id: string; label: string; description?: string }[];
   const allowFreeform = !!data.allowFreeform;
   const [answered, setAnswered] = useState(false);
+  const [draft, setDraft] = useState('');
   if (!prompt || !options.length) return null;
   const disabled = answered || !onAnswer;
+  const canSubmitFreeform = !disabled && !!draft.trim();
+  const submitFreeform = () => {
+    if (!canSubmitFreeform) return;
+    setAnswered(true);
+    onAnswer?.(draft.trim());
+  };
   return (
     <Card.Root variant="subtle" size="sm" my={2}>
       <Card.Body p={3}>
@@ -228,7 +237,41 @@ function QuestionCard({ data, onAnswer }: { data: Record<string, unknown>; onAns
           ))}
         </Stack>
         {allowFreeform && !answered ? (
-          <Text fontSize="xs" color="fg.muted" mt={2}>…or type your own answer below.</Text>
+          <HStack mt={2} gap={2}>
+            <Input
+              size="sm"
+              flex="1"
+              borderRadius="l2"
+              bg="bg.canvas"
+              placeholder="…or type your own answer"
+              value={draft}
+              disabled={disabled}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  submitFreeform();
+                }
+              }}
+            />
+            <Box
+              as="button"
+              px={3}
+              py={1.5}
+              borderRadius="l2"
+              fontSize="sm"
+              fontWeight="medium"
+              bg="brand.solid"
+              color="brand.contrast"
+              flexShrink={0}
+              opacity={canSubmitFreeform ? 1 : 0.5}
+              cursor={canSubmitFreeform ? 'pointer' : 'default'}
+              _hover={canSubmitFreeform ? { bg: 'brand.emphasized' } : undefined}
+              onClick={submitFreeform}
+            >
+              Send
+            </Box>
+          </HStack>
         ) : null}
       </Card.Body>
     </Card.Root>
@@ -256,7 +299,7 @@ function ItineraryCard({ data, onAnswer }: { data: Record<string, unknown>; onAn
     <Card.Root variant="subtle" size="sm" my={2}>
       <Card.Body p={3}>
         <Text fontWeight="semibold" fontFamily="heading" mb={2}>
-          {trip.name}
+          {decodeEntities(trip.name)}
         </Text>
         {closures.length ? (
           <Stack gap={1} mb={3} borderWidth="1px" borderColor="orange.emphasized" bg="orange.subtle" borderRadius="l2" p={2}>
@@ -306,6 +349,39 @@ function ItineraryCard({ data, onAnswer }: { data: Record<string, unknown>; onAn
             </Box>
           ))}
         </Stack>
+        {(() => {
+          // Before/After edit diff (P1.1) — promote the change to the existing TripDiffCard instead of prose.
+          const diff = data.diff as { a?: unknown; b?: unknown } | undefined;
+          return diff?.a && diff?.b ? (
+            <Box mt={3}>
+              <TripDiffCard data={diff as Record<string, unknown>} />
+            </Box>
+          ) : null;
+        })()}
+        {onAnswer ? (
+          // Quick-action chips (P1.3): one-tap iteration without typing. Latest turn only (onAnswer present).
+          <HStack gap={2} mt={3} wrap="wrap">
+            {['Make it shorter', 'Swap a stop', 'Make it cheaper', 'Add a stop'].map((label) => (
+              <Box
+                key={label}
+                as="button"
+                fontSize="xs"
+                px={2.5}
+                py={1}
+                borderRadius="full"
+                borderWidth="1px"
+                borderColor="border"
+                bg="bg.panel"
+                color="fg.muted"
+                transition="background 0.15s, border-color 0.15s, color 0.15s"
+                _hover={{ bg: 'brand.muted', borderColor: 'brand.solid', color: 'brand.fg' }}
+                onClick={() => onAnswer(label)}
+              >
+                {label}
+              </Box>
+            ))}
+          </HStack>
+        ) : null}
         {isDraft && onAnswer ? (
           <Box
             as="button"
@@ -336,7 +412,9 @@ function ItineraryCard({ data, onAnswer }: { data: Record<string, unknown>; onAn
   );
 }
 
-function AlertList({ data }: { data: Record<string, unknown> }) {
+/** Park-level Closure/Danger alerts. Exported (P1.2) so the trip artifact (TripBuilder) can pin the same
+ * structured card the chat uses, instead of a bespoke prose list. */
+export function AlertList({ data }: { data: Record<string, unknown> }) {
   const parks = (data.parks ?? []) as { park: string; alerts: { category: string; title: string }[] }[];
   if (!parks.length) return <Text fontSize="sm" color="fg.muted" my={2}>No active Closure/Danger alerts.</Text>;
   return (
@@ -447,7 +525,13 @@ function BudgetCard({ data }: { data: Record<string, unknown> }) {
   return (
     <Card.Root variant="subtle" size="sm" my={2}>
       <Card.Body p={3}>
-        <Text fontWeight="semibold" fontFamily="heading" mb={2}>Trip entrance fees · per {unit}</Text>
+        <HStack gap={1.5} mb={2}>
+          <Text fontWeight="semibold" fontFamily="heading">Trip entrance fees · per {unit}</Text>
+          <SourceInfo
+            label="Entrance fees"
+            detail="From the NPS API as of our last sync — a strong planning estimate, not a live quote. Excludes timed-entry reservation fees. Verify at nps.gov."
+          />
+        </HStack>
         <Stack gap={1}>
           {parks.map((p) => (
             <HStack key={p.parkCode} justify="space-between">
@@ -482,7 +566,13 @@ function AccessibilityCard({ data }: { data: Record<string, unknown> }) {
   return (
     <Card.Root variant="subtle" size="sm" my={2}>
       <Card.Body p={3}>
-        <Text fontWeight="semibold" fontFamily="heading" mb={2}>Accessibility · {name}</Text>
+        <HStack gap={1.5} mb={2}>
+          <Text fontWeight="semibold" fontFamily="heading">Accessibility · {name}</Text>
+          <SourceInfo
+            label="Accessibility data"
+            detail="Self-reported by the park to the NPS — useful as a guide, but verify specifics with the park before you go."
+          />
+        </HStack>
         {features.length ? (
           <HStack wrap="wrap" gap={1} mb={2}>
             {features.map((f) => (

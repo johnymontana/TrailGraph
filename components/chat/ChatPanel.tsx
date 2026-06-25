@@ -8,10 +8,15 @@ import { Markdown } from './Markdown';
 import { ToolActivityPill } from './ToolActivityPill';
 import { summarizeActivity, type ActivityPart } from '../../lib/tool-activity';
 
-const DEFAULT_SUGGESTIONS = [
+const DEFAULT_SUGGESTIONS: ChatSuggestion[] = [
+  '✨ Surprise me — plan something I\'d love',
   '4 days, mountains and easy hikes near Montana',
   'A dark-sky road trip in Utah',
-  'Fewer crowds, waterfalls, kid-friendly',
+  {
+    label: '🎒 Plan a school field trip',
+    message:
+      'Help me plan an accessible one-day school field trip near us that ties to our curriculum. I\'ll tell you the grade level, subject, group size, date, and how far we can travel.',
+  },
 ];
 
 /**
@@ -94,10 +99,23 @@ export function ChatPanel({
   const bottomRef = useRef<HTMLDivElement>(null);
   const announcedTrips = useRef<Set<string>>(new Set());
   const announcedGrades = useRef<Set<string>>(new Set());
+  // The trip currently open in the sibling TripBuilder (P2.1). We can't share React state across the two
+  // panes, so TripBuilder broadcasts it on a window event; we attach its dates as ephemeral Eve client
+  // context on every send so dated dark-sky/astro answers reflect the trip window, not tonight.
+  const activeTrip = useRef<{ id: string; name: string; startDate: string | null; endDate: string | null } | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
+
+  // Track the TripBuilder's open trip (P2.1) so send() can attach its dates as client context.
+  useEffect(() => {
+    function onActive(e: Event) {
+      activeTrip.current = (e as CustomEvent<typeof activeTrip.current>).detail ?? null;
+    }
+    window.addEventListener('trailgraph:active-trip', onActive);
+    return () => window.removeEventListener('trailgraph:active-trip', onActive);
+  }, []);
 
   // When the ranger saves a trip (an itinerary_preview tool result with a trip), tell the trip builder
   // to refresh + open it — without a page reload (R3 §4.2). Dispatch once per trip id.
@@ -142,9 +160,31 @@ export function ChatPanel({
     if (!msg || busy) return;
     setStopped(false);
     setInput('');
-    // `clientContext` rides ephemerally to the model only (ids for tutor grounding) — never persisted, never
-    // shown as a bubble. Swallow the rare "already processing" rejection if a send races a just-aborted turn.
-    await agent.send({ message: msg, ...(clientContext ? { clientContext } : {}) }).catch(() => {});
+    // `clientContext` rides ephemerally to the model only (ids for tutor grounding + the open trip's dates)
+    // — never persisted, never shown as a bubble. Layer the active trip's window under any explicit context
+    // (explicit wins) so dated dark-sky/astro answers reflect the trip window (P2.1).
+    const at = activeTrip.current;
+    const base: Record<string, string> = {};
+    if (at?.id) base.activeTripId = at.id;
+    if (at?.name) base.activeTripName = at.name;
+    if (at?.startDate) base.activeTripStart = at.startDate;
+    if (at?.endDate) base.activeTripEnd = at.endDate;
+    const mergedCtx = { ...base, ...(clientContext ?? {}) };
+    const payload = { message: msg, ...(Object.keys(mergedCtx).length ? { clientContext: mergedCtx } : {}) };
+    try {
+      await agent.send(payload);
+    } catch {
+      // The Eve session is created LAZILY server-side (persist-turn → getOrCreateConversation), so the very
+      // first message typed right after page load can lose the race and reject (P0.3). A throw means the
+      // message was NOT accepted, so it's safe to retry once after a tick — and if it still fails, restore
+      // the text to the input rather than silently dropping it (the old `.catch(() => {})` did exactly that).
+      try {
+        await new Promise((r) => setTimeout(r, 250));
+        await agent.send(payload);
+      } catch {
+        setInput((cur) => (cur === '' ? msg : cur));
+      }
+    }
   }
 
   /** Stop watching the in-flight turn (P1.1). Aborts the client stream via Eve's store; the server turn
@@ -225,6 +265,21 @@ export function ChatPanel({
         if (seenSig.has(sig)) return;
         seenSig.add(sig);
         nodes.push(<ToolCard key={j} kind={out.kind} data={data} onAnswer={onAnswer} />);
+      } else if (
+        part.type === 'dynamic-tool' &&
+        (part as { toolName?: string }).toolName === 'ask_question' &&
+        part.state !== 'output-available'
+      ) {
+        // ask_question instructs the model to END the turn after calling it, so its passthrough output may
+        // never reach `output-available` on the client — render the clarifying card from the tool INPUT
+        // instead (for a passthrough, input === the card data) so the question always surfaces (P0.1). The
+        // seenSig guard de-dupes if the real output part does arrive later.
+        const data = (part as { input?: unknown }).input as Record<string, unknown> | undefined;
+        if (!data || !isRenderableToolOutput('question_card', data)) return;
+        const sig = 'question_card' + JSON.stringify(data ?? {});
+        if (seenSig.has(sig)) return;
+        seenSig.add(sig);
+        nodes.push(<ToolCard key={j} kind="question_card" data={data} onAnswer={onAnswer} />);
       }
     });
 

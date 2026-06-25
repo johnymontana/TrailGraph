@@ -112,8 +112,14 @@ export interface TripMetrics {
   riskLabel: 'none' | 'low' | 'moderate' | 'high';
 }
 
-/** One trip's comparable metrics: drive (graph), dark hours (ephemeris), cost (graph), risk (alerts). */
-export async function tripMetrics(userId: string, tripId: string): Promise<TripMetrics | null> {
+/** One trip's comparable metrics: drive (graph), dark hours (ephemeris), cost (graph), risk (alerts).
+ * `skipAlerts` skips the only external call (checkTripAlerts → NPS) for a cheap before/after snapshot on an
+ * incremental edit (P1.1) — risk then reports `none`/0, so reserve it for low-stakes diffs, not compare_trips. */
+export async function tripMetrics(
+  userId: string,
+  tripId: string,
+  opts: { skipAlerts?: boolean } = {},
+): Promise<TripMetrics | null> {
   const trip = await getTrip(userId, tripId);
   if (!trip) return null;
   const meta = await readGraph<{ version: number; parentId: string | null }>(
@@ -138,8 +144,11 @@ export async function tripMetrics(userId: string, tripId: string): Promise<TripM
   }
 
   const cost = await tripCost(userId, tripId);
-  const alertRows = (await checkTripAlerts(userId, tripId)) as { alerts?: unknown[] }[];
-  const alertCount = alertRows.reduce((n, r) => n + (r.alerts?.length ?? 0), 0);
+  let alertCount = 0;
+  if (!opts.skipAlerts) {
+    const alertRows = (await checkTripAlerts(userId, tripId)) as { alerts?: unknown[] }[];
+    alertCount = alertRows.reduce((n, r) => n + (r.alerts?.length ?? 0), 0);
+  }
   const risk = riskFromAlerts(alertCount);
 
   return {
