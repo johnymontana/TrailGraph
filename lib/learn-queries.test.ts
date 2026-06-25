@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Pure-logic test: stub I/O so importing the module never touches a driver or the queries layer.
 vi.mock('./neo4j', () => ({ readGraph: vi.fn() }));
@@ -16,6 +16,8 @@ import {
   quizForClient,
   getLearningMemory,
   lessonPlanProgress,
+  lessonPlanHeader,
+  subjectFacets,
   pickQuizForLesson,
   recentQuizIdsForLesson,
   certificateBySlug,
@@ -191,6 +193,102 @@ describe('searchCourses (fulltext vs catalog fallback)', () => {
     expect(cypher).toContain('db.index.fulltext.queryNodes');
     expect(params).toEqual({ ft: 'yellowstone* geology*', limit: 60, skip: 0, bandMin: null, bandMax: null, subject: null });
     expectAllParamsBound();
+  });
+});
+
+describe('learnCatalog (subject filter, sort whitelist, pagination)', () => {
+  beforeEach(() => {
+    readGraphMock.mockReset();
+    readGraphMock.mockResolvedValue([]);
+  });
+
+  it('binds the subject filter and adds the subject WHERE clause', async () => {
+    await learnCatalog(24, undefined, { subject: 'Earth Science' });
+    const [cypher, params] = readGraphMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(cypher).toContain('lp.subject = $subject');
+    expect(params.subject).toBe('Earth Science');
+    expectAllParamsBound();
+  });
+
+  it('paginates with SKIP = page * limit', async () => {
+    await learnCatalog(24, undefined, { page: 2 });
+    const [cypher, params] = readGraphMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(cypher).toContain('SKIP toInteger($skip)');
+    expect(params).toMatchObject({ limit: 24, skip: 48 });
+  });
+
+  it('clamps a negative page to 0', async () => {
+    await learnCatalog(24, undefined, { page: -3 });
+    expect((readGraphMock.mock.calls[0][1] as { skip: number }).skip).toBe(0);
+  });
+
+  it('interpolates only WHITELISTED sort clauses (no injection), defaulting to decomposed-first', async () => {
+    const orderFor = async (sort?: never) => {
+      readGraphMock.mockReset();
+      readGraphMock.mockResolvedValue([]);
+      await learnCatalog(24, undefined, sort ? { sort } : {});
+      return (readGraphMock.mock.calls[0][0] as string).match(/ORDER BY ([^\n]+)/)?.[1] ?? '';
+    };
+    expect(await orderFor()).toContain('decomposed DESC'); // default
+    expect(await orderFor('park' as never)).toContain('parkCode ASC');
+    expect(await orderFor('lessons' as never)).toContain('lessonCount DESC');
+    expect(await orderFor('subject' as never)).toContain('subject');
+    expect(await orderFor('grade' as never)).toContain('gradeMin');
+    // An unknown sort string (defensive — the type forbids it, but a bad caller can't inject) → the default.
+    expect(await orderFor('park ASC; DROP' as never)).toContain('decomposed DESC');
+  });
+});
+
+describe('searchCourses (forwards facets/sort/page to both paths)', () => {
+  it('fulltext path binds subject + skip and a typed sort overrides relevance', async () => {
+    readGraphMock.mockReset();
+    readGraphMock.mockResolvedValue([]);
+    await searchCourses('geology', { limit: 24, subject: 'Earth Science', sort: 'lessons', page: 1 });
+    const [cypher, params] = readGraphMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(cypher).toContain('lp.subject = $subject');
+    expect(cypher).toMatch(/ORDER BY lessonCount DESC/); // typed sort wins over `score DESC`
+    expect(params).toMatchObject({ subject: 'Earth Science', skip: 24, limit: 24 });
+    expectAllParamsBound();
+  });
+
+  it('empty query forwards facets/sort/page through to learnCatalog', async () => {
+    readGraphMock.mockReset();
+    readGraphMock.mockResolvedValue([]);
+    await searchCourses('  ', { limit: 24, subject: 'Earth Science', page: 2 });
+    const [cypher, params] = readGraphMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(cypher).not.toContain('db.index.fulltext'); // fell back to catalog
+    expect(params).toMatchObject({ subject: 'Earth Science', skip: 48 });
+  });
+});
+
+describe('lessonPlanHeader (course-header read)', () => {
+  it('returns null + binds { lessonPlanId } when the plan is missing', async () => {
+    readGraphMock.mockReset();
+    readGraphMock.mockResolvedValue([]);
+    expect(await lessonPlanHeader('nope')).toBeNull();
+    expect(readGraphMock.mock.calls[0][1]).toEqual({ lessonPlanId: 'nope' });
+    expectAllParamsBound();
+  });
+
+  it('returns the park + subject + objective + topics shape', async () => {
+    readGraphMock.mockReset();
+    readGraphMock.mockResolvedValue([
+      { subject: 'Earth Science', gradeLevel: '6-8', objective: 'Why geysers?', parkCode: 'yell', parkName: 'Yellowstone', topics: ['Geology', 'Volcanoes'] },
+    ] as never);
+    const h = await lessonPlanHeader('lp1');
+    expect(h).toEqual({ subject: 'Earth Science', gradeLevel: '6-8', objective: 'Why geysers?', parkCode: 'yell', parkName: 'Yellowstone', topics: ['Geology', 'Volcanoes'] });
+  });
+});
+
+describe('subjectFacets (catalog filter facet)', () => {
+  it('maps the distinct subjects and queries non-empty subjects', async () => {
+    readGraphMock.mockReset();
+    readGraphMock.mockResolvedValue([{ subject: 'Earth Science' }, { subject: 'History' }] as never);
+    const subjects = await subjectFacets();
+    expect(subjects).toEqual(['Earth Science', 'History']);
+    const cypher = readGraphMock.mock.calls[0][0] as string;
+    expect(cypher).toContain('DISTINCT lp.subject');
+    expect(cypher).toMatch(/lp\.subject IS NOT NULL/);
   });
 });
 

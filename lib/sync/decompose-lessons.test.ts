@@ -252,6 +252,40 @@ describe('buildCourseSpine', () => {
     const mods = buildCourseSpine(validCourse, 'lp1', HASH, 'v2');
     expect(mods[0].lessons[0].quiz.map((q) => q.id)).toEqual(['lp1:m1:l1:quiz_v2:easy']);
   });
+
+  it('drops invalid quizzes from a bank but keeps the valid ones', () => {
+    const ch = [{ id: 'a', label: 'x' }, { id: 'b', label: 'y' }];
+    const course: GenCourse = {
+      modules: [
+        {
+          title: 'M',
+          lessons: [
+            {
+              title: 'L',
+              quiz: [
+                { stem: 'Easy?', choices: ch, correctId: 'a', difficulty: 'easy' },
+                { stem: '', choices: [{ id: 'a', label: 'x' }], correctId: 'a', difficulty: 'medium' }, // no stem + <2 choices
+                { stem: 'Hard?', choices: ch, correctId: 'z', difficulty: 'hard' }, // correctId matches no choice
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(buildCourseSpine(course, 'lp', HASH, 'v2')[0].lessons[0].quiz.map((q) => q.difficulty)).toEqual(['easy']);
+  });
+
+  it('returns an empty bank when every quiz in the array is invalid', () => {
+    const course: GenCourse = {
+      modules: [
+        {
+          title: 'M',
+          lessons: [{ title: 'L', quiz: [{ stem: 'Q', choices: [{ id: 'a', label: 'x' }], correctId: 'a' }, { stem: '', choices: [], correctId: 'a' }] }],
+        },
+      ],
+    };
+    expect(buildCourseSpine(course, 'lp', HASH, 'v2')[0].lessons[0].quiz).toEqual([]);
+  });
 });
 
 // --- decomposeLessons orchestration: mock the DB + model, assert cost-discipline + counts ---

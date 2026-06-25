@@ -20,8 +20,11 @@ import {
   quizForClient,
   quizGradeData,
   pickQuizForLesson,
+  recentQuizIdsForLesson,
   lessonContent,
   learnCatalog,
+  subjectFacets,
+  lessonPlanHeader,
   certificateBySlug,
   searchCourses,
   crossParkTopics,
@@ -55,6 +58,11 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
        OPTIONAL MATCH (u)-[:HAS_TRANSCRIPT]->(tt:TutorTranscript)
        DETACH DELETE u, c, d, tt`,
       { userId },
+    );
+    // Isolated graph nodes the variety/prune tests create (all id-prefixed 'itest-').
+    await writeGraph(
+      `MATCH (n) WHERE (n:Lesson OR n:QuizQuestion OR n:Module OR n:LessonPlan) AND n.id STARTS WITH 'itest-'
+       DETACH DELETE n`,
     );
     await closeDriver();
   });
@@ -282,6 +290,101 @@ describeIntegration('Ranger School Phase 3 — learning bridges + reads', () => 
     // quizGradeData now surfaces it (alongside the seed's Volcanoes) for mastery tracking.
     const grade = await quizGradeData(QUIZ);
     expect(grade!.topics).toContain('Geology');
+  });
+
+  // --- Catalog reads: subject filter / sort / pagination / facets / header (against the 2 seed courses) ---
+
+  it('learnCatalog filters by subject, sorts decomposed-first, and paginates', async () => {
+    const earth = await learnCatalog(50, undefined, { subject: 'Earth Science' });
+    expect(earth.map((c) => c.id)).toEqual(expect.arrayContaining([LP, 'lesson-grca-geology']));
+    expect(await learnCatalog(50, undefined, { subject: 'No Such Subject ZZZ' })).toEqual([]);
+
+    // sort=lessons → the decomposed yell course (≥1 lesson) ranks ahead of the spine-less grca course (0).
+    const byLessons = await learnCatalog(50, undefined, { sort: 'lessons' });
+    const yi = byLessons.findIndex((c) => c.id === LP);
+    const gi = byLessons.findIndex((c) => c.id === 'lesson-grca-geology');
+    expect(yi).toBeGreaterThanOrEqual(0);
+    expect(gi).toBeGreaterThan(yi);
+
+    // Pagination: a page size of 1 returns at most 1, and page 1 differs from page 0.
+    const [p0, p1] = await Promise.all([learnCatalog(1, undefined, { page: 0 }), learnCatalog(1, undefined, { page: 1 })]);
+    expect(p0.length).toBeLessThanOrEqual(1);
+    if (p0.length && p1.length) expect(p1[0].id).not.toBe(p0[0].id);
+  });
+
+  it('subjectFacets surfaces the seed subject', async () => {
+    expect(await subjectFacets()).toContain('Earth Science');
+  });
+
+  it('lessonPlanHeader returns park + subject + objective + topics; null for a missing plan', async () => {
+    const h = await lessonPlanHeader(LP);
+    expect(h).not.toBeNull();
+    expect(h!.subject).toBe('Earth Science');
+    expect(h!.parkCode).toBe('yell');
+    expect(h!.objective).toMatch(/hotspot/i);
+    expect(h!.topics).toEqual(expect.arrayContaining(['Geology', 'Volcanoes']));
+    expect(await lessonPlanHeader('itest-nonexistent')).toBeNull();
+  });
+
+  it('quizGradeData parses choices so grade_answer can map ids → labels for the feedback reveal', async () => {
+    const g = await quizGradeData(QUIZ);
+    expect(g).not.toBeNull();
+    expect(g!.correctId).toBe('hotspot');
+    expect(g!.choices.length).toBeGreaterThanOrEqual(2);
+    expect(g!.choices.find((c) => c.id === g!.correctId)?.label).toBeTruthy(); // the correct option has a human label
+  });
+
+  // --- Quiz variety: prefer-difficulty + excludeIds + recentQuizIdsForLesson (isolated 'itest-' lesson) ---
+
+  it('pickQuizForLesson prefers the requested difficulty and skips excludeIds; recentQuizIdsForLesson reflects answers', async () => {
+    await writeGraph(
+      `MERGE (l:Lesson {id:'itest-var:l1'}) SET l.title='Variety', l.ordinal=1
+       WITH l UNWIND [['easy',1],['medium',2],['hard',3]] AS d
+       MERGE (q:QuizQuestion {id:'itest-var:l1:quiz_v2:'+d[0]})
+         SET q.lessonId='itest-var:l1', q.ordinal=d[1], q.stem='Q '+d[0],
+             q.choices='[{"id":"a","label":"A"},{"id":"b","label":"B"}]', q.correctId='a', q.difficulty=d[0]
+       MERGE (l)-[:HAS_QUESTION]->(q)`,
+    );
+
+    expect((await pickQuizForLesson('itest-var:l1', 'medium'))?.difficulty).toBe('medium');
+    expect((await pickQuizForLesson('itest-var:l1', 'hard'))?.difficulty).toBe('hard');
+
+    // Excluding the easy question makes the pick fall through to another (by ordinal) instead of repeating.
+    const skipped = await pickQuizForLesson('itest-var:l1', 'easy', ['itest-var:l1:quiz_v2:easy']);
+    expect(skipped).not.toBeNull();
+    expect(skipped!.id).not.toBe('itest-var:l1:quiz_v2:easy');
+
+    // Answering a question makes it show up in the recently-served list (drives the exclusion above).
+    await recordQuizAttempt(userId, 'itest-var:l1:quiz_v2:easy', true, 'a');
+    expect(await recentQuizIdsForLesson(userId, 'itest-var:l1', 5)).toContain('itest-var:l1:quiz_v2:easy');
+  });
+
+  it('decompose prune deletes superseded progress-free quizzes but keeps answered ones', async () => {
+    await writeGraph(
+      `MERGE (lp:LessonPlan {id:'itest-prune'})
+       MERGE (m:Module {id:'itest-prune:m1'}) MERGE (lp)-[:CONTAINS_MODULE]->(m)
+       MERGE (l:Lesson {id:'itest-prune:m1:l1'}) MERGE (m)-[:CONTAINS_LESSON]->(l)
+       MERGE (qOrphan:QuizQuestion {id:'itest-prune:m1:l1:quiz_v1:easy'})   SET qOrphan.lessonId='itest-prune:m1:l1', qOrphan.choices='[]', qOrphan.correctId='a', qOrphan.difficulty='easy'
+       MERGE (l)-[:HAS_QUESTION]->(qOrphan)
+       MERGE (qAnswered:QuizQuestion {id:'itest-prune:m1:l1:quiz_v1:medium'}) SET qAnswered.lessonId='itest-prune:m1:l1', qAnswered.choices='[]', qAnswered.correctId='a', qAnswered.difficulty='medium'
+       MERGE (l)-[:HAS_QUESTION]->(qAnswered)`,
+    );
+    await recordQuizAttempt(userId, 'itest-prune:m1:l1:quiz_v1:medium', true, 'a'); // only the medium has progress
+
+    // The exact prune persist() runs after a v2 regeneration (neither old v1 id is in keepIds).
+    await writeGraph(
+      `MATCH (lp:LessonPlan {id:$lpId})-[:CONTAINS_MODULE]->(:Module)-[:CONTAINS_LESSON]->(:Lesson)-[:HAS_QUESTION]->(q:QuizQuestion)
+       WHERE NOT q.id IN $keepIds AND NOT EXISTS { (:User)-[:ANSWERED]->(q) }
+       DETACH DELETE q`,
+      { lpId: 'itest-prune', keepIds: ['itest-prune:m1:l1:quiz_v2:easy'] },
+    );
+
+    const remaining = await readGraph<{ id: string }>(
+      `MATCH (:LessonPlan {id:'itest-prune'})-[:CONTAINS_MODULE]->(:Module)-[:CONTAINS_LESSON]->(:Lesson)-[:HAS_QUESTION]->(q:QuizQuestion) RETURN q.id AS id`,
+    );
+    const ids = remaining.map((r) => r.id);
+    expect(ids).toContain('itest-prune:m1:l1:quiz_v1:medium'); // answered → progress preserved
+    expect(ids).not.toContain('itest-prune:m1:l1:quiz_v1:easy'); // orphaned → pruned
   });
 });
 

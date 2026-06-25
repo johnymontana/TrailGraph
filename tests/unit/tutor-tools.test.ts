@@ -181,6 +181,22 @@ describe('recommend_next', () => {
     expect(bridges.issueCertificate).not.toHaveBeenCalled();
   });
 
+  it('RETRY: the just-finished lesson is still incomplete (missed the quiz) → review THIS lesson, never a contradictory advance', async () => {
+    vi.mocked(lq.lessonPlanProgress).mockResolvedValue({
+      title: 'Course', done: 0, total: 2,
+      modules: [{ id: 'm1', ordinal: 1, title: 'M1', lessons: [
+        { id: 'l1', ordinal: 1, title: 'What Is Pollution?', completed: false }, // just attempted, answered wrong
+        { id: 'l2', ordinal: 2, title: 'L2', completed: false },
+      ] }],
+    });
+    const out = await exec(recommendNext, { lessonId: 'l1' });
+    expect(out.data.recommendation).toBe('retry'); // not 'advance'
+    expect(out.data.lessonId).toBe('l1'); // points back to the SAME lesson
+    expect(out.data.lessonTitle).toBe('What Is Pollution?');
+    expect(out.data.reason).toMatch(/review .*try again/i);
+    expect(bridges.issueCertificate).not.toHaveBeenCalled();
+  });
+
   it('COMPLETE: issues a certificate + Junior Ranger badge when every lesson is done', async () => {
     vi.mocked(lq.lessonPlanProgress).mockResolvedValue({
       title: 'Course', done: 1, total: 1,
