@@ -16,7 +16,7 @@ jobs:
     name: Lint · Typecheck · Unit · Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with: { version: 10 }
       - uses: actions/setup-node@v6
@@ -46,7 +46,7 @@ jobs:
       NEO4J_DATABASE: neo4j
       RUN_INTEGRATION: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with: { version: 10 }
       - uses: actions/setup-node@v6
@@ -76,7 +76,7 @@ jobs:
       NEO4J_PASSWORD: testpassword
       NEO4J_DATABASE: neo4j
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with: { version: 10 }
       - uses: actions/setup-node@v6
@@ -120,7 +120,7 @@ jobs:
       NEO4J_DATABASE: neo4j
       AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with: { version: 10 }
       - uses: actions/setup-node@v6
