@@ -23,6 +23,8 @@ export interface CollectivePick {
   parkCode: string;
   name: string;
   travelers: number; // how many similar opted-in travelers considered/planned it
+  lat?: number | null; // for the map "travelers like you" overlay (#6)
+  lng?: number | null;
 }
 
 /**
@@ -43,7 +45,8 @@ export async function travelersAlsoLoved(userId: string, limit = 8): Promise<Col
       AND NOT (me)-[:CONSIDERED]->(p)
       AND NOT EXISTS { (me)-[:PLANNED]->(:Trip)-[:HAS_STOP]->(:Stop)-[:OF_PARK]->(p) }
     WITH p, count(DISTINCT other) AS travelers
-    RETURN p.parkCode AS parkCode, p.fullName AS name, travelers
+    RETURN p.parkCode AS parkCode, p.fullName AS name, travelers,
+           p.location.latitude AS lat, p.location.longitude AS lng
     ORDER BY travelers DESC, name ASC
     LIMIT toInteger($limit)
     `,

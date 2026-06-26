@@ -12,7 +12,7 @@ import {
 } from '../../../../lib/trips';
 import { suggestDays } from '../../../../lib/itinerary';
 import { nearestNeighborOrder } from '../../../../lib/route-order';
-import { forkTrip, tripDiff } from '../../../../lib/trip-lab';
+import { forkTrip, tripDiff, tripMetrics } from '../../../../lib/trip-lab';
 import { parseBody, TripActionSchema } from '../../../../lib/validation';
 import { rateLimit, rlUser } from '../../../../lib/rate-limit';
 
@@ -20,13 +20,25 @@ export const dynamic = 'force-dynamic';
 
 type Ctx = { params: Promise<{ id: string }> };
 
+// Live running-total for the build-on-map canvas (#9): the aggregate metrics (drive miles/min, cost, dark
+// hours) after a mutation. skipAlerts avoids the one external NPS call, so it stays cheap on every edit.
+async function liveMetrics(userId: string, id: string) {
+  try {
+    return await tripMetrics(userId, id, { skipAlerts: true });
+  } catch {
+    return null; // metrics are a nice-to-have badge — never fail a mutation over them
+  }
+}
+
 export async function GET(req: Request, { params }: Ctx) {
   const userId = await getUserId(req);
   if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
   const { id } = await params;
   const trip = await getTrip(userId, id);
   if (!trip) return Response.json({ error: 'not found' }, { status: 404 });
-  return Response.json({ trip });
+  // The canvas frames its initial badge with ?include=metrics, avoiding a second round-trip on open (#9).
+  const wantMetrics = new URL(req.url).searchParams.get('include') === 'metrics';
+  return Response.json({ trip, ...(wantMetrics ? { metrics: await liveMetrics(userId, id) } : {}) });
 }
 
 export async function DELETE(req: Request, { params }: Ctx) {
@@ -77,17 +89,17 @@ export async function POST(req: Request, { params }: Ctx) {
       if (!body.stop) return Response.json({ error: 'stop required' }, { status: 400 });
       const stopId = await addStop(userId, id, body.stop);
       if (!stopId) return Response.json({ error: 'not found' }, { status: 404 });
-      return Response.json({ stopId, trip: await getTrip(userId, id) });
+      return Response.json({ stopId, trip: await getTrip(userId, id), metrics: await liveMetrics(userId, id) });
     }
     case 'removeStop': {
       if (!body.stopId) return Response.json({ error: 'stopId required' }, { status: 400 });
       await removeStop(userId, id, body.stopId);
-      return Response.json({ trip: await getTrip(userId, id) });
+      return Response.json({ trip: await getTrip(userId, id), metrics: await liveMetrics(userId, id) });
     }
     case 'reorder': {
       if (!body.orderedStopIds) return Response.json({ error: 'orderedStopIds required' }, { status: 400 });
       await reorderStops(userId, id, body.orderedStopIds);
-      return Response.json({ trip: await getTrip(userId, id) });
+      return Response.json({ trip: await getTrip(userId, id), metrics: await liveMetrics(userId, id) });
     }
     case 'alerts':
       return Response.json({ alerts: await checkTripAlerts(userId, id) });
@@ -101,7 +113,7 @@ export async function POST(req: Request, { params }: Ctx) {
       const stops = ((trip.stops ?? []).filter(Boolean) as { id: string; lat: number | null; lng: number | null }[])
         .map((s) => ({ id: s.id, lat: s.lat, lng: s.lng }));
       await reorderStops(userId, id, nearestNeighborOrder(stops));
-      return Response.json({ trip: await getTrip(userId, id) });
+      return Response.json({ trip: await getTrip(userId, id), metrics: await liveMetrics(userId, id) });
     }
     case 'suggestDays': {
       const trip = await getTrip(userId, id);

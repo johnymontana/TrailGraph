@@ -23,6 +23,7 @@ export default defineTool({
       ${topic ? `${stateCode || activity ? 'AND' : 'WHERE'} (p)-[:HAS_TOPIC]->(:Topic {name:$topic})` : ''}
       ${designation ? `${stateCode || activity || topic ? 'AND' : 'WHERE'} p.designation = $designation` : ''}
       RETURN p.parkCode AS parkCode, p.fullName AS name, p.designation AS designation,
+             p.location.latitude AS lat, p.location.longitude AS lng,
              p.states AS states, score
       ORDER BY score DESC, name ASC LIMIT toInteger($limit)
       `,

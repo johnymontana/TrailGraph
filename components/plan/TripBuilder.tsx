@@ -1,19 +1,22 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { Box, Stack, Heading, Text, Input, Button, Flex, HStack, IconButton, Separator, Badge } from '@chakra-ui/react';
-import { LuX } from 'react-icons/lu';
-import { TripMap } from './TripMap';
+import { useEffect, useMemo, useState } from 'react';
+import { Box, Stack, Heading, Text, Input, Button, Flex, HStack, IconButton, Separator, Badge, Icon } from '@chakra-ui/react';
+import { Reorder } from 'motion/react';
+import { LuX, LuGripVertical } from 'react-icons/lu';
+import { MapTripCanvas } from './MapTripCanvas';
 import { ParkSearchInput } from './ParkSearchInput';
 import { toast } from '../../lib/toast';
 import { TripDashboardCard } from '../conditions/ConditionCards';
 import { AlertList } from '../chat/Cards';
 import { decodeEntities } from '../../lib/html-entities';
 import type { TripDashboard } from '../../lib/conditions';
+import type { TripMetrics } from '../../lib/trip-lab';
 
 /** Itinerary builder (C1-C4) — drives the Trip service via /api/trips. Fully functional without the agent. */
 interface Stop {
   id: string;
   order: number;
+  parkCode?: string | null;
   parkName?: string;
   campgroundName?: string;
   poiTitle?: string;
@@ -49,6 +52,11 @@ export function TripBuilder() {
   } | null>(null);
   const [costErr, setCostErr] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<TripDashboard | null>(null);
+  // Live running-total badge for the build-on-map canvas (#9): updated from every mutation response.
+  const [metrics, setMetrics] = useState<TripMetrics | null>(null);
+  // A local copy of the stops the drag-reorder list mutates live (motion/react Reorder owns its values array);
+  // synced from `trip` on every change and persisted on drop.
+  const [localStops, setLocalStops] = useState<Stop[]>([]);
   const [dayMap, setDayMap] = useState<Record<string, number>>({});
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -95,11 +103,28 @@ export function TripBuilder() {
     );
   }, [trip?.id, trip?.name, trip?.startDate, trip?.endDate]);
 
+  // Keep the drag-reorder list in lockstep with the open trip's stops (after any add/remove/reorder/optimize).
+  useEffect(() => {
+    setLocalStops((trip?.stops ?? []).filter(Boolean) as Stop[]);
+  }, [trip]);
+
+  // Every stop mutation returns the fresh trip + live metrics (#9) — apply both, invalidate the now-stale
+  // cost card, and refresh the sidebar stop counts. Shared by the canvas, search-add, remove, and reorder.
+  function applyMutation(data: { trip?: Trip | null; metrics?: TripMetrics | null }) {
+    if (data.trip) setTrip(data.trip);
+    // Keep the prior badge if metrics recompute transiently failed (null) — don't blink it off (#9 LOW-4).
+    setMetrics((prev) => data.metrics ?? prev);
+    setCost(null);
+    setCostErr(null);
+    loadTrips();
+  }
+
   async function openTrip(id: string) {
     if (trip?.id === id) return; // idempotent: re-clicking the open trip is a no-op, never deselects (§4.6)
-    const res = await fetch(`/api/trips/${id}`);
-    const { trip: opened } = await res.json();
+    const res = await fetch(`/api/trips/${id}?include=metrics`);
+    const { trip: opened, metrics: m } = await res.json();
     setTrip(opened);
+    setMetrics(m ?? null);
     setAlerts(null);
     setCost(null);
     setCostErr(null);
@@ -147,6 +172,13 @@ export function TripBuilder() {
     await loadTrips();
     await openTrip(id);
   }
+  // All trip mutations share one 30/60s `tripmut` budget server-side (ORS cost); the canvas can exhaust it,
+  // so every edit path surfaces a 429 the same way instead of silently no-opping (#9 LOW-1).
+  function rateLimited(res: Response): boolean {
+    if (res.status !== 429) return false;
+    toast.info('Slow down — too many trip edits. Try again in a moment.');
+    return true;
+  }
   async function addPark(code: string) {
     if (!trip || !code) return;
     const res = await fetch(`/api/trips/${trip.id}`, {
@@ -154,13 +186,8 @@ export function TripBuilder() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ op: 'addStop', stop: { kind: 'park', refId: code } }),
     });
-    const { trip: updated } = await res.json();
-    if (updated) {
-      setTrip(updated);
-      setCost(null);
-      setCostErr(null);
-      loadTrips(); // refresh the sidebar stop counts (§2.14)
-    }
+    if (rateLimited(res)) return;
+    if (res.ok) applyMutation(await res.json());
   }
   async function removeStop(stopId: string) {
     if (!trip) return;
@@ -169,12 +196,28 @@ export function TripBuilder() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ op: 'removeStop', stopId }),
     });
-    const { trip: updated } = await res.json();
-    if (updated) {
-      setTrip(updated);
-      setCost(null);
-      setCostErr(null);
-      loadTrips(); // refresh the sidebar stop counts (§2.14)
+    if (rateLimited(res)) return;
+    if (res.ok) applyMutation(await res.json());
+  }
+  // Persist a drag-reorder on drop (#9). Skip the round-trip if the order didn't actually change. The 30/60s
+  // trip-mutation cap is server-side; a 429 surfaces as a toast and the next openTrip resyncs the true order.
+  async function persistReorder() {
+    if (!trip) return;
+    const ids = localStops.map((s) => s.id);
+    const current = ((trip.stops ?? []).filter(Boolean) as Stop[]).map((s) => s.id);
+    if (ids.length !== current.length || ids.every((id, i) => id === current[i])) return;
+    const res = await fetch(`/api/trips/${trip.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op: 'reorder', orderedStopIds: ids }),
+    });
+    if (rateLimited(res)) {
+      setLocalStops((trip.stops ?? []).filter(Boolean) as Stop[]); // revert the optimistic drag order
+      return;
+    }
+    if (res.ok) {
+      setDayMap({}); // the route order changed → the prior day grouping no longer maps cleanly (#9 LOW-2)
+      applyMutation(await res.json());
     }
   }
   async function checkAlerts() {
@@ -256,12 +299,11 @@ export function TripBuilder() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ op: 'optimize' }),
     });
-    const { trip: updated } = await res.json();
-    if (updated) {
-      setTrip(updated);
-      setDayMap({});
-      setCost(null);
-      setCostErr(null);
+    if (rateLimited(res)) return;
+    if (res.ok) {
+      const data = await res.json();
+      if (data.trip) setDayMap({}); // route changed → the prior day grouping no longer maps cleanly
+      applyMutation(data);
     }
   }
   // Trip Lab (ADR-056): fork the open trip into a copy and switch to it, leaving the original untouched.
@@ -304,6 +346,16 @@ export function TripBuilder() {
   if (err) return <Box p={4}><Text color="fg.muted">{err}</Text></Box>;
 
   const stops = (trip?.stops ?? []).filter(Boolean) as Stop[];
+  // Memoize the canvas props keyed on `trip` (not on every render) — otherwise typing in the name box would
+  // hand MapTripCanvas fresh array identities each keystroke and restart its route-draw animation (#9 MEDIUM-1).
+  const canvasStops = useMemo(
+    () => ((trip?.stops ?? []).filter(Boolean) as Stop[]).map((s) => ({ lat: s.lat ?? null, lng: s.lng ?? null, label: stopLabel(s), order: s.order })),
+    [trip],
+  );
+  const addedParkCodes = useMemo(
+    () => ((trip?.stops ?? []).filter(Boolean) as Stop[]).map((s) => s.parkCode).filter((code): code is string => !!code),
+    [trip],
+  );
 
   return (
     <Stack p={4} gap={4} h="100%" overflowY="auto">
@@ -361,24 +413,34 @@ export function TripBuilder() {
             </HStack>
           )}
           <ParkSearchInput onSelect={addPark} />
-          {stops.some((s) => s.lat != null && s.lng != null) ? (
-            <TripMap
-              stops={stops.map((s) => ({ lat: s.lat ?? null, lng: s.lng ?? null, label: stopLabel(s), order: s.order }))}
+          {/* Build-on-map canvas (#9): click a park to add it; the route + running total assemble live. */}
+          <Box h="380px" w="full" borderRadius="md" overflow="hidden">
+            <MapTripCanvas
+              tripId={trip.id}
+              stops={canvasStops}
+              addedParkCodes={addedParkCodes}
+              metrics={metrics}
+              onMutated={(d) => applyMutation({ trip: d.trip as unknown as Trip | null, metrics: d.metrics })}
             />
-          ) : null}
+          </Box>
 
-          <Stack gap={1}>
-            {stops.map((s, i) => {
+          {/* Drag a stop to reorder (#9); the route + drive times recompute on drop. Day headers ride inside
+              each item so they stay direct children of the Reorder.Group. */}
+          <Reorder.Group axis="y" values={localStops} onReorder={setLocalStops} as="div" style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 0, margin: 0 }}>
+            {localStops.map((s, i) => {
               const day = dayMap[s.id];
-              const prevDay = i > 0 ? dayMap[stops[i - 1].id] : undefined;
+              const prevDay = i > 0 ? dayMap[localStops[i - 1].id] : undefined;
               return (
-                <Box key={s.id}>
+                <Reorder.Item key={s.id} value={s} as="div" onDragEnd={persistReorder} style={{ listStyle: 'none' }}>
                   {day && day !== prevDay ? (
                     <Text fontSize="xs" fontWeight="bold" color="brand.fg" mt={2}>
                       Day {day}
                     </Text>
                   ) : null}
                   <HStack>
+                    <Icon color="fg.muted" cursor="grab" boxSize={3.5} aria-label="Drag to reorder">
+                      <LuGripVertical />
+                    </Icon>
                     <Text fontSize="sm" flex="1">
                       {i + 1}. {stopLabel(s)}
                     </Text>
@@ -392,10 +454,10 @@ export function TripBuilder() {
                       {s.driveTo.source === 'great_circle' ? ' (approx)' : ''}
                     </Text>
                   ) : null}
-                </Box>
+                </Reorder.Item>
               );
             })}
-          </Stack>
+          </Reorder.Group>
           {stops.length > 0 ? (
             <Stack gap={2}>
               <HStack wrap="wrap">

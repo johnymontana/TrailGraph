@@ -100,6 +100,25 @@ export async function searchParks(opts: {
   return { items, total: totalRows[0]?.total ?? items.length };
 }
 
+/**
+ * All parkCodes matching state/activity/topic facets (#8b) — codes only (no paging), so the map can
+ * intersect them with its loaded parks-all set client-side. Mirrors searchParks' facet pattern predicates.
+ * Returns [] when no facet is given (caller treats that as "no constraint").
+ */
+export async function parkCodesByFacet(opts: { stateCode?: string; activity?: string; topic?: string }): Promise<string[]> {
+  const { stateCode, activity, topic } = opts;
+  const where: string[] = [];
+  if (stateCode) where.push('(p)-[:LOCATED_IN]->(:State {code:$stateCode})');
+  if (activity) where.push('(p)-[:OFFERS]->(:Activity {name:$activity})');
+  if (topic) where.push('(p)-[:HAS_TOPIC]->(:Topic {name:$topic})');
+  if (!where.length) return [];
+  const rows = await readGraph<{ parkCode: string }>(
+    `MATCH (p:Park) WHERE ${where.join(' AND ')} RETURN p.parkCode AS parkCode`,
+    { stateCode: stateCode ?? null, activity: activity ?? null, topic: topic ?? null },
+  );
+  return rows.map((r) => r.parkCode);
+}
+
 /** Full park detail (A2) — nested JSON props parsed back to objects. */
 /**
  * Hero/gallery images for a park. Prefer the rich `imagesFull` records (`{url,caption,...}`); when those
@@ -397,6 +416,42 @@ export async function parksInBBox(box: {
   );
 }
 
+/** Lightweight point for the clustered map source, carrying the scalars the data lenses recolor by (#3). */
+export interface ParkPoint {
+  parkCode: string;
+  name: string;
+  designation: string;
+  lat: number | null;
+  lng: number | null;
+  /** Derived dark-sky badge (certified OR Bortle ≤ 3) — drives the boundary glow + dark-sky lens (#2/#3). */
+  darkSky: boolean;
+  /** Raw §5 lens scalars (nullable — sparsely populated until `pnpm datasources:sync`; lenses show "No data"). */
+  bortleScale: number | null;
+  crowdLevel: string | null;
+  feeFree: boolean;
+  accessible: boolean;
+}
+
+/**
+ * Every located park as a lightweight point (perf, #12): with only a few hundred :Park nodes the map
+ * loads this ONCE (cached) and clusters client-side instead of re-querying per viewport. Carries
+ * `designation` (designation color/icon, #2), the derived `darkSky` badge, and the §5 lens scalars
+ * (`bortleScale`/`crowdLevel`/`feeFree`/`accessible`) the data lenses recolor by (#3). Still cheap — one
+ * EXISTS + scalar reads per park.
+ */
+export async function allParksGeo(): Promise<ParkPoint[]> {
+  return readGraph<ParkPoint>(
+    `MATCH (p:Park) WHERE p.location IS NOT NULL
+     RETURN p.parkCode AS parkCode, p.fullName AS name, p.designation AS designation,
+            p.location.latitude AS lat, p.location.longitude AS lng,
+            (coalesce(p.darkSkyCertified, false) OR coalesce(p.bortleScale, 99) <= 3) AS darkSky,
+            p.bortleScale AS bortleScale,
+            p.crowdLevel AS crowdLevel,
+            coalesce(p.feeFree, false) AS feeFree,
+            EXISTS { (cg:Campground)-[:IN_PARK]->(p) WHERE cg.wheelchairAccessible = true } AS accessible`,
+  );
+}
+
 export interface BBox {
   minLat: number;
   minLng: number;
@@ -411,32 +466,98 @@ export interface PoiMarker {
   parkCode: string | null;
 }
 
+/** Default cap for viewport POI/alert loads (#12): bounds payload + render cost at wide zooms. */
+const POI_BBOX_LIMIT = 600;
+
 /** Map layer POIs by viewport (B3). `label` ∈ Campground | VisitorCenter | ThingToDo. */
-async function poisInBBox(label: 'Campground' | 'VisitorCenter' | 'ThingToDo', box: BBox): Promise<PoiMarker[]> {
+async function poisInBBox(label: 'Campground' | 'VisitorCenter' | 'ThingToDo', box: BBox, limit = POI_BBOX_LIMIT): Promise<PoiMarker[]> {
   const nameField = label === 'ThingToDo' ? 'n.title' : 'n.name';
   return readGraph<PoiMarker>(
     `MATCH (n:\`${label}\`) WHERE n.location IS NOT NULL
        AND point.withinBBox(n.location, point({latitude:$minLat, longitude:$minLng}), point({latitude:$maxLat, longitude:$maxLng}))
      OPTIONAL MATCH (n)-[:IN_PARK|AT_PARK]->(p:Park)
      RETURN n.id AS id, ${nameField} AS name,
-            n.location.latitude AS lat, n.location.longitude AS lng, p.parkCode AS parkCode`,
-    { minLat: box.minLat, minLng: box.minLng, maxLat: box.maxLat, maxLng: box.maxLng },
+            n.location.latitude AS lat, n.location.longitude AS lng, p.parkCode AS parkCode
+     LIMIT toInteger($limit)`,
+    { minLat: box.minLat, minLng: box.minLng, maxLat: box.maxLat, maxLng: box.maxLng, limit },
   );
 }
 
-export const campgroundsInBBox = (box: BBox) => poisInBBox('Campground', box);
-export const visitorCentersInBBox = (box: BBox) => poisInBBox('VisitorCenter', box);
-export const thingsToDoInBBox = (box: BBox) => poisInBBox('ThingToDo', box);
+export const campgroundsInBBox = (box: BBox, limit?: number) => poisInBBox('Campground', box, limit);
+export const visitorCentersInBBox = (box: BBox, limit?: number) => poisInBBox('VisitorCenter', box, limit);
+export const thingsToDoInBBox = (box: BBox, limit?: number) => poisInBBox('ThingToDo', box, limit);
+
+/** Per-park facts the condition-aware map (#4) scores: graph-side inputs only (open-state hours, closure
+ * summary, crowd, active alert). The BFF adds runtime weather/astro + fee-free, then calls scoreMapCondition. */
+export interface ParkConditionFacts {
+  parkCode: string;
+  name: string;
+  lat: number;
+  lng: number;
+  hours: string | null; // raw operatingHours JSON (parsed by lib/sync/hours)
+  seasonalClosureSummary: string | null;
+  crowdLevel: string | null;
+  alert: boolean; // active Closure/Danger alert
+}
+
+export async function parksWithConditionFacts(box: BBox, limit = 60): Promise<ParkConditionFacts[]> {
+  return readGraph<ParkConditionFacts>(
+    `MATCH (p:Park) WHERE p.location IS NOT NULL
+       AND point.withinBBox(p.location, point({latitude:$minLat, longitude:$minLng}), point({latitude:$maxLat, longitude:$maxLng}))
+     RETURN p.parkCode AS parkCode, p.fullName AS name,
+            p.location.latitude AS lat, p.location.longitude AS lng,
+            p.operatingHours AS hours, p.seasonalClosureSummary AS seasonalClosureSummary,
+            p.crowdLevel AS crowdLevel,
+            EXISTS { (a:Alert)-[:AFFECTS]->(p) WHERE a.active = true AND a.category IN ['Closure','Danger'] } AS alert
+     LIMIT toInteger($limit)`,
+    { minLat: box.minLat, minLng: box.minLng, maxLat: box.maxLat, maxLng: box.maxLng, limit },
+  );
+}
+
+/** Graph edges drawable between parks on the map (#5) — over the materialized NEAR/SHARES edges. */
+export type EdgeKind = 'near' | 'topic' | 'activity';
+export interface ParkEdge {
+  aCode: string;
+  aLat: number;
+  aLng: number;
+  bCode: string;
+  bLat: number;
+  bLng: number;
+  weight: number; // near → miles apart; topic/activity → shared count
+}
+
+/**
+ * Park-to-park edges whose BOTH endpoints are in the viewport (#5): proximity (NEAR {miles}) or shared
+ * topics/activities (SHARES_TOPIC/SHARES_ACTIVITY {count}), strongest first, capped. `kind` is a fixed
+ * enum (never user-injected) so interpolating the relationship type is safe.
+ */
+export async function parkEdgesInBBox(box: BBox, kind: EdgeKind, limit = 500): Promise<ParkEdge[]> {
+  const rel = kind === 'near' ? 'NEAR' : kind === 'topic' ? 'SHARES_TOPIC' : 'SHARES_ACTIVITY';
+  const weight = kind === 'near' ? 'r.miles' : 'r.count';
+  const order = kind === 'near' ? 'ASC' : 'DESC'; // nearest first / most-shared first
+  return readGraph<ParkEdge>(
+    `MATCH (a:Park)-[r:${rel}]->(b:Park)
+     WHERE a.location IS NOT NULL AND b.location IS NOT NULL
+       AND point.withinBBox(a.location, point({latitude:$minLat, longitude:$minLng}), point({latitude:$maxLat, longitude:$maxLng}))
+       AND point.withinBBox(b.location, point({latitude:$minLat, longitude:$minLng}), point({latitude:$maxLat, longitude:$maxLng}))
+     RETURN a.parkCode AS aCode, a.location.latitude AS aLat, a.location.longitude AS aLng,
+            b.parkCode AS bCode, b.location.latitude AS bLat, b.location.longitude AS bLng,
+            ${weight} AS weight
+     ORDER BY weight ${order} LIMIT toInteger($limit)`,
+    { minLat: box.minLat, minLng: box.minLng, maxLat: box.maxLat, maxLng: box.maxLng, limit },
+  );
+}
 
 /** Parks with an active Closure/Danger alert in the viewport (B3 alerts layer). */
-export async function alertParksInBBox(box: BBox) {
+export async function alertParksInBBox(box: BBox, limit = POI_BBOX_LIMIT) {
   return readGraph<{ parkCode: string; name: string; lat: number; lng: number; alerts: number }>(
     `MATCH (a:Alert)-[:AFFECTS]->(p:Park)
      WHERE a.active = true AND a.category IN ['Closure','Danger'] AND p.location IS NOT NULL
        AND point.withinBBox(p.location, point({latitude:$minLat, longitude:$minLng}), point({latitude:$maxLat, longitude:$maxLng}))
      RETURN p.parkCode AS parkCode, p.fullName AS name,
-            p.location.latitude AS lat, p.location.longitude AS lng, count(a) AS alerts`,
-    { minLat: box.minLat, minLng: box.minLng, maxLat: box.maxLat, maxLng: box.maxLng },
+            p.location.latitude AS lat, p.location.longitude AS lng, count(a) AS alerts
+     LIMIT toInteger($limit)`,
+    { minLat: box.minLat, minLng: box.minLng, maxLat: box.maxLat, maxLng: box.maxLng, limit },
   );
 }
 

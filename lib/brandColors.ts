@@ -21,6 +21,8 @@ export interface BrandColors {
   danger: string;
   /** Faded/inactive nodes + map muted text. */
   faded: string;
+  /** Passport-stamp accent (the "your map" collected-stamp pins + dark-sky boundary glow). */
+  stamps: string;
   /** Marker/label contrast (text on a colored marker). */
   onColor: string;
   /** Surface behind floating panels / map controls. */
@@ -33,6 +35,7 @@ const light: BrandColors = {
   trailLight: trail[300],
   danger: '#E03131',
   faded: sand[400],
+  stamps: '#E0A82E',
   onColor: '#FFFFFF',
   surface: sand[50],
 };
@@ -43,6 +46,7 @@ const dark: BrandColors = {
   trailLight: trail[300],
   danger: '#FF6B6B',
   faded: sand[700],
+  stamps: '#FFD86B',
   onColor: ink.canvas,
   surface: ink.panel,
 };

@@ -1,4 +1,6 @@
-import { Box, Container, Heading, SimpleGrid, Stack, Text } from '@chakra-ui/react';
+import { Box, Container, Heading, SimpleGrid, Stack, Text, HStack, Icon, Link as CLink } from '@chakra-ui/react';
+import NextLink from 'next/link';
+import { LuMountainSnow } from 'react-icons/lu';
 import { thematicTrail, trailThemes } from '../../lib/queries';
 import { ParkCard } from '../../components/ParkCard';
 import { ThemeChips, type ThemeChipItem } from '../../components/trails/ThemeChips';
@@ -29,6 +31,7 @@ export default async function TrailsPage({ searchParams }: { searchParams: Promi
   ]);
 
   const graphHref = person ? `/graph?person=${encodeURIComponent(person)}` : topic ? `/graph?topic=${encodeURIComponent(topic)}` : '/graph';
+  const tourHref = person ? `/trails/tour?person=${encodeURIComponent(person)}` : topic ? `/trails/tour?topic=${encodeURIComponent(topic)}` : '/trails/tour';
 
   const peopleChips: ThemeChipItem[] = themes.people.map((p) => ({
     key: p.title,
@@ -88,6 +91,26 @@ export default async function TrailsPage({ searchParams }: { searchParams: Promi
               <Text color="fg.muted">No parks found for this theme.</Text>
             ) : (
               <>
+                {/* Fly the trail in 3D before the static grid (#11B). */}
+                {trail.some((p) => p.lat != null && p.lng != null) ? (
+                  <HStack mb={5}>
+                    <CLink
+                      asChild
+                      display="inline-flex"
+                      alignItems="center"
+                      bg="brand.solid"
+                      color="brand.contrast"
+                      borderRadius="full"
+                      px={4}
+                      py={2}
+                      fontSize="sm"
+                      fontWeight="medium"
+                      _hover={{ textDecoration: 'none', opacity: 0.92 }}
+                    >
+                      <NextLink href={tourHref}><Icon mr={2}><LuMountainSnow /></Icon>Fly the 3D tour</NextLink>
+                    </CLink>
+                  </HStack>
+                ) : null}
                 {/* See the trail as a connected graph before the card grid (ADR-039, friction #5). */}
                 <Box mb={6}>
                   <TrailMiniGraph
