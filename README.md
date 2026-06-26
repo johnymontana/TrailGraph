@@ -95,6 +95,21 @@ A companion deep-dive on this integration is written up as a blog post [here](ht
   **people** (historical figures), ranked by meaning via per-node vector embeddings.
 - **Map** every site on a clustered MapLibre map with layer toggles (campgrounds, visitor centers,
   things-to-do, active alerts) loaded by viewport, plus real **park boundary** overlays on detail maps.
+- **Read the map, don't just look at it** — switch the labeled vector basemap between **Topo** and
+  **Dark**, then recolor every park by a **data lens** (dark sky, crowds, entry fee, or accessibility)
+  or by **live conditions** (weather + road events), so the map answers a question instead of plotting
+  dots.
+- **See the graph on the map** — toggle **park-to-park edges** (the materialized `NEAR` proximity graph
+  plus shared-topic / shared-activity links) to trace thematic trails across the country, and flip on
+  **"your map"** to light up the parks you've considered and the passport stamps you've collected.
+- **Ask the map** — a **ranger command bar** turns "dark-sky parks near Moab" into a focused, filtered
+  view, and you can **build a trip right on the canvas**: click parks to add stops, watch live
+  drive-time / mileage metrics, and drag to reorder.
+- **Take it into the field** — generate an **offline pack** (boundaries + POIs zipped for the area), a
+  printable **field sheet**, or a **share-a-view** deep link that reopens the exact map someone else was
+  looking at.
+- **Fly the parks in 3D** — with optional terrain enabled, trip routes and the `/trails` story tour
+  become cinematic **3D fly-throughs** (gracefully flat, pitched 2D when no elevation source is set).
 - **Plan** multi-park, multi-day trips with drive segments, day-by-day pacing, graph-aware route
   optimization, per-trip alert checks, **date-aware open/closed validation** (`check_open` flags a road
   or facility that's closed on your travel dates), a **real fees/passes budget** (per-vehicle/person/
@@ -180,6 +195,21 @@ PMTILES_SOURCE=https://build.protomaps.com/<YYYYMMDD>.pmtiles pnpm build:basemap
 
 This writes `public/basemap/us.pmtiles` (gitignored; host it on a CDN for production — see below). Any
 MapLibre `style.json` URL works in `NEXT_PUBLIC_MAP_TILES_URL` too.
+
+**Labels work with zero setup.** The map's label-font glyphs are **self-hosted and committed** (the Noto
+Sans PBFs under `public/basemap/fonts/`, regenerated with `pnpm build:glyphs`) and served same-origin, so
+park / city / road names render even before you build a basemap — there's no third-party glyph host to
+404 and silently drop every label. To serve glyphs from your own CDN instead, point
+`NEXT_PUBLIC_MAP_GLYPHS_URL` at a `{fontstack}/{range}.pbf` template.
+
+**3D terrain is optional (off → flat).** Maps render flat by default. Set `NEXT_PUBLIC_MAP_TERRAIN_URL`
+to a raster-DEM tile template (`…/{z}/{x}/{y}.png`) or a TileJSON URL to enable 3D terrain and the trip /
+`/trails` fly-throughs — AWS's open **Terrarium** elevation tiles
+(`https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png`) are a good free default. The
+encoding defaults to `terrarium` (override with `NEXT_PUBLIC_MAP_TERRAIN_ENCODING`); set
+`NEXT_PUBLIC_MAP_TERRAIN_ATTRIBUTION` for the credit line. Whatever DEM host you choose, **add it to both
+`img-src` and `connect-src`** in the `next.config.ts` CSP (the AWS host is allowed out of the box). With
+the env unset every terrain hook is a no-op, so fly-throughs degrade to flat, pitched 2D camera moves.
 
 ---
 

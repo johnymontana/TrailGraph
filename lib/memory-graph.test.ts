@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const readGraph = vi.fn();
 vi.mock('./neo4j', () => ({ readGraph: (...a: unknown[]) => readGraph(...a) }));
 
-import { getUserMemory } from './memory-graph';
+import { getUserMemory, userContextBridges } from './memory-graph';
 
 beforeEach(() => readGraph.mockReset());
 
@@ -46,5 +46,42 @@ describe('getUserMemory (E3 — context subgraph read)', () => {
       stamps: [],
       availability: { start: null, end: null },
     });
+  });
+});
+
+describe('userContextBridges (#8 — you-in-the-graph bridges)', () => {
+  it('short-circuits with no DB call when there are no park codes', async () => {
+    expect(await userContextBridges('u1', [])).toEqual([]);
+    expect(readGraph).not.toHaveBeenCalled();
+  });
+
+  it('concatenates pref + trip + stamp bridges and caps the total', async () => {
+    // Promise.all order: prefs, trips, stamps.
+    readGraph
+      .mockResolvedValueOnce([{ fromKind: 'activity', fromKey: 'Hiking', via: 'OFFERS', parkCode: 'yell' }])
+      .mockResolvedValueOnce([{ fromKind: 'trip', fromKey: 't1', via: 'INCLUDES', parkCode: 'grca' }])
+      .mockResolvedValueOnce([{ fromKind: 'stamp', fromKey: 's1', via: 'AT', parkCode: 'zion' }]);
+    const out = await userContextBridges('u1', ['yell', 'grca', 'zion']);
+    expect(out).toEqual([
+      { fromKind: 'activity', fromKey: 'Hiking', via: 'OFFERS', parkCode: 'yell' },
+      { fromKind: 'trip', fromKey: 't1', via: 'INCLUDES', parkCode: 'grca' },
+      { fromKind: 'stamp', fromKey: 's1', via: 'AT', parkCode: 'zion' },
+    ]);
+    // pref query received the per-pref cap + scoped park codes
+    const prefParams = readGraph.mock.calls[0][1] as { perPrefCap: number; parkCodes: string[] };
+    expect(prefParams.perPrefCap).toBe(40);
+    expect(prefParams.parkCodes).toEqual(['yell', 'grca', 'zion']);
+  });
+
+  it('respects the global maxBridges cap', async () => {
+    readGraph
+      .mockResolvedValueOnce([
+        { fromKind: 'activity', fromKey: 'a', via: 'OFFERS', parkCode: 'p1' },
+        { fromKind: 'activity', fromKey: 'b', via: 'OFFERS', parkCode: 'p2' },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const out = await userContextBridges('u1', ['p1', 'p2'], { maxBridges: 1 });
+    expect(out).toHaveLength(1);
   });
 });

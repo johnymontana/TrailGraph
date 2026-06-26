@@ -81,6 +81,97 @@ export async function forYou(
 }
 
 /**
+ * Graph-native "recommend from here" (#9): 2-hop recommendations seeded by ONE park rather than the
+ * user's whole profile. Walk (seed)-[:OFFERS|HAS_TOPIC]->(dimension)<-[:OFFERS|HAS_TOPIC]-(other park),
+ * apply `forYou`'s travel-constraint + novelty filters, and weight shared dimensions the user *loves*
+ * (PREFERS) over generic shares so the ranking still reflects taste. Each rec carries `sharedVia` (the
+ * dimensions it shares with the seed) for a graph-native "because they share X" view; `matched` is the
+ * loved subset, falling back to the first couple of shared dims so the park card always has a reason.
+ */
+export interface SharedDimension {
+  name: string;
+  kind: 'activity' | 'topic';
+  via: 'OFFERS' | 'HAS_TOPIC';
+}
+export interface NodeRecommendation extends Recommendation {
+  sharedVia: SharedDimension[];
+}
+
+export async function forYouFromNode(
+  userId: string,
+  parkCode: string,
+  opts: { limit?: number } = {},
+): Promise<{ seedName: string | null; parks: NodeRecommendation[] }> {
+  const { limit = 8 } = opts;
+  const cons = await getTravelConstraints(userId);
+
+  const rows = await readGraph<
+    Omit<NodeRecommendation, 'matched' | 'sharedVia'> & {
+      seedName: string | null;
+      lovedNames: string[];
+      shared: SharedDimension[];
+    }
+  >(
+    `
+    MATCH (u:User {userId: $userId})
+    MATCH (seed:Park {parkCode: $parkCode})-[:OFFERS|HAS_TOPIC]->(d)<-[r2:OFFERS|HAS_TOPIC]-(p:Park)
+    WHERE p.parkCode <> $parkCode
+      AND NOT (u)-[:CONSIDERED]->(p)
+      AND NOT EXISTS { (u)-[:PLANNED]->(:Trip)-[:HAS_STOP]->(:Stop)-[:OF_PARK]->(p) }
+      AND ($rv IS NULL OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.rvMaxLengthFt >= $rv })
+      AND (NOT $wheelchair OR EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.wheelchairAccessible = true })
+      AND ALL(req IN $required WHERE
+            EXISTS { (p)-[:HAS_PLACE]->(:Place)-[:HAS_AMENITY]->(:Amenity {name: req}) }
+            OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) }
+            OR EXISTS { (p)<-[:IN_PARK]-(:Campground)-[:HAS_AMENITY]->(:Amenity {name: req}) })
+    // Collapse to one row per (rec park, shared dimension): a park may touch a dimension via both edge
+    // types, so pick one via and note whether the user loves that dimension.
+    // loved matches forYou / userContextBridges: a MUTED preference (weight 0) does not count as loved.
+    WITH seed, p, d, EXISTS { (u)-[pw:PREFERS]->(d) WHERE coalesce(pw.weight, 1.0) > 0 } AS loved, collect(DISTINCT type(r2))[0] AS via
+    WITH seed, p,
+         collect({ name: d.name, kind: CASE WHEN d:Activity THEN 'activity' ELSE 'topic' END, via: via, loved: loved }) AS dims,
+         count(d) AS matches,
+         sum(CASE WHEN loved THEN 2.0 ELSE 1.0 END) AS score
+    RETURN seed.fullName AS seedName, p.parkCode AS parkCode, p.fullName AS name, p.designation AS designation,
+           p.states AS states, p.location.latitude AS lat, p.location.longitude AS lng,
+           CASE WHEN size(coalesce(p.images,[])) > 0 THEN p.images[0] ELSE null END AS image,
+           matches,
+           [x IN dims WHERE x.loved | x.name] AS lovedNames,
+           [x IN dims | { name: x.name, kind: x.kind, via: x.via }][0..6] AS shared,
+           score
+    ORDER BY score DESC, name ASC
+    LIMIT toInteger($limit)
+    `,
+    {
+      userId,
+      parkCode,
+      limit,
+      rv: cons.rvMaxLengthFt,
+      wheelchair: cons.wheelchair,
+      required: cons.requiredAmenities,
+    },
+  );
+
+  const parks: NodeRecommendation[] = rows.map((r) => {
+    const { seedName: _seed, lovedNames, shared, ...rest } = r;
+    return {
+      ...rest,
+      sharedVia: shared,
+      // The card reads `matched`: prefer loved dimensions, else the first couple of shared dims.
+      matched: lovedNames.length ? lovedNames : shared.slice(0, 2).map((s) => s.name),
+    };
+  });
+  // seedName from the rec rows is null when novelty/constraints filter everything out — fetch it independently
+  // so the caller can still say "No fresh recommendations from <SeedName>" with the real park name.
+  let seedName = rows[0]?.seedName ?? null;
+  if (!seedName) {
+    const s = await readGraph<{ name: string | null }>(`MATCH (p:Park {parkCode: $parkCode}) RETURN p.fullName AS name`, { parkCode });
+    seedName = s[0]?.name ?? null;
+  }
+  return { seedName, parks };
+}
+
+/**
  * Live constraint re-ranking (ADR-046). The structured query a vector store can't do cleanly:
  * "campgrounds that fit a 22-ft RV AND Bortle ≤ 2 AND quiet". Hard filters lift verbatim from `forYou`;
  * the soft score is the user's PREFERS-weight sum (OPTIONAL — cold-start/anon parks still appear at

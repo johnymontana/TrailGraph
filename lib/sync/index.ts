@@ -46,6 +46,10 @@ import { embedParks } from './embed-parks';
 import { embedPlaces, embedPeople, embedArticles } from './embed-nodes';
 import { deriveNear } from './derive-near';
 import { deriveSharedEdges } from './derive-shared';
+import { deriveCentrality } from './derive-centrality';
+import { deriveCommunities } from './derive-communities';
+import { refreshNearProjection } from './project-near';
+import { deriveCoConsidered } from './derive-co-considered';
 import { deriveLessonJoins } from './derive-lesson-joins';
 import { deriveLessonTopics } from './derive-lesson-topics';
 import { decomposeLessons } from './decompose-lessons';
@@ -348,6 +352,15 @@ export async function runSlowSync(): Promise<StepResult[]> {
   // Derivations run last (need the full corpus): NEAR proximity (F9) + materialized shared-topic/activity (bonus).
   out.push(await step('derive-near', 'slow', async () => deriveNear()));
   out.push(await step('derive-shared', 'slow', async () => deriveSharedEdges()));
+  // Co-considered lens (#4): cross-user CONSIDERED overlap, k-anonymity ≥5. Independent of the NPS corpus
+  // (rides the slow sync because that's where derivations live; sparse until the user base grows).
+  out.push(await step('derive-co-considered', 'slow', async () => deriveCoConsidered()));
+  // Graph analytics (#7): GDS centrality + community detection over the materialized SHARES_* edges. Each
+  // no-ops cleanly on a Neo4j without the GDS plugin (guard is inside the fn, so the step list is stable).
+  out.push(await step('derive-centrality', 'slow', async () => deriveCentrality()));
+  out.push(await step('derive-communities', 'slow', async () => deriveCommunities()));
+  // Keep the resident parks-near GDS projection fresh for weighted pathfinding (#6).
+  out.push(await step('project-near', 'slow', async () => refreshNearProjection()));
   // Ranger School (F6 cross-feature join): (:LessonPlan)-[:CAN_USE_MEDIA]->(media ABOUT the same park).
   out.push(await step('derive-lesson-joins', 'slow', async () => deriveLessonJoins()));
   // Ranger School: ground lesson plans + quizzes in their park's topics (NPS lessonplans carry none), so

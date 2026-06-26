@@ -1,6 +1,14 @@
 import { readGraph } from './neo4j';
 import { embedQuery } from './embed-cache';
-import { labelColor, type ParkNodeNav } from './graph-nvl';
+import {
+  labelColor,
+  nodeIdFor,
+  type ParkNodeNav,
+  type SeedNode,
+  type SeedLink,
+  type SeedGraph,
+} from './graph-nvl';
+import { buildTopicBackbone } from './graph-backbone';
 import { normalizeCrowdCurve, type CrowdCurvePoint } from './datasources/visitation';
 import { parseOperatingHours, openStateOn, summarizeClosures, type DayState } from './sync/hours';
 import { isFeeFreeDay } from './datasources/feefree';
@@ -685,6 +693,295 @@ export async function graphNeighborhood(minShared = 3, limit = 250) {
     return { source: r.a, target: r.b, value: r.shared, topics: r.topics ?? [] };
   });
   return { nodes: [...nodes.values()], links };
+}
+
+/**
+ * Shared natural-key map for the multi-entity explorer (#2): the INDEXED unique property to MATCH/expand
+ * each label by. `graphSeed`, `expandNode`, and the mapper's `nodeIdFor` all key off this so a node minted
+ * by the seed re-resolves to the same id when expanded (round-trip), and every lookup is index-backed.
+ * It is ALSO the closed allowlist of expandable/renderable labels (excludes :Season — two shapes — and all
+ * user/context/auth labels).
+ */
+export const GRAPH_NODE_KEYS = {
+  Park: 'parkCode',
+  Topic: 'id',
+  Activity: 'id',
+  State: 'code',
+  Person: 'id',
+  Region: 'name',
+  Place: 'id',
+  Tour: 'id',
+  Campground: 'id',
+  VisitorCenter: 'id',
+  ThingToDo: 'id',
+  Alert: 'id',
+} as const;
+export type GraphNodeLabel = keyof typeof GRAPH_NODE_KEYS;
+export function isGraphNodeLabel(x: string): x is GraphNodeLabel {
+  return Object.prototype.hasOwnProperty.call(GRAPH_NODE_KEYS, x);
+}
+
+/**
+ * Seed graph for the explorer (#2): the National-Park *similarity backbone*, shaped as the multi-entity
+ * `SeedGraph` (carrying lat/lng for the geographic layout). De-hairball fix: instead of linking any two
+ * parks that share ≥3 topics by RAW count (which made a near-complete graph — generic topics like
+ * Animals/Geology sit on nearly every park), we read each NP's topic SET and hand it to the pure
+ * `buildTopicBackbone` helper, which weights topics by IDF (ubiquitous → ~0), scores pairs by IDF-cosine
+ * similarity, and keeps each park's top-K most-DISTINCTIVE matches (+ connectivity floor, degree cap). The
+ * de-hairball is computed live (no derive/resync — every NP node is emitted so the graph can't go blank).
+ * Entities are NOT pre-loaded — they appear on demand via `expandNode` (Bloom-style progressive reveal).
+ */
+export async function graphSeed(opts: { topK?: number; minSim?: number; limit?: number } = {}): Promise<SeedGraph> {
+  // One cheap row per National Park + its DISTINCT topic-name set. OPTIONAL MATCH keeps edgeless parks so no
+  // park silently vanishes. No LIMIT/SKIP/topK in Cypher → no toInteger; the cap is applied in the helper.
+  const rows = await readGraph<{ code: string; name: string; lat: number | null; lng: number | null; topics: string[] }>(
+    `MATCH (p:Park) WHERE p.designation CONTAINS 'National Park'
+     OPTIONAL MATCH (p)-[:HAS_TOPIC]->(t:Topic)
+     WITH p, collect(DISTINCT t.name) AS topics
+     RETURN p.parkCode AS code, p.fullName AS name, p.location.latitude AS lat, p.location.longitude AS lng, topics
+     ORDER BY p.parkCode`,
+  );
+  const { nodes, edges } = buildTopicBackbone(rows, opts);
+  const seedNodes: SeedNode[] = nodes.map((n) => ({
+    id: n.code,
+    label: 'Park',
+    name: n.name,
+    key: n.code,
+    parkCode: n.code,
+    lat: n.lat,
+    lng: n.lng,
+    degree: n.degree,
+  }));
+  // value = #distinctive shared topics (INT, keeps the caption fallback sane); topics drive the topic filter.
+  const links: SeedLink[] = edges.map((e) => ({ source: e.a, target: e.b, value: e.sharedTopics.length, topics: e.sharedTopics }));
+  return { nodes: seedNodes, links };
+}
+
+/**
+ * One-hop expansion for the explorer (#2): the directly-connected, ALLOWLISTED neighbours of a node.
+ * `label`/`keyProp` come from `GRAPH_NODE_KEYS` (server-side, NOT user input), so interpolating them into
+ * the pattern is safe AND index-backed. Generalises `parkGraph`'s one-hop traversal to any allowed label;
+ * `$allowed` (the same closed set) bounds the neighbour labels and excludes :Season + user/auth labels.
+ */
+export async function expandNode(
+  key: string,
+  label: GraphNodeLabel,
+  opts: { limit?: number } = {},
+): Promise<{ nodes: SeedNode[]; links: SeedLink[] }> {
+  const { limit = 40 } = opts;
+  const keyProp = GRAPH_NODE_KEYS[label];
+  const centerId = nodeIdFor(label, key);
+  const rows = await readGraph<{
+    label: string | null;
+    natId: string | null;
+    caption: string | null;
+    lat: number | null;
+    lng: number | null;
+    relType: string;
+    outgoing: boolean;
+  }>(
+    `MATCH (n:\`${label}\` {\`${keyProp}\`: $key})
+     MATCH (n)-[r]-(m)
+     // Pick the neighbour's label by ALLOWLIST precedence (iterate $allowed), not by labels(m) order —
+     // labels() ordering is not guaranteed, so a multi-labelled node would otherwise key non-deterministically.
+     WITH n, r, m, head([lbl IN $allowed WHERE lbl IN labels(m)]) AS mLabel
+     WHERE mLabel IS NOT NULL AND (NOT m:Alert OR m.active = true)
+     WITH DISTINCT mLabel AS label, m, type(r) AS relType, startNode(r) = n AS outgoing
+     RETURN label,
+            CASE label WHEN 'Park' THEN m.parkCode WHEN 'State' THEN m.code WHEN 'Region' THEN m.name ELSE m.id END AS natId,
+            coalesce(m.fullName, m.name, m.title) AS caption,
+            m.location.latitude AS lat, m.location.longitude AS lng,
+            relType, outgoing
+     LIMIT toInteger($limit)`,
+    { key, allowed: Object.keys(GRAPH_NODE_KEYS), limit },
+  );
+  const nodes: SeedNode[] = [];
+  const links: SeedLink[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (!r.natId || !r.label) continue;
+    const nid = nodeIdFor(r.label, r.natId);
+    if (!seen.has(nid)) {
+      seen.add(nid);
+      nodes.push({
+        id: nid,
+        label: r.label,
+        name: r.caption ?? r.natId,
+        key: r.natId,
+        parkCode: r.label === 'Park' ? r.natId : undefined,
+        lat: r.lat,
+        lng: r.lng,
+      });
+    }
+    links.push(
+      r.outgoing
+        ? { source: centerId, target: nid, caption: r.relType }
+        : { source: nid, target: centerId, caption: r.relType },
+    );
+  }
+  return { nodes, links };
+}
+
+/**
+ * Relationship "lenses" (#4): re-draw the SAME park set around a different meaning. shares_topic/
+ * shares_activity reuse the materialized SHARES_* edges (single-direction → directed match); `near` uses
+ * UNDIRECTED NEAR + min(miles) (NEAR is stored directed/asymmetric); person_connected/shared_tour are live;
+ * co_considered uses the materialized CO_CONSIDERED edge (derive-co-considered, k-anon ≥5). Output plugs
+ * straight into `neighborhoodToNvl` (nodes get a degree counter; links carry a per-lens caption).
+ */
+export type GraphLens = 'shares_topic' | 'shares_activity' | 'near' | 'person_connected' | 'shared_tour' | 'co_considered';
+export interface LensLink {
+  source: string;
+  target: string;
+  value: number;
+  caption: string;
+}
+export interface LensGraph {
+  nodes: { id: string; name: string; degree: number }[];
+  links: LensLink[];
+}
+export function isGraphLens(x: string): x is GraphLens {
+  return ['shares_topic', 'shares_activity', 'near', 'person_connected', 'shared_tour', 'co_considered'].includes(x);
+}
+
+const NP = "a.designation CONTAINS 'National Park' AND b.designation CONTAINS 'National Park'";
+const LENS_CYPHER: Record<GraphLens, string> = {
+  shares_topic: `MATCH (a:Park)-[r:SHARES_TOPIC]->(b:Park)
+     WHERE r.count >= toInteger($minWeight) AND ${NP}
+     RETURN a.parkCode AS source, a.fullName AS sName, b.parkCode AS target, b.fullName AS tName, r.count AS value, toString(r.count) + ' shared topics' AS caption
+     ORDER BY value DESC LIMIT toInteger($limit)`,
+  shares_activity: `MATCH (a:Park)-[r:SHARES_ACTIVITY]->(b:Park)
+     WHERE r.count >= toInteger($minWeight) AND ${NP}
+     RETURN a.parkCode AS source, a.fullName AS sName, b.parkCode AS target, b.fullName AS tName, r.count AS value, toString(r.count) + ' shared activities' AS caption
+     ORDER BY value DESC LIMIT toInteger($limit)`,
+  // NEAR is asymmetric/directed → UNDIRECTED match + min(miles) (a directed match would drop pairs whose
+  // only stored edge runs high→low elementId). $maxMiles stays FLOAT.
+  near: `MATCH (a:Park)-[r:NEAR]-(b:Park)
+     WHERE elementId(a) < elementId(b) AND r.miles <= $maxMiles AND ${NP}
+     WITH a, b, min(r.miles) AS miles
+     RETURN a.parkCode AS source, a.fullName AS sName, b.parkCode AS target, b.fullName AS tName, miles AS value, toString(toInteger(round(miles))) + ' mi' AS caption
+     ORDER BY value ASC LIMIT toInteger($limit)`,
+  person_connected: `MATCH (per:Person)-[:ASSOCIATED_WITH]->(a:Park), (per)-[:ASSOCIATED_WITH]->(b:Park)
+     WHERE elementId(a) < elementId(b) AND ${NP}
+     WITH a, b, collect(DISTINCT per.title) AS via, count(DISTINCT per) AS value
+     WHERE value >= toInteger($minWeight)
+     RETURN a.parkCode AS source, a.fullName AS sName, b.parkCode AS target, b.fullName AS tName, value, 'via ' + via[0] AS caption
+     ORDER BY value DESC LIMIT toInteger($limit)`,
+  shared_tour: `MATCH (t:Tour)-[:HAS_STOP]->(:TourStop)-[:AT]->(x)-[:IN_PARK]->(a:Park),
+                      (t)-[:HAS_STOP]->(:TourStop)-[:AT]->(y)-[:IN_PARK]->(b:Park)
+     WHERE elementId(a) < elementId(b) AND ${NP}
+     WITH a, b, count(DISTINCT t) AS value, collect(DISTINCT t.title)[0..1] AS tours
+     WHERE value >= toInteger($minWeight)
+     RETURN a.parkCode AS source, a.fullName AS sName, b.parkCode AS target, b.fullName AS tName, value, 'shared tour: ' + tours[0] AS caption
+     ORDER BY value DESC LIMIT toInteger($limit)`,
+  // CO_CONSIDERED stores only an aggregate user count (k-anon ≥5); never identities.
+  co_considered: `MATCH (a:Park)-[r:CO_CONSIDERED]->(b:Park)
+     WHERE r.users >= toInteger($minUsers)
+     RETURN a.parkCode AS source, a.fullName AS sName, b.parkCode AS target, b.fullName AS tName, r.users AS value, toString(r.users) + ' people consider both' AS caption
+     ORDER BY value DESC LIMIT toInteger($limit)`,
+};
+
+export async function graphLens(
+  lens: GraphLens,
+  opts: { minWeight?: number; maxMiles?: number; minUsers?: number; limit?: number } = {},
+): Promise<LensGraph> {
+  const cypher = LENS_CYPHER[lens];
+  if (!cypher) return { nodes: [], links: [] };
+  const rows = await readGraph<{ source: string; sName: string; target: string; tName: string; value: number; caption: string }>(cypher, {
+    minWeight: opts.minWeight ?? 3,
+    maxMiles: opts.maxMiles ?? 200, // FLOAT — never toInteger
+    minUsers: Math.max(5, opts.minUsers ?? 5), // k-anonymity floor, clamped server-side
+    limit: opts.limit ?? 400,
+  });
+  const nodes = new Map<string, { id: string; name: string; degree: number }>();
+  const bump = (id: string, name: string) => {
+    const n = nodes.get(id) ?? { id, name, degree: 0 };
+    n.degree += 1;
+    nodes.set(id, n);
+  };
+  const links: LensLink[] = rows.map((r) => {
+    bump(r.source, r.sName);
+    bump(r.target, r.tName);
+    return { source: r.source, target: r.target, value: r.value, caption: r.caption };
+  });
+  return { nodes: [...nodes.values()], links };
+}
+
+/**
+ * Unified node search for the /graph search box (#3): find ANY node by name/vibe — parks (vibeSearch),
+ * places + people (semanticSearch), and topics/activities (CONTAINS; they have no full-text index). Embeds
+ * the query ONCE (audit C5) and reuses the vector across the vector searches. Returns `{label, key}` so a
+ * hit can be handed straight to `egoNetwork` (label = the GRAPH_NODE_KEYS label; key = its indexed id).
+ */
+export type SearchNodeKind = 'park' | 'place' | 'person' | 'topic' | 'activity';
+export interface UnifiedHit {
+  kind: SearchNodeKind;
+  label: GraphNodeLabel;
+  key: string;
+  name: string;
+  subtitle?: string;
+}
+export async function unifiedNodeSearch(query: string, limit = 6): Promise<UnifiedHit[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  // Embed is BEST-EFFORT: if the AI Gateway is down (or no cache hit), the vector searches are skipped but
+  // the embedding-independent Topic/Activity name search still runs — so the /graph search box degrades to
+  // graph-only hits instead of going fully dark on a gateway hiccup.
+  let vector: number[] | undefined;
+  try {
+    vector = await embedQuery(q);
+  } catch {
+    vector = undefined;
+  }
+  const [parks, places, people, labels] = await Promise.all([
+    vector ? vibeSearch(q, { limit, vector }) : Promise.resolve([]),
+    vector ? semanticSearch('place', q, limit, vector) : Promise.resolve([]),
+    vector ? semanticSearch('person', q, limit, vector) : Promise.resolve([]),
+    readGraph<{ kind: 'topic' | 'activity'; key: string; name: string }>(
+      `MATCH (t:Topic) WHERE toLower(t.name) CONTAINS toLower($q)
+       RETURN 'topic' AS kind, t.id AS key, t.name AS name LIMIT toInteger($limit)
+       UNION
+       MATCH (a:Activity) WHERE toLower(a.name) CONTAINS toLower($q)
+       RETURN 'activity' AS kind, a.id AS key, a.name AS name LIMIT toInteger($limit)`,
+      { q, limit },
+    ),
+  ]);
+  return [
+    ...parks.map((p): UnifiedHit => ({ kind: 'park', label: 'Park', key: p.parkCode, name: p.name, subtitle: p.states ?? undefined })),
+    ...places.map((h): UnifiedHit => ({ kind: 'place', label: 'Place', key: h.id, name: h.title, subtitle: h.parks[0]?.parkName })),
+    ...people.map((h): UnifiedHit => ({ kind: 'person', label: 'Person', key: h.id, name: h.title, subtitle: h.parks[0]?.parkName })),
+    ...labels.map((l): UnifiedHit => ({ kind: l.kind, label: l.kind === 'topic' ? 'Topic' : 'Activity', key: l.key, name: l.name })),
+  ];
+}
+
+/**
+ * Ego-network for /graph (#3): a node + its one-hop allowlisted neighbours, shaped for the result-subgraph
+ * view (SeedNode/SeedLink). Reuses `expandNode` for the neighbours and adds the centre node. `label` is a
+ * server-side `GraphNodeLabel` (closed allowlist), so the centre lookup interpolation is safe + index-backed.
+ */
+export async function egoNetwork(key: string, label: GraphNodeLabel): Promise<{ narration: string; nodes: SeedNode[]; links: SeedLink[] }> {
+  const keyProp = GRAPH_NODE_KEYS[label];
+  const c = await readGraph<{ name: string | null; lat: number | null; lng: number | null }>(
+    `MATCH (n:\`${label}\` {\`${keyProp}\`: $key})
+     RETURN coalesce(n.fullName, n.name, n.title) AS name, n.location.latitude AS lat, n.location.longitude AS lng`,
+    { key },
+  );
+  // Unknown id → empty result (not a phantom centre node the explorer would draw for a node that doesn't exist).
+  if (!c.length) return { narration: 'Not found in the graph.', nodes: [], links: [] };
+  const center: SeedNode = {
+    id: nodeIdFor(label, key),
+    label,
+    name: c[0]?.name ?? key,
+    key,
+    parkCode: label === 'Park' ? key : undefined,
+    lat: c[0]?.lat ?? null,
+    lng: c[0]?.lng ?? null,
+  };
+  const exp = await expandNode(key, label, { limit: 60 });
+  const narration = exp.nodes.length
+    ? `${center.name}: ${exp.nodes.length} connection${exp.nodes.length === 1 ? '' : 's'}.`
+    : `${center.name} has no connections in the graph.`;
+  return { narration, nodes: [center, ...exp.nodes], links: exp.links };
 }
 
 /** A per-park graph node carries `nav` (for click routing) + `label` alongside the NVL fields. */

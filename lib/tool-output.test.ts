@@ -63,6 +63,13 @@ describe('isRenderableToolOutput', () => {
     expect(isRenderableToolOutput('why_this', {})).toBe(false);
   });
 
+  it('graph_result: subgraph, narrated no-result, OR disambiguation chips (#5a)', () => {
+    expect(isRenderableToolOutput('graph_result', { nodes: [{}], links: [] })).toBe(true);
+    expect(isRenderableToolOutput('graph_result', { narration: 'No connection found.', nodes: [] })).toBe(true);
+    expect(isRenderableToolOutput('graph_result', { candidates: [{ intent: 'similar_to', label: 'x' }] })).toBe(true);
+    expect(isRenderableToolOutput('graph_result', {})).toBe(false);
+  });
+
   it('trip_diff: needs both sides; leaderboard_card: entries or a submission', () => {
     expect(isRenderableToolOutput('trip_diff', { a: {}, b: {} })).toBe(true);
     expect(isRenderableToolOutput('trip_diff', { a: {} })).toBe(false);
