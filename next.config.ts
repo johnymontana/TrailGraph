@@ -41,12 +41,25 @@ const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'Permissions-Policy', value: 'geolocation=(self), camera=(), microphone=()' },
-  // includeSubDomains + preload is a commitment: every *.trailgraph.app must be HTTPS-only.
-  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+  // HSTS is PRODUCTION-ONLY. Sending it on http://localhost in dev poisons Chrome's HSTS cache:
+  // `includeSubDomains; preload` makes Chrome force-upgrade http://localhost → https://localhost, which the
+  // dev server doesn't speak, so every page fails with "can't provide a secure connection" (curl, which
+  // ignores HSTS, still works — which is how this hid). Only commit to HTTPS-only in production, where it
+  // belongs: includeSubDomains + preload means every *.trailgraph.app must be HTTPS-only.
+  ...(process.env.NODE_ENV === 'production'
+    ? [{ key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' }]
+    : []),
 ];
 
 const nextConfig: NextConfig = {
   poweredByHeader: false, // stop leaking "X-Powered-By: Next.js"
+  // Neo4j-NVL holds an imperative WebGL/canvas instance per mount; React StrictMode's DEV-only
+  // mount→unmount→remount double-invoke leaves a zombie NVL instance bound to the ref while the visible
+  // one is a different object — the force layout never settles on the ref'd instance, so the graph opens
+  // as a single un-fit dot (and camera/fit calls no-op). StrictMode is a no-op in production builds, so
+  // this only affects dev; disabling it makes dev match prod and unblocks every NVL surface
+  // (/graph, /me, /parks, /trails). Revisit if NVL gains StrictMode-safe mounting.
+  reactStrictMode: false,
   serverExternalPackages: ['neo4j-driver', '@neo4j-labs/agent-memory'],
   experimental: {
     serverActions: { bodySizeLimit: '2mb' },

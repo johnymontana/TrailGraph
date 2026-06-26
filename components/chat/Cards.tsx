@@ -8,6 +8,8 @@ import { TripDiffCard } from '../plan/TripDiffCard';
 import { SkyLeaderboard, type LeaderboardEntry } from '../collective/SkyLeaderboard';
 import { DigestItems, type DigestItemView } from '../inbox/DigestItems';
 import { ProvenanceEdges } from '../parks/ProvenanceEdges';
+import { NvlGraph } from '../graph/NvlGraph';
+import { seedToNvl, type SeedNode, type SeedLink } from '../../lib/graph-nvl';
 import { SourceInfo } from '../ui/SourceInfo';
 import { decodeEntities } from '../../lib/html-entities';
 import { WATCH_CAP } from '../../lib/watch-cap';
@@ -74,6 +76,8 @@ export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: un
       return <NewsCard data={data} />;
     case 'media_card':
       return <MediaCard data={data} />;
+    case 'graph_result':
+      return <GraphResultCard data={data} />;
     case 'why_this':
       return (
         <Card.Root variant="subtle" size="sm" my={2}>
@@ -102,6 +106,34 @@ export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: un
 
 // Renderability guard lives in lib/tool-output.ts (pure + unit-tested); re-export to keep the import path.
 export { isRenderableToolOutput } from '../../lib/tool-output';
+
+/** #5a ask-the-graph: a narrated answer + the result subgraph (or disambiguation chips). */
+function GraphResultCard({ data }: { data: Record<string, unknown> }) {
+  const narration = typeof data.narration === 'string' ? data.narration : '';
+  const nodes = (Array.isArray(data.nodes) ? data.nodes : []) as SeedNode[];
+  const links = (Array.isArray(data.links) ? data.links : []) as SeedLink[];
+  const candidates = (Array.isArray(data.candidates) ? data.candidates : []) as { intent: string; label: string }[];
+  const { nodes: nvlNodes, rels } = seedToNvl({ nodes, links });
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        {narration ? <Text fontSize="sm" mb={nvlNodes.length || candidates.length ? 2 : 0}>{narration}</Text> : null}
+        {nvlNodes.length ? (
+          <Box h="360px" borderWidth="1px" borderColor="border" borderRadius="l2" overflow="hidden">
+            <NvlGraph nodes={nvlNodes} rels={rels} height="100%" />
+          </Box>
+        ) : null}
+        {candidates.length ? (
+          <HStack gap={2} wrap="wrap">
+            {candidates.map((c) => (
+              <Badge key={c.intent} variant="subtle" colorPalette="pine">{c.label}</Badge>
+            ))}
+          </HStack>
+        ) : null}
+      </Card.Body>
+    </Card.Root>
+  );
+}
 
 function ParkCards({ data }: { data: Record<string, unknown> }) {
   const raw = (data.parks ?? (data.park ? [data.park] : [])) as {

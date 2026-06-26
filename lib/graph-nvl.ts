@@ -14,7 +14,7 @@ import type { UserMemory } from './memory-graph';
  */
 
 // /graph palette — highlight > hub > plain, mapped onto pine/trail.
-export const HUB_DEGREE = 5;
+export const HUB_DEGREE = 6;
 const COLOR_HIGHLIGHT = trail[500];
 const COLOR_HUB = pine[600];
 const COLOR_PARK = pine[400];
@@ -29,6 +29,8 @@ interface NeighborhoodLink {
   target: string;
   value: number;
   topics?: string[];
+  /** Per-lens edge caption (#4), e.g. "142 mi" / "via John Muir" — used when there are no topic names. */
+  caption?: string;
 }
 
 /** Map a `graphNeighborhood()` result to NVL nodes/rels. Highlighted parks override hub/plain color. */
@@ -48,9 +50,85 @@ export function neighborhoodToNvl(
     id: `${l.source}--${l.target}`,
     from: l.source,
     to: l.target,
-    caption: l.topics?.length ? l.topics.join(', ') : `${l.value} shared`,
+    // Keep the `.length` guard: non-topic lenses pass `topics: []` (not undefined), and `[].join('')` would
+    // wrongly win a `??`. Topic names → join; else a per-lens caption; else the legacy "N shared".
+    caption: l.topics?.length ? l.topics.join(', ') : (l.caption ?? `${l.value} shared`),
   }));
   return { nodes, rels };
+}
+
+// ── Multi-entity seed + expand-on-click (#2) ────────────────────────────────────────────────────────
+// Shared shape for the explorer dataset: the park-topic backbone (label 'Park') plus on-demand entity
+// neighbours (Activity/Topic/Person/Place/Tour/Campground/VisitorCenter/ThingToDo/State/Region/Alert).
+
+export interface SeedNode {
+  /** NVL id — BARE parkCode for parks (so a CONSIDERED park merges with the overlay), else `${label}:${key}`. */
+  id: string;
+  label: string;
+  name: string;
+  /** The indexed natural key used to expand this node (GRAPH_NODE_KEYS[label]). */
+  key: string;
+  /** Park-backbone degree (drives hub sizing/colour); absent for entity nodes. */
+  degree?: number;
+  parkCode?: string;
+  lat?: number | null;
+  lng?: number | null;
+}
+export interface SeedLink {
+  source: string;
+  target: string;
+  /** Shared-topic count for park-park backbone edges. */
+  value?: number;
+  /** Shared topic names (park-park backbone) — drives the topic filter. */
+  topics?: string[];
+  /** Relationship caption for entity edges (e.g. 'HAS_TOPIC'). */
+  caption?: string;
+}
+export interface SeedGraph {
+  nodes: SeedNode[];
+  links: SeedLink[];
+}
+
+/** NVL node id for a domain node. Parks stay BARE (so a CONSIDERED park merges with the overlay). */
+export function nodeIdFor(label: string, key: string): string {
+  return label === 'Park' ? key : `${label}:${key}`;
+}
+
+/** Map the multi-entity explorer dataset to NVL. Parks colour by highlight/hub/degree; entities by label. */
+export function seedToNvl(
+  seed: { nodes: SeedNode[]; links: SeedLink[] },
+  highlight: Iterable<string> = [],
+): { nodes: NvlNode[]; rels: NvlRel[] } {
+  const hi = new Set(highlight);
+  const nodes: NvlNode[] = seed.nodes.map((n) =>
+    n.label === 'Park'
+      ? {
+          id: n.id,
+          caption: n.name,
+          size: 6 + Math.min(8, n.degree ?? 0) * 2,
+          color: hi.has(n.id) ? COLOR_HIGHLIGHT : (n.degree ?? 0) >= HUB_DEGREE ? COLOR_HUB : COLOR_PARK,
+        }
+      : { id: n.id, caption: n.name, size: 12, color: labelColor(n.label) },
+  );
+  const rels: NvlRel[] = seed.links.map((l) => ({
+    id: `${l.source}--${l.target}`,
+    from: l.source,
+    to: l.target,
+    caption: l.topics?.length ? l.topics.join(', ') : (l.caption ?? (l.value != null ? `${l.value} shared` : '')),
+  }));
+  return { nodes, rels };
+}
+
+/** Legend entries (label + colour) for the node types currently present, sorted for a stable display. */
+export function nodeTypeLegend(labels: Iterable<string>): { label: string; color: string }[] {
+  const seen = new Set<string>();
+  const out: { label: string; color: string }[] = [];
+  for (const l of labels) {
+    if (seen.has(l)) continue;
+    seen.add(l);
+    out.push({ label: l, color: labelColor(l) });
+  }
+  return out.sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /** Stable id prefix for the (non-navigable) center node of a thematic trail mini-graph. */
@@ -158,6 +236,94 @@ export function isContextParkId(id: string): boolean {
   return !id.startsWith(CONTEXT_PREFIX);
 }
 
+// ── "You in the graph" bridges (#8) ─────────────────────────────────────────────────────────────────
+// A bridge connects a user's context node (a preference/trip/stamp) to the DOMAIN park it touches, so the
+// overlay shows *why* your tastes reach into the constellation. The `from` id MUST byte-match the context
+// node id minted by `contextToNvl`, and `to` is the BARE parkCode (which also merges with the domain node).
+export interface ContextBridge {
+  fromKind: 'activity' | 'topic' | 'trip' | 'stamp';
+  fromKey: string;
+  via: string;
+  parkCode: string;
+}
+const BRIDGE_PREFIX: Record<ContextBridge['fromKind'], string> = {
+  activity: `${CONTEXT_PREFIX}Activity:`,
+  topic: `${CONTEXT_PREFIX}Topic:`,
+  trip: `${CONTEXT_PREFIX}Trip:`,
+  stamp: `${CONTEXT_PREFIX}PassportStamp:`,
+};
+
+/** Map context bridges to NVL rels (deduped). Ids align with `contextToNvl` node ids + the You--PREFERS-- edge convention. */
+export function bridgesToRels(bridges: ContextBridge[]): NvlRel[] {
+  const seen = new Set<string>();
+  const out: NvlRel[] = [];
+  for (const b of bridges) {
+    const fromId = `${BRIDGE_PREFIX[b.fromKind]}${b.fromKey}`;
+    const id = `${fromId}--${b.via}--${b.parkCode}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, from: fromId, to: b.parkCode, caption: b.via });
+  }
+  return out;
+}
+
+// ── Recommendations & provenance on the graph (#9) ──────────────────────────────────────────────────
+
+/**
+ * "Recommend from here" (#9) result subgraph: the seed park at the centre, a spoke to each 2-hop
+ * recommendation captioned by WHY (the shared dimensions). Shaped as a SeedGraph so it renders through the
+ * same result-subgraph override as ask-the-graph / paths / ego. Pure + unit-tested.
+ */
+export interface RecLike {
+  parkCode: string;
+  name: string;
+  lat?: number | null;
+  lng?: number | null;
+  matched: string[];
+}
+export function recsToGraph(
+  seed: { parkCode: string; name: string | null },
+  recs: RecLike[],
+): { narration: string; nodes: SeedNode[]; links: SeedLink[] } {
+  const seedName = seed.name ?? seed.parkCode;
+  const nodes: SeedNode[] = [
+    { id: seed.parkCode, label: 'Park', name: seedName, key: seed.parkCode, parkCode: seed.parkCode, degree: recs.length },
+    ...recs.map(
+      (r): SeedNode => ({ id: r.parkCode, label: 'Park', name: r.name, key: r.parkCode, parkCode: r.parkCode, lat: r.lat ?? null, lng: r.lng ?? null }),
+    ),
+  ];
+  const links: SeedLink[] = recs.map((r) => ({
+    source: seed.parkCode,
+    target: r.parkCode,
+    caption: r.matched.slice(0, 3).join(', ') || 'shares your interests',
+  }));
+  const narration = recs.length
+    ? `Because ${seedName} shares your interests, you might like ${recs.length} more park${recs.length === 1 ? '' : 's'}: ${recs.map((r) => r.name).join(', ')}.`
+    : `No fresh recommendations from ${seedName} right now — you may have considered or planned its closest matches already.`;
+  return { narration, nodes, links };
+}
+
+/**
+ * The id set for the "why is this park in my world?" provenance highlight (#9): the You anchor, the clicked
+ * park, and every preference that bridges them. Rel ids BYTE-MATCH `contextToNvl` (You-[:PREFERS]->pref,
+ * You-[:CONSIDERED]->park) and `bridgesToRels` (pref-[:OFFERS|HAS_TOPIC]->park), so the constellation can dim
+ * everything outside this subgraph. Pure + unit-tested against those id conventions.
+ */
+export function provenanceSubgraphIds(
+  parkCode: string,
+  prefPaths: { name: string; kind: 'activity' | 'topic'; via: 'OFFERS' | 'HAS_TOPIC' }[],
+): { nodeIds: Set<string>; relIds: Set<string> } {
+  const nodeIds = new Set<string>([CONTEXT_YOU_ID, parkCode]);
+  const relIds = new Set<string>([`${CONTEXT_YOU_ID}--CONSIDERED--${parkCode}`]);
+  for (const p of prefPaths) {
+    const prefId = `${CONTEXT_PREFIX}${p.kind === 'activity' ? 'Activity' : 'Topic'}:${p.name}`;
+    nodeIds.add(prefId);
+    relIds.add(`${CONTEXT_YOU_ID}--PREFERS--${prefId}`);
+    relIds.add(`${prefId}--${p.via}--${parkCode}`);
+  }
+  return { nodeIds, relIds };
+}
+
 /** Color for a domain node label in the per-park graph. Pure. */
 const LABEL_COLOR: Record<string, string> = {
   Park: pine[600],
@@ -168,6 +334,12 @@ const LABEL_COLOR: Record<string, string> = {
   VisitorCenter: trail[600],
   ThingToDo: trail[400],
   Alert: '#E03131',
+  // Multi-entity explorer (#2) + analytics (#7) node types — distinct hues from the pine/trail/sand scales.
+  Person: trail[700],
+  Place: pine[300],
+  Tour: trail[300],
+  Region: sand[500],
+  Community: pine[700],
 };
 export function labelColor(label: string): string {
   return LABEL_COLOR[label] ?? sand[500];

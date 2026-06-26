@@ -7,6 +7,7 @@ import { ToolCard, isRenderableToolOutput } from './Cards';
 import { Markdown } from './Markdown';
 import { ToolActivityPill } from './ToolActivityPill';
 import { summarizeActivity, type ActivityPart } from '../../lib/tool-activity';
+import { decodeSeed } from '../../lib/graph-handoff';
 
 const DEFAULT_SUGGESTIONS: ChatSuggestion[] = [
   '✨ Surprise me — plan something I\'d love',
@@ -115,6 +116,23 @@ export function ChatPanel({
     }
     window.addEventListener('trailgraph:active-trip', onActive);
     return () => window.removeEventListener('trailgraph:active-trip', onActive);
+  }, []);
+
+  // Plan-from-graph handoff (#10): /plan?seed=zion,bryce&from=graph seeds an itinerary ONCE on mount. The
+  // codes ride as ephemeral clientContext (Record<string,string> — comma-joined, never an array); the agent
+  // turns `seedParkCodes` into a propose_itinerary call (see agent/instructions.md). Clear the params via
+  // replaceState so a refresh can't re-fire, and guard with a ref against the dev double-effect.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current) return;
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get('from') !== 'graph') return;
+    const codes = decodeSeed(sp.get('seed'));
+    if (!codes.length) return;
+    seededRef.current = true;
+    window.history.replaceState({}, '', window.location.pathname);
+    void send('Plan a trip with the parks I picked on the graph.', { seedParkCodes: codes.join(','), seedFrom: 'graph' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // When the ranger saves a trip (an itinerary_preview tool result with a trip), tell the trip builder

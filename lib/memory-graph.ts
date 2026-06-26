@@ -1,5 +1,5 @@
 import { readGraph } from './neo4j';
-import { contextToNvl } from './graph-nvl';
+import { contextToNvl, type ContextBridge } from './graph-nvl';
 
 /**
  * "Your memory" reads (E3). Returns the user's context subgraph from the co-resident Neo4j (AD-1):
@@ -128,4 +128,47 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
  */
 export async function userContextGraph(userId: string) {
   return contextToNvl(await getUserMemory(userId));
+}
+
+/**
+ * "You in the graph" bridges (#8): edges from a user's context nodes (preferences / trips / stamps) to the
+ * DOMAIN parks they touch, restricted to parks currently on the constellation (`parkCodes`). Bounded by a
+ * per-preference cap AND a global `maxBridges` cap so a power user can't blow past NVL's edge ceiling.
+ * Pref edges carry the real relationship type (OFFERS / HAS_TOPIC) as their caption.
+ */
+export async function userContextBridges(
+  userId: string,
+  parkCodes: string[],
+  opts: { perPrefCap?: number; maxBridges?: number } = {},
+): Promise<ContextBridge[]> {
+  if (parkCodes.length === 0) return [];
+  const { perPrefCap = 40, maxBridges = 300 } = opts;
+  const [prefRows, tripRows, stampRows] = await Promise.all([
+    readGraph<{ fromKind: 'activity' | 'topic'; fromKey: string; via: string; parkCode: string }>(
+      `MATCH (u:User {userId: $userId})-[pr:PREFERS]->(d)
+       WHERE (d:Activity OR d:Topic) AND coalesce(pr.weight, 1.0) > 0
+       MATCH (p:Park)-[rel:OFFERS|HAS_TOPIC]->(d)
+       WHERE p.parkCode IN $parkCodes
+       WITH d, pr, type(rel) AS via, p.parkCode AS parkCode,
+            (CASE WHEN d:Activity THEN 'activity' ELSE 'topic' END) AS kind
+       ORDER BY coalesce(pr.weight, 1.0) DESC
+       WITH kind, d.name AS prefName, via, collect(parkCode)[0..toInteger($perPrefCap)] AS parks
+       UNWIND parks AS parkCode
+       RETURN kind AS fromKind, prefName AS fromKey, via, parkCode`,
+      { userId, parkCodes, perPrefCap },
+    ),
+    readGraph<{ fromKind: 'trip'; fromKey: string; via: string; parkCode: string }>(
+      `MATCH (u:User {userId: $userId})-[:PLANNED]->(t:Trip)-[:HAS_STOP]->(:Stop)-[:OF_PARK]->(p:Park)
+       WHERE p.parkCode IN $parkCodes
+       RETURN 'trip' AS fromKind, t.id AS fromKey, 'INCLUDES' AS via, p.parkCode AS parkCode`,
+      { userId, parkCodes },
+    ),
+    readGraph<{ fromKind: 'stamp'; fromKey: string; via: string; parkCode: string }>(
+      `MATCH (u:User {userId: $userId})-[:COLLECTED]->(s:PassportStamp)-[:IN_PARK]->(p:Park)
+       WHERE p.parkCode IN $parkCodes
+       RETURN 'stamp' AS fromKind, s.id AS fromKey, 'AT' AS via, p.parkCode AS parkCode`,
+      { userId, parkCodes },
+    ),
+  ]);
+  return [...prefRows, ...tripRows, ...stampRows].slice(0, maxBridges);
 }

@@ -21,6 +21,7 @@
     "ontology:setup": "tsx scripts/setup-ontology.ts",
     "seed:test": "tsx scripts/seed-test-data.ts",
     "cleanup:orphan-stops": "tsx scripts/cleanup-orphan-stops.ts",
+    "analytics:rebuild": "tsx scripts/rebuild-analytics.ts",
     "sync:reset": "tsx scripts/reset-sync-checkpoint.ts",
     "build:basemap": "tsx scripts/build-basemap.ts",
     "build:glyphs": "tsx scripts/build-glyphs.ts",

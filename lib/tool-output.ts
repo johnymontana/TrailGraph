@@ -26,6 +26,8 @@ export function isRenderableToolOutput(kind: string, data: unknown): boolean {
   if (kind === 'media_card') return ((d.audio as unknown[])?.length ?? 0) + ((d.videos as unknown[])?.length ?? 0) + ((d.galleries as unknown[])?.length ?? 0) > 0; // F6
   if (kind === 'digest_card') return Array.isArray(d.items); // render even when empty ("all clear")
   if (kind === 'why_this') return ((d.prefPaths as unknown[])?.length ?? 0) > 0 || ((d.constraints as unknown[])?.length ?? 0) > 0 || !!d.park;
+  // #5a ask-the-graph: render a subgraph, a narrated no-result, OR disambiguation chips.
+  if (kind === 'graph_result') return ((d.nodes as unknown[])?.length ?? 0) > 0 || typeof d.narration === 'string' || Array.isArray(d.candidates);
   if (kind === 'question_card') return typeof d.prompt === 'string' && ((d.options as unknown[])?.length ?? 0) > 0;
   // Ranger School (Phase 4) tutor cards
   if (kind === 'lesson_card') return Array.isArray(d.modules) || Array.isArray(d.courses) || !!d.lessonPlanId;
