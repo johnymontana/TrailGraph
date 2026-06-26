@@ -12,6 +12,9 @@ import { ChatPanel } from '../../components/chat/ChatPanel';
  * Single responsive layout (no `useBreakpointValue` branching — that caused an SSR↔CSR hydration
  * mismatch, R2 §2.1): desktop is a two-pane row; mobile stacks the builder above the chat, each panel
  * scrollable. Both panels mount exactly once (the Eve chat session isn't duplicated).
+ *
+ * Since the builder became a map-centric planning canvas (#9), it takes the flexible space and the ranger
+ * chat docks as a fixed-width sidebar (was reversed).
  */
 export default async function PlanPage() {
   const userId = await getServerUserId();
@@ -29,14 +32,15 @@ export default async function PlanPage() {
     >
       <Heading as="h1" srOnly>Plan a trip</Heading>
       <Box
-        w={{ base: '100%', md: '380px' }}
-        h={{ base: '50%', md: '100%' }}
+        flex="1"
+        h={{ base: '55%', md: '100%' }}
+        minH={0}
         borderRightWidth={{ md: '1px' }}
         borderBottomWidth={{ base: '1px', md: 0 }}
       >
         <TripBuilder />
       </Box>
-      <Box flex="1" h={{ base: '50%', md: '100%' }} minH={0}>
+      <Box w={{ base: '100%', md: '400px' }} h={{ base: '45%', md: '100%' }} minH={0}>
         <ChatPanel />
       </Box>
     </Flex>

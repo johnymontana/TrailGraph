@@ -54,6 +54,7 @@ export default defineTool({
               OR EXISTS { (p)<-[:IN_PARK]-(:VisitorCenter)-[:HAS_AMENITY]->(:Amenity {name: req}) }
               OR EXISTS { (p)<-[:IN_PARK]-(:Campground)-[:HAS_AMENITY]->(:Amenity {name: req}) })
       RETURN p.parkCode AS parkCode, p.fullName AS name, p.designation AS designation,
+             p.location.latitude AS lat, p.location.longitude AS lng,
              point.distance(p.location, point({latitude:$lat, longitude:$lng})) / 1609.344 AS miles
       ${order} LIMIT 15
       `,

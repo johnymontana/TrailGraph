@@ -28,10 +28,16 @@ describe('brandColors', () => {
     expect(brandColors(undefined)).toEqual(brandColors('light'));
   });
 
+  it('exposes a passport-stamp accent with light/dark parity (#9: stamp pins + dark-sky boundary glow)', () => {
+    expect(brandColors('light').stamps).toBe('#E0A82E');
+    expect(brandColors('dark').stamps).toBe('#FFD86B');
+    expect(brandColors('light').stamps).not.toBe(brandColors('dark').stamps);
+  });
+
   it('always returns the full color contract', () => {
     for (const mode of ['light', 'dark'] as const) {
       const c = brandColors(mode);
-      for (const key of ['pine', 'trail', 'trailLight', 'danger', 'faded', 'onColor', 'surface'] as const) {
+      for (const key of ['pine', 'trail', 'trailLight', 'danger', 'faded', 'stamps', 'onColor', 'surface'] as const) {
         expect(c[key]).toMatch(/^#[0-9A-Fa-f]{6}$/);
       }
     }

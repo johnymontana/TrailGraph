@@ -39,12 +39,17 @@ interface OpenMeteoResponse {
   daily?: { time?: string[]; temperature_2m_max?: number[]; temperature_2m_min?: number[]; weather_code?: number[] };
 }
 
-/** Current conditions + 3-day forecast for a lat/lng, or null if unavailable. Cached ~30 min. */
-export async function getWeather(lat: number, lng: number): Promise<ParkWeather | null> {
+/**
+ * Current conditions + forecast for a lat/lng, or null if unavailable. Cached ~30 min. Defaults to a 3-day
+ * forecast (existing callers); pass `{ days }` to extend the horizon (e.g. the condition-aware map's "this
+ * weekend", #4) — Open-Meteo caps at 16 days, so dates beyond that have no daily row (caller treats as unknown).
+ */
+export async function getWeather(lat: number, lng: number, opts?: { days?: number }): Promise<ParkWeather | null> {
+  const days = Math.min(16, Math.max(1, Math.round(opts?.days ?? 3)));
   const url =
     `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
     `&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,weather_code` +
-    `&temperature_unit=fahrenheit&timezone=auto&forecast_days=3`;
+    `&temperature_unit=fahrenheit&timezone=auto&forecast_days=${days}`;
   try {
     const res = await fetch(url, { next: { revalidate: 1800 } });
     if (!res.ok) return null;

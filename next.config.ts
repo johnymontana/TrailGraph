@@ -18,8 +18,14 @@ const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://*.nps.gov https://*.public.blob.vercel-storage.com",
-  "connect-src 'self' https://*.public.blob.vercel-storage.com https://demotiles.maplibre.org https://protomaps.github.io",
+  // 3D terrain (#11): the AWS open-data Terrarium DEM is the natural default for NEXT_PUBLIC_MAP_TERRAIN_URL
+  // (raster-dem tiles load as images). If you point the env at a different DEM/satellite host (MapTiler,
+  // Mapbox, a self-hosted DEM), add that origin to BOTH img-src and connect-src here.
+  "img-src 'self' data: blob: https://*.nps.gov https://*.public.blob.vercel-storage.com https://elevation-tiles-prod.s3.amazonaws.com https://s3.amazonaws.com",
+  // Glyph fonts are now self-hosted (public/basemap/fonts via scripts/build-glyphs.ts), so the old
+  // third-party https://protomaps.github.io glyph origin is gone. demotiles.maplibre.org stays for the
+  // no-basemap fallback. If NEXT_PUBLIC_MAP_GLYPHS_URL points at a remote CDN, add that host here.
+  "connect-src 'self' https://*.public.blob.vercel-storage.com https://demotiles.maplibre.org https://elevation-tiles-prod.s3.amazonaws.com https://s3.amazonaws.com",
   "font-src 'self'",
   "worker-src 'self' blob:",
   "frame-ancestors 'none'",

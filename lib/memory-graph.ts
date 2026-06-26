@@ -42,6 +42,31 @@ export async function consideredBounds(
   ];
 }
 
+/** A located park pin for the "your map" memory overlay (#6). */
+export interface MapPin {
+  parkCode: string;
+  lat: number;
+  lng: number;
+}
+
+/** Parks the user has CONSIDERED (saved/viewed), as map pins (#6). */
+export async function consideredParksGeo(userId: string): Promise<MapPin[]> {
+  return readGraph<MapPin>(
+    `MATCH (:User {userId:$userId})-[:CONSIDERED]->(p:Park) WHERE p.location IS NOT NULL
+     RETURN p.parkCode AS parkCode, p.location.latitude AS lat, p.location.longitude AS lng`,
+    { userId },
+  );
+}
+
+/** Parks where the user has COLLECTED a passport stamp, as map pins (#6). */
+export async function collectedStampParksGeo(userId: string): Promise<MapPin[]> {
+  return readGraph<MapPin>(
+    `MATCH (:User {userId:$userId})-[:COLLECTED]->(:PassportStamp)-[:IN_PARK]->(p:Park) WHERE p.location IS NOT NULL
+     RETURN DISTINCT p.parkCode AS parkCode, p.location.latitude AS lat, p.location.longitude AS lng`,
+    { userId },
+  );
+}
+
 export async function getUserMemory(userId: string): Promise<UserMemory> {
   const rows = await readGraph<
     Omit<UserMemory, 'travel' | 'availability'> & {
