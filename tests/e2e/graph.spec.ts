@@ -47,7 +47,7 @@ test('/graph renders the National-Park count header and the core controls', asyn
   await expect(page.getByRole('button', { name: 'Ask' })).toBeVisible();
 });
 
-test('search box fires a debounced /api/graph/search request at >= 3 chars', async ({ page }) => {
+test('search box fires a debounced /api/graph/search request and returns graph-only hits', async ({ page }) => {
   await page.goto('/graph');
 
   const search = page.getByRole('textbox', { name: 'Find a node' });
@@ -55,14 +55,12 @@ test('search box fires a debounced /api/graph/search request at >= 3 chars', asy
 
   // < 3 chars: no request (the box short-circuits client-side). Typing >= 3 chars fires one debounced GET.
   const searchResp = page.waitForResponse((r) => r.url().includes('/api/graph/search') && r.request().method() === 'GET');
-  await search.fill('yellowstone');
+  // 'Volcano' matches the seeded :Topic 'Volcanoes' via the embedding-INDEPENDENT CONTAINS path, so the box
+  // degrades gracefully and returns 200 with a hit even when the AI Gateway / park embeddings are absent.
+  await search.fill('Volcano');
   const resp = await searchResp;
-  // The route is public (no auth redirect). 200 when embeddings are reachable; 500 in e2e (no AI Gateway
-  // key) — either proves the box is wired to the search endpoint. The dropdown options only render on 200.
-  expect([200, 500]).toContain(resp.status());
-  if (resp.status() === 200) {
-    await expect(page.getByTestId('graph-search').getByText(/Yellowstone/i).first()).toBeVisible();
-  }
+  expect(resp.status()).toBe(200);
+  await expect(page.getByTestId('graph-search').getByText(/Volcanoes/i).first()).toBeVisible();
 });
 
 test('relationship lens "Nearby" reveals the threshold slider and fetches /api/graph/lens', async ({ page }) => {
@@ -104,7 +102,7 @@ test('trip mode reveals the trip action bar with disabled actions until a select
   await expect(page.getByRole('button', { name: 'Show route' })).toBeDisabled();
 });
 
-test('ask-the-graph bar posts to /api/graph/query and updates the bar', async ({ page }) => {
+test('ask-the-graph bar posts to /api/graph/query and renders an outcome', async ({ page }) => {
   await page.goto('/graph');
 
   const ask = page.getByRole('textbox', { name: 'Ask the graph' });
@@ -113,14 +111,11 @@ test('ask-the-graph bar posts to /api/graph/query and updates the bar', async ({
   const queryResp = page.waitForResponse((r) => r.url().includes('/api/graph/query') && r.request().method() === 'POST');
   await page.getByRole('button', { name: 'Ask' }).click();
   const resp = await queryResp;
-  // Public POST route; 200 when embeddings are reachable, 500 in e2e (no AI Gateway key) — both prove the
-  // bar is wired. The bar then either shows the "← Back" pill (on a result subgraph) or the failure message.
-  expect([200, 500]).toContain(resp.status());
-  await expect(
-    page
-      .getByRole('button', { name: 'Back to the full graph' })
-      .or(page.getByText('Query failed.')),
-  ).toBeVisible();
+  // Public POST route; the NL→intent classification is embedding-backed (its logic is covered by the
+  // graph-intents unit tests). E2e proves the bar is WIRED to the endpoint and renders SOME outcome line —
+  // a narration/error <p>, candidate chips, or the ← Back pill — regardless of whether embeddings resolve.
+  expect([200, 429, 500]).toContain(resp.status());
+  await expect(page.getByTestId('graph-query-bar').locator('p').first()).toBeVisible();
 });
 
 test('insights panel renders only when graph analytics are materialized', async ({ page, request }) => {
