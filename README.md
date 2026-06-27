@@ -115,13 +115,20 @@ A companion deep-dive on this integration is written up as a blog post [here](ht
   or facility that's closed on your travel dates), a **real fees/passes budget** (per-vehicle/person/
   motorcycle entrance fees summed from NPS data, with the America-the-Beautiful break-even and fee-free-day
   nudges), shareable read-only links, and `.ics` export — or **seed a trip from an official NPS tour**.
-- **Trails** (`/trails`) — real, hikeable **trails** by length, elevation, difficulty, dogs,
-  accessibility, and season (from NPS Public Trails GIS; elevation derived from a DEM).
+- **Trails** (`/trails`) — real, hikeable **trails** with an elevation profile, a route map, and trailhead
+  logistics, searchable by length, elevation gain, difficulty, route type, dogs, accessibility, season, and
+  permit (NPS Public Trails GIS geometry; difficulty + time are labeled estimates, never a safety guarantee).
+  **Add a hike to a trip day** (nested under a park stop, with an over-packed-day warning and real per-hike GPX
+  tracks), **stitch connected trails into loops** ("link Bright Angel + South Kaibab for a rim-to-rim"), search
+  by **vibe** ("a quiet alpine-lake hike with wildflowers under 5 mi") or hit **surprise me**, see what
+  **hikers like you** also did, and follow **Trail ↔ Learn ↔ Journeys** cross-links. The ranger remembers your
+  trail preferences and saved / bucket-list / hiked trails.
 - **Journeys** (`/journeys`) — cross-park **thematic journeys** connected by a historical figure or a
-  shared topic, highlighted on the graph constellation, with a scrollytelling 3D tour.
+  shared topic, highlighted on the graph constellation, with a scrollytelling 3D tour. (This is the original
+  "Trails" theme feature, rebranded so `/trails` could mean real trails.)
 - **Chat** with the **ranger**, which recalls your preferences, recommends parks with reasons, builds
-  trips, finds places/people semantically (`find_place`/`find_person`), and respects how you travel —
-  remembering what you like across sessions.
+  trips, finds places/people semantically (`find_place`/`find_person`), finds real trails (`find_trails`,
+  `trail_vibe`, `build_loop`), and respects how you travel — remembering what you like across sessions.
 - **Plan for how *you* travel** — tell the ranger you use a wheelchair, travel in a 30-ft RV, need a
   specific amenity, hold an annual pass, or are going in September, and every later recommendation,
   itinerary, and cost honors it — with provenance ("has a wheelchair-accessible campground").
@@ -184,6 +191,14 @@ accessibility, news releases, and a `NEAR`/region graph (see [`docs/DECISIONS.md
 ADR-059). Self-guided audio + multimedia is opt-in behind `SYNC_MULTIMEDIA=1` (large, off by default).
 `pnpm sync:reset <resource>…` clears specific checkpoints to force a re-sync.
 
+**Real trails** are a separate ingest (ADR-066–073): `pnpm trails:sync` — or the slow sync with
+`SYNC_TRAILS=1` — pulls NPS Public Trails GIS into `:Trail` nodes, simplifies the geometry to **Vercel Blob**
+(`BLOB_READ_WRITE_TOKEN`; local `public/trails/` in dev), joins curated NPS hikes, and derives the
+loop-builder `CONNECTS` network. Add `SYNC_TRAIL_ELEVATION=1` (+ `ELEVATION_API_URL`) for elevation profiles,
+`EMBED_TRAILS=1` for trail vibe-search, and `ENRICH_OSM_TRAILS=1` for OSM-fill of NPS-empty parks. On Vercel
+the Blob token is **required** for trails (the local-file fallback is dev-only) — see
+[`docs/DEPLOY-MAP-DATA.md`](docs/DEPLOY-MAP-DATA.md).
+
 > `pnpm dev` auto-starts the Eve agent behind the app via Eve's `withEve`. To run the app **without** the
 > agent (just Explore / Map / Plan UI): `DISABLE_EVE=1 pnpm dev`.
 
@@ -235,6 +250,11 @@ step (those are for standalone agent projects). The build command stays `next bu
      deployments through `vercelOidc()` (`agent/channels/eve.ts`). **Do not set `EVE_BASE_URL`.**
    - `CRON_SECRET` — Vercel sends it as the `Authorization: Bearer` on cron calls; `/api/sync` checks it.
    - `NEXT_PUBLIC_MAP_TILES_URL` — the Blob URL from the next section.
+   - `BLOB_READ_WRITE_TOKEN` — a **Vercel Blob** store, required for the basemap **and** trail geometry
+     (both are too large for / written outside the deploy bundle; the local-file fallback can't run on
+     Vercel's read-only FS). Trail flags for the cron sync: `SYNC_TRAILS=1` (+ optional
+     `SYNC_TRAIL_ELEVATION=1`/`ELEVATION_API_URL`, `EMBED_TRAILS=1`, `ENRICH_OSM_TRAILS=1`). See
+     [`docs/DEPLOY-MAP-DATA.md`](docs/DEPLOY-MAP-DATA.md).
 3. **Deploy.** The scheduled jobs in [`vercel.json`](vercel.json) start automatically: a once-daily
    full sync (`/api/sync?tier=all` — corpus + alerts/events + data sources) and a once-daily memory
    reconcile. This fits **Vercel Hobby** (≤2 cron jobs, daily). On Pro you can split into more frequent
@@ -243,7 +263,9 @@ step (those are for standalone agent projects). The build command stays `next bu
 4. **One-time data setup** against the production Neo4j (run locally with prod `NEO4J_*` in
    `.env.local`): `pnpm db:migrate` · `pnpm ontology:setup` · `pnpm nams:spike`, then seed the graph
    (`curl -H "Authorization: Bearer $CRON_SECRET" "https://<your-domain>/api/sync?tier=all"` and
-   `pnpm datasources:sync`).
+   `pnpm datasources:sync`). For **real trails**, run `SYNC_TRAIL_ELEVATION=1 EMBED_TRAILS=1 pnpm trails:sync`
+   with `BLOB_READ_WRITE_TOKEN` set so `:Park.trailsGeoUrl` stores Blob URLs (not local paths) — full
+   handling of the trail GeoJSON + DEM on Vercel is in [`docs/DEPLOY-MAP-DATA.md`](docs/DEPLOY-MAP-DATA.md).
 
 ### Host the basemap on Vercel Blob (CDN)
 
@@ -281,7 +303,7 @@ lib/         adapters + domain logic — memory (NAMS), neo4j, bridges, recommen
 theme/       Chakra design system — tokens, semantic tokens, recipes, textures (brand: pine/trail/sand)
 components/  UI — chat, plan, graph (NVL), map, park, memory, ui/ (primitives)
 db/          Cypher migrations + migrate/verify runners
-scripts/     seed, ontology setup, basemap build, data-source sync, the NAMS spike
+scripts/     seed, ontology setup, basemap build + Blob upload, data-source + trail sync, the NAMS spike
 evals/       Eve eval suite
 tests/       integration (real Neo4j, gated) + e2e (Playwright)
 ```
