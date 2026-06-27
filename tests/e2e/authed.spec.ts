@@ -30,8 +30,10 @@ test('build a trip: create → add stops → drive segment → day plan → aler
   await page.getByText('Glacier National Park').click();
   await expect(page.getByText(/Glacier/)).toBeVisible();
 
-  // Drive segment between the two stops (great-circle fallback if ORS absent).
-  await expect(page.getByText(/mi ·/)).toBeVisible();
+  // Drive segment between the two stops (great-circle fallback if ORS absent). Match the drive line
+  // specifically (it shows "· N min") — the trip-metrics badge also renders "mi · N h", so a bare /mi ·/
+  // is ambiguous under strict mode.
+  await expect(page.getByText(/mi · \d+ min/)).toBeVisible();
 
   // Day-by-day structuring (C4).
   await page.getByRole('button', { name: 'Suggest day plan' }).click();
