@@ -1,6 +1,7 @@
 import { getUserId } from '../../../../../lib/session';
-import { getTrip } from '../../../../../lib/trips';
+import { getTrip, tripHikeRefs } from '../../../../../lib/trips';
 import { tripToGpx } from '../../../../../lib/trip-gpx';
+import { tripHikeTracks } from '../../../../../lib/trail-tracks';
 
 /** GPX export for a trip (ADR-048) — waypoints + a connector track for Gaia/CalTopo/etc. */
 export const dynamic = 'force-dynamic';
@@ -13,7 +14,10 @@ export async function GET(req: Request, { params }: Ctx) {
   const trip = await getTrip(userId, id);
   if (!trip) return Response.json({ error: 'not found' }, { status: 404 });
 
-  const gpx = tripToGpx(trip, { time: new Date().toISOString() });
+  // Real trail polylines for any hikes attached to the trip's stops (ADR-071) — geometry from Blob.
+  const refs = await tripHikeRefs(userId, id);
+  const hikeTracks = refs.length ? await tripHikeTracks(refs) : [];
+  const gpx = tripToGpx(trip, { time: new Date().toISOString(), hikeTracks });
   return new Response(gpx, {
     headers: {
       'content-type': 'application/gpx+xml; charset=utf-8',

@@ -228,6 +228,30 @@ export function contextToNvl(memory: UserMemory): { nodes: NvlNode[]; rels: NvlR
     addNode(id, `${memory.availability.start ?? '…'} – ${memory.availability.end ?? '…'}`);
     addEdge(id, 'AVAILABLE');
   }
+  const tp = memory.trailPreferences;
+  if (tp.difficulty || tp.maxMiles != null || tp.maxGainFt != null || tp.avoidExposure || tp.dogsRequired) {
+    const parts = [
+      tp.difficulty,
+      tp.maxMiles != null ? `≤ ${tp.maxMiles}mi` : null,
+      tp.maxGainFt != null ? `≤ ${tp.maxGainFt}ft` : null,
+      tp.avoidExposure ? 'no exposure' : null,
+      tp.dogsRequired ? 'dog-friendly' : null,
+    ].filter(Boolean);
+    const id = `${CONTEXT_PREFIX}TrailPrefs:trail`;
+    addNode(id, parts.join(' · ') || 'trail prefs');
+    addEdge(id, 'PREFERS_TRAIL');
+  }
+  for (const [list, rel] of [
+    [memory.trailHistory.saved, 'SAVED'],
+    [memory.trailHistory.wishlisted, 'WISHLISTED'],
+    [memory.trailHistory.done, 'DID'],
+  ] as const) {
+    for (const t of list) {
+      const id = `${CONTEXT_PREFIX}Trail:${t.id}`;
+      addNode(id, t.name, 11);
+      addEdge(id, rel);
+    }
+  }
   return { nodes, rels };
 }
 

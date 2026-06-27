@@ -32,6 +32,18 @@ describeIntegration('Trail finder (Neo4j)', () => {
     expect(codes(await searchTrails({ maxGainFt: 500 }))).toEqual(['nps:yell:storm-point-trail']);
   });
 
+  it('maxDifficulty is a CEILING (this band or easier), unlike exact difficulty (ADR-071)', async () => {
+    // easy ceiling == only easy trails (here, the same single easy trail).
+    expect(codes(await searchTrails({ maxDifficulty: 'easy' }))).toEqual(['nps:yell:storm-point-trail']);
+    // moderate ceiling includes easy + moderate but NOT the strenuous trails.
+    const upToModerate = codes(await searchTrails({ maxDifficulty: 'moderate' }));
+    expect(upToModerate).toContain('nps:yell:storm-point-trail'); // easy
+    expect(upToModerate).not.toContain('nps:grca:bright-angel-trail'); // strenuous
+    expect(upToModerate).not.toContain('nps:zion:angels-landing-trail'); // strenuous
+    // strenuous ceiling admits everything (all 6 seeded trails are ranked).
+    expect((await searchTrails({ maxDifficulty: 'strenuous' })).total).toBe(6);
+  });
+
   it('filters by park, allowed use, route type, and permit', async () => {
     expect(codes(await searchTrails({ parkCode: 'grca' }))).toEqual([
       'nps:grca:bright-angel-trail',

@@ -7,9 +7,10 @@ type Trip = NonNullable<Awaited<ReturnType<typeof getTrip>>>;
  * Adapt a hydrated trip (the reified :Stop model, ADR-003) into GPX (ADR-048). Mirrors lib/trip-ics.ts:
  * a type-only `getTrip` import (no circular value import). Located stops only, in order; one connector
  * track of the stop coordinates. The `:DRIVE_TO` edge caches distance/minutes only (no geometry), so the
- * track is a straight connector — labeled as such, never faked into road geometry.
+ * connector track is a straight line — labeled as such, never faked into road geometry. `opts.hikeTracks`
+ * (ADR-071) carries the REAL trail polylines for hikes attached to the trip's stops, read from Blob.
  */
-export function tripToGpx(trip: Trip, opts: { time: string }): string {
+export function tripToGpx(trip: Trip, opts: { time: string; hikeTracks?: GpxTrackSeg[] }): string {
   const stops = (trip.stops ?? []).filter(
     (s): s is NonNullable<typeof s> => !!s && s.lat != null && s.lng != null,
   );
@@ -31,6 +32,7 @@ export function tripToGpx(trip: Trip, opts: { time: string }): string {
 
   const tracks: GpxTrackSeg[] = [
     { name: `${trip.name ?? 'TrailGraph Trip'} route`, points: stops.map((s) => ({ lat: s.lat as number, lon: s.lng as number })) },
+    ...(opts.hikeTracks ?? []),
   ];
 
   return generateGPX(

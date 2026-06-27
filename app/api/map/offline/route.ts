@@ -1,6 +1,8 @@
 import JSZip from 'jszip';
 import { areaBrief, areaParksGeoJSON, areaPoisGeoJSON, parseAreaBox, parseAreaLayers } from '../../../../lib/area-pack';
 import { areaFieldHtml } from '../../../../lib/area-field-html';
+import { trailGeoUrlsForParks } from '../../../../lib/queries';
+import { readParkTrails } from '../../../../lib/blob-trails';
 import { rateLimit, rlIp, clientIp } from '../../../../lib/rate-limit';
 
 /**
@@ -29,6 +31,20 @@ export async function GET(req: Request) {
   zip.file('pois.geojson', JSON.stringify(areaPoisGeoJSON(brief), null, 2));
   zip.file('area.json', JSON.stringify({ box: brief.box, layers: brief.layers, capped: brief.capped, parks: brief.parks.length, pois: brief.pois.length }, null, 2));
   for (const b of brief.boundaries) zip.file(`boundaries/${b.parkCode}.geojson`, JSON.stringify(b.geojson));
+
+  // Trail geometry per park (ADR-071) — only when the trails layer is on. Each park's FeatureCollection
+  // carries the trail lines AND the embedded elevation profiles, so offline hikers get both. Geometry is
+  // read from Blob (`:Park.trailsGeoUrl`); parks without synced trails are simply absent.
+  if (brief.layers.includes('trails')) {
+    const codes = brief.parks.map((p) => p.parkCode).filter((c): c is string => !!c);
+    const urls = await trailGeoUrlsForParks(codes);
+    const fcs = await Promise.all(
+      urls.map(async ({ parkCode, geoUrl }) => ({ parkCode, fc: await readParkTrails(parkCode, geoUrl) })),
+    );
+    for (const { parkCode, fc } of fcs) {
+      if (fc) zip.file(`trails/${parkCode}.geojson`, JSON.stringify(fc));
+    }
+  }
 
   const blob = await zip.generateAsync({ type: 'arraybuffer' });
   return new Response(blob, {

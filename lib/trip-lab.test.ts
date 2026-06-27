@@ -51,6 +51,7 @@ describe('tripBriefHtml (ADR-057)', () => {
         visitorCenters: ['Bryce Canyon VC'],
         campgrounds: [{ name: 'North Campground', reservationUrl: null }],
         driveToNext: { miles: 72, minutes: 95 },
+        hikes: [{ name: 'Navajo Loop', lengthMiles: 1.3, estTimeHrs: 1, difficulty: 'moderate', permitRequired: false }],
       },
     ],
   };
@@ -65,6 +66,8 @@ describe('tripBriefHtml (ADR-057)', () => {
     expect(html).toContain('Rim Trail closed'); // gate/closure note
     expect(html).toContain('North Campground');
     expect(html).toContain('72 mi · 95 min'); // drive to next
+    expect(html).toContain('Navajo Loop'); // hike attached to the stop (ADR-071)
+    expect(html).toContain('1.3 mi · ~1 hr · moderate'); // hike stats
     expect(html).toContain('not an official safety source'); // honesty footer
   });
 

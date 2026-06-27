@@ -16,6 +16,9 @@ export function renderMemoryBlock(m: UserMemory): string {
   const constraints = summarizeConstraints(m.travel);
   if (constraints) lines.push(`- Travel constraints: ${constraints}`);
 
+  const trailPrefs = summarizeTrailPreferences(m.trailPreferences);
+  if (trailPrefs) lines.push(`- Trail preferences: ${trailPrefs}`);
+
   const passes = m.passes.map((p) => p.name).filter(Boolean).sort();
   const availability = summarizeAvailability(m.availability);
   if (passes.length || availability) {
@@ -34,6 +37,22 @@ export function renderMemoryBlock(m: UserMemory): string {
 
   const trips = m.planned.map((t) => t.name).filter(Boolean).sort();
   if (trips.length) lines.push(`- Saved trips: ${trips.join(', ')}`);
+
+  // Dedupe by name: a trail can carry BOTH a SAVED and a WISHLISTED edge (independent rel types), so the
+  // merge would otherwise render it twice and burn a cap slot.
+  const savedTrails = [
+    ...new Set([...m.trailHistory.saved, ...m.trailHistory.wishlisted].map((t) => t.name).filter(Boolean)),
+  ]
+    .sort()
+    .slice(0, 6);
+  if (savedTrails.length) lines.push(`- Saved / bucket-list trails: ${savedTrails.join(', ')}`);
+
+  const doneTrails = m.trailHistory.done
+    .map((t) => t.name)
+    .filter(Boolean)
+    .sort()
+    .slice(0, 6);
+  if (doneTrails.length) lines.push(`- Trails already hiked: ${doneTrails.join(', ')}`);
 
   if (!lines.length) return '';
 
@@ -54,6 +73,18 @@ function summarizeConstraints(t: UserMemory['travel']): string {
   if (t.rvMaxLengthFt) parts.push(`RV ≤ ${t.rvMaxLengthFt} ft`);
   const amenities = [...t.requiredAmenities].filter(Boolean).sort();
   if (amenities.length) parts.push(`required amenities: ${amenities.join(', ')}`);
+  return parts.join(' · ');
+}
+
+function summarizeTrailPreferences(tp: UserMemory['trailPreferences']): string {
+  const parts: string[] = [];
+  if (tp.difficulty) parts.push(`${tp.difficulty} or easier`);
+  if (tp.maxMiles != null) parts.push(`≤ ${tp.maxMiles} mi`);
+  // Raw number (NOT toLocaleString) — this block must be byte-identical for identical memory, and a
+  // no-locale toLocaleString() formats per the runtime's ambient locale (3000 → '3,000'/'3.000'/'3 000').
+  if (tp.maxGainFt != null) parts.push(`≤ ${tp.maxGainFt} ft gain`);
+  if (tp.avoidExposure) parts.push('no exposure');
+  if (tp.dogsRequired) parts.push('dog-friendly');
   return parts.join(' · ');
 }
 

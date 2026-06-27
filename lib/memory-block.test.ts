@@ -16,6 +16,8 @@ function mem(over: Partial<UserMemory> = {}): UserMemory {
     passes: [],
     stamps: [],
     availability: { start: null, end: null },
+    trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
+    trailHistory: { saved: [], wishlisted: [], done: [] },
     ...over,
   };
 }
@@ -113,6 +115,45 @@ describe('renderMemoryBlock', () => {
     const out = renderMemoryBlock(mem({ passes: [{ id: 'atb', name: 'America the Beautiful' }] }));
     expect(out).toContain('Passes held: America the Beautiful');
     expect(out).not.toContain('availability:');
+  });
+
+  it('renders trail preferences and saved / hiked trails (sorted, capped) once each', () => {
+    const out = renderMemoryBlock(
+      mem({
+        trailPreferences: { maxMiles: 6, maxGainFt: 2500, difficulty: 'moderate', avoidExposure: true, dogsRequired: false },
+        trailHistory: {
+          saved: [{ id: 't2', name: 'Bright Angel' }],
+          wishlisted: [{ id: 't1', name: 'Angels Landing' }],
+          done: [{ id: 't3', name: 'South Kaibab' }],
+        },
+      }),
+    );
+    // preference summary, ordered difficulty → miles → gain → exposure. Gain is raw (no locale grouping)
+    // so the cache-stable block is byte-identical across runtime locales.
+    expect(out).toContain('- Trail preferences: moderate or easier · ≤ 6 mi · ≤ 2500 ft gain · no exposure');
+    // saved + wishlisted merged and sorted; done is its own line
+    expect(out).toContain('- Saved / bucket-list trails: Angels Landing, Bright Angel');
+    expect(out).toContain('- Trails already hiked: South Kaibab');
+  });
+
+  it('dedupes a trail that is both saved and wishlisted (no double-render, no wasted cap slot)', () => {
+    const out = renderMemoryBlock(
+      mem({
+        trailHistory: {
+          saved: [{ id: 't1', name: 'Angels Landing' }],
+          wishlisted: [{ id: 't1', name: 'Angels Landing' }, { id: 't2', name: 'Bright Angel' }],
+          done: [],
+        },
+      }),
+    );
+    const line = out.split('\n').find((l) => l.startsWith('- Saved / bucket-list trails:')) ?? '';
+    expect(line).toBe('- Saved / bucket-list trails: Angels Landing, Bright Angel'); // each once, sorted
+  });
+
+  it('omits trail lines entirely when there is no trail memory', () => {
+    const out = renderMemoryBlock(mem({ preferences: [{ kind: 'topic', name: 'lakes', category: null, value: null, feedback: null, weight: null }] }));
+    expect(out).not.toContain('Trail preferences:');
+    expect(out).not.toContain('bucket-list trails');
   });
 
   it('sorts passes so identical holdings render identically (cache stability)', () => {

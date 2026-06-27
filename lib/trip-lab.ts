@@ -196,6 +196,8 @@ export interface BriefStop {
   visitorCenters: string[];
   campgrounds: { name: string; reservationUrl: string | null }[];
   driveToNext: { miles: number; minutes: number } | null;
+  // Hikes attached to this stop (ADR-071) — the "what to do here" the field brief needs at the trailhead.
+  hikes: { name: string; lengthMiles: number | null; estTimeHrs: number | null; difficulty: string | null; permitRequired: boolean }[];
 }
 
 export interface TripBrief {
@@ -230,6 +232,13 @@ export async function tripBrief(userId: string, tripId: string): Promise<TripBri
       visitorCenters: (detail?.visitorCenters ?? []).map((v) => v.name),
       campgrounds: (detail?.campgrounds ?? []).map((c) => ({ name: c.name, reservationUrl: c.reservationUrl })),
       driveToNext: s.driveTo ? { miles: Math.round(s.driveTo.miles), minutes: Math.round(s.driveTo.minutes) } : null,
+      hikes: (s.hikes ?? []).map((h) => ({
+        name: h.name,
+        lengthMiles: h.lengthMiles,
+        estTimeHrs: h.estTimeHrs,
+        difficulty: h.difficulty,
+        permitRequired: h.permitRequired,
+      })),
     });
   }
   return { tripId: trip.id, name: trip.name, startDate: trip.startDate, endDate: trip.endDate, stops: out };

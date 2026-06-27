@@ -1238,11 +1238,15 @@ const TRAIL_SUMMARY_RETURN = `
  * length/gain/difficulty/route/use/dogs/accessibility/permit/surface/activity/scenery. Returns paged
  * summaries + an accurate total. `q` uses the `trail_fulltext` index over the trail name.
  */
+/** Difficulty bands ranked low→high so a "maxDifficulty" ceiling ("moderate or easier") can be applied. */
+const DIFFICULTY_RANK: Record<string, number> = { easy: 1, moderate: 2, strenuous: 3 };
+
 export async function searchTrails(opts: {
   q?: string;
   parkCode?: string;
   region?: string;
-  difficulty?: string;
+  difficulty?: string; // EXACT match (a finder-facet pick)
+  maxDifficulty?: string; // CEILING — this band or easier (a saved-preference ceiling); excludes unranked
   minMiles?: number;
   maxMiles?: number;
   maxGainFt?: number;
@@ -1264,6 +1268,11 @@ export async function searchTrails(opts: {
   if (o.parkCode) where.push('t.parkCode = $parkCode');
   if (o.region) where.push('(p)-[:IN_REGION]->(:Region {name:$region})');
   if (o.difficulty) where.push('t.difficulty = $difficulty');
+  if (o.maxDifficulty && DIFFICULTY_RANK[o.maxDifficulty]) {
+    // Ceiling: keep trails whose band is this hard or easier; trails with an unknown band are excluded
+    // (we can't guarantee they're within the ceiling).
+    where.push(`(CASE t.difficulty WHEN 'easy' THEN 1 WHEN 'moderate' THEN 2 WHEN 'strenuous' THEN 3 ELSE 99 END) <= $maxDifficultyRank`);
+  }
   if (o.minMiles != null) where.push('t.lengthMiles >= $minMiles');
   if (o.maxMiles != null) where.push('t.lengthMiles <= $maxMiles');
   if (o.maxGainFt != null) where.push('coalesce(t.elevationGainFt, 0) <= $maxGainFt');
@@ -1289,6 +1298,7 @@ export async function searchTrails(opts: {
     parkCode: o.parkCode ?? null,
     region: o.region ?? null,
     difficulty: o.difficulty ?? null,
+    maxDifficultyRank: o.maxDifficulty ? DIFFICULTY_RANK[o.maxDifficulty] ?? null : null,
     minMiles: o.minMiles ?? null,
     maxMiles: o.maxMiles ?? null,
     maxGainFt: o.maxGainFt ?? null,
@@ -1307,6 +1317,17 @@ export async function searchTrails(opts: {
   );
   const totalRows = await readGraph<{ total: number }>(`${source} RETURN count(t) AS total`, params);
   return { items, total: totalRows[0]?.total ?? items.length };
+}
+
+/** Blob geo URLs for a set of parks (ADR-067/071) — lets the offline pack read each park's trail
+ *  FeatureCollection (lines + embedded elevation profiles) without going through the per-park serve route. */
+export async function trailGeoUrlsForParks(codes: string[]): Promise<{ parkCode: string; geoUrl: string | null }[]> {
+  if (!codes.length) return [];
+  return readGraph<{ parkCode: string; geoUrl: string | null }>(
+    `MATCH (p:Park) WHERE p.parkCode IN $codes AND p.trailsGeoUrl IS NOT NULL
+     RETURN p.parkCode AS parkCode, p.trailsGeoUrl AS geoUrl`,
+    { codes },
+  );
 }
 
 /** Filter-dropdown options for the trail finder (parks with trails + distinct surfaces/route types). */

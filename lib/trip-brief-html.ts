@@ -27,11 +27,28 @@ export function tripBriefHtml(brief: TripBrief): string {
       const drive = s.driveToNext ? `<p class="drive">↓ ${s.driveToNext.miles} mi · ${s.driveToNext.minutes} min to next stop</p>` : '';
       const dir = s.directionsUrl ? `<p><span class="k">Directions:</span> ${esc(s.directionsUrl)}</p>` : '';
       const fee = s.entranceFee != null ? `$${s.entranceFee} vehicle entrance` : 'fee n/a';
+      // Hikes attached to this stop (ADR-071) — length/time/difficulty are GIS estimates; verify at the trailhead.
+      const hikes = s.hikes.length
+        ? `<h3>Hikes</h3><ul class="hikes">${s.hikes
+            .map((h) => {
+              const stats = [
+                h.lengthMiles != null ? `${h.lengthMiles} mi` : null,
+                h.estTimeHrs != null ? `~${h.estTimeHrs} hr` : null,
+                h.difficulty,
+                h.permitRequired ? 'permit required' : null,
+              ]
+                .filter(Boolean)
+                .join(' · ');
+              return `<li>${esc(h.name)}${stats ? ` <span class="muted">— ${esc(stats)}</span>` : ''}</li>`;
+            })
+            .join('')}</ul>`
+        : '';
       return `
       <section class="stop">
         <h2><span class="num">${num}</span> ${esc(s.name)}${s.designation ? ` <span class="muted">· ${esc(s.designation)}</span>` : ''}</h2>
         <p><span class="k">Coordinates:</span> ${coords(s.lat, s.lng)} &nbsp; <span class="k">·</span> ${esc(fee)}</p>
         ${dir}${vcs}${cgs}
+        ${hikes}
         <h3>Gate &amp; closure notes</h3>
         ${alerts}
         ${drive}
