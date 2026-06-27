@@ -9,14 +9,14 @@ import { test, expect } from '@playwright/test';
  * production build (`next build && next start`). Public routes only (no auth needed).
  */
 // `/plan` redirects anonymous users to `/signin` (ADR-038), so it also exercises the sign-in page.
-// `/trails` carries the new client ThemeChips; every route exercises the mounted-gated nav account
+// `/journeys` carries the client ThemeChips; `/trails` is the real-trails index; every route exercises the mounted-gated nav account
 // control (the highest-risk new hydration surface). `/parks/yell` (seeded) exercises the new motion
 // client islands — the ParkHero (layoutId + scale-settle) and the global MotionConfig (ADR-044) — plus
 // the astro "Tonight" stat; `/explore` now carries the RankPanel sliders (ADR-046).
 // `/learn` + `/learn/lesson-yell-geology` are the public Ranger School catalog + syllabus (seeded course);
 // `/learn/topic/Geology` is the public cross-park trail (design §13); `/learn/cert/<slug>` is the public
 // certificate share page (a seeded fixture).
-const ROUTES = ['/', '/explore', '/plan', '/me', '/map', '/graph', '/trails', '/learn', '/learn/lesson-yell-geology', '/learn/topic/Geology', '/learn/cert/test0123456789abcd', '/signin', '/parks/yell'];
+const ROUTES = ['/', '/explore', '/plan', '/me', '/map', '/graph', '/trails', '/trails/nps%3Ayell%3Astorm-point-trail', '/journeys', '/learn', '/learn/lesson-yell-geology', '/learn/topic/Geology', '/learn/cert/test0123456789abcd', '/signin', '/parks/yell'];
 const HYDRATION_RX = /hydrat|did not match|text content does not match|tree hydrated|css-\w+/i;
 
 for (const route of ROUTES) {

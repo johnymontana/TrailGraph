@@ -67,6 +67,16 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },
+  // ADR-070: the thematic cross-park feature moved to /journeys; /trails is now real hikeable trails.
+  // Only the old thematic URLs (which carried ?person=/?topic= or /tour) redirect — a bare /trails renders
+  // the new real-trails index. Query is preserved via the named has-group.
+  async redirects() {
+    return [
+      { source: '/trails/tour', destination: '/journeys/tour', permanent: true },
+      { source: '/trails', has: [{ type: 'query', key: 'person' }], destination: '/journeys?person=:person', permanent: true },
+      { source: '/trails', has: [{ type: 'query', key: 'topic' }], destination: '/journeys?topic=:topic', permanent: true },
+    ];
+  },
   // Optimize/resize NPS images through next/image instead of hotlinking full-res originals (§8).
   images: {
     remotePatterns: [

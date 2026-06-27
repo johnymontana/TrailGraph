@@ -12,7 +12,7 @@ import { rankParks } from '../../lib/recommend';
  * live panel (rankParks) always agree on WHICH parks qualify — they may differ only in ordering.
  *
  * Seed facts: yell∈{WY,MT,ID} Hiking/Volcanoes; grca∈{AZ} Astronomy/Hiking, dark-sky; glac∈{MT}
- * Astronomy/Hiking/Lakes, dark-sky. All three are 'National Park'.
+ * Astronomy/Hiking/Lakes, dark-sky. glac/grca/yell + zion (added by the trail seed) are all 'National Park'.
  */
 const sortCodes = (items: { parkCode: string }[]) => items.map((p) => p.parkCode).sort();
 
@@ -41,8 +41,8 @@ describeIntegration('explore faceted search + live re-rank (Neo4j)', () => {
     it('darkSky → grca + glac (certified)', async () => {
       expect(sortCodes((await searchParks({ darkSky: true })).items)).toEqual(['glac', 'grca']);
     });
-    it('designation: National Park → all three', async () => {
-      expect(sortCodes((await searchParks({ designation: 'National Park' })).items)).toEqual(['glac', 'grca', 'yell']);
+    it('designation: National Park → all four', async () => {
+      expect(sortCodes((await searchParks({ designation: 'National Park' })).items)).toEqual(['glac', 'grca', 'yell', 'zion']);
     });
     it('q: "glacier" (fulltext) → glac', async () => {
       expect(sortCodes((await searchParks({ q: 'glacier' })).items)).toEqual(['glac']);
@@ -62,7 +62,7 @@ describeIntegration('explore faceted search + live re-rank (Neo4j)', () => {
       expect(p1.items).toHaveLength(1);
       expect(p2.items).toHaveLength(1);
       expect(p1.items[0].parkCode).not.toBe(p2.items[0].parkCode); // distinct page
-      expect(p1.total).toBe(3);
+      expect(p1.total).toBe(4); // glac/grca/yell + zion (added by the trail seed, ADR-070)
     });
   });
 
@@ -77,7 +77,7 @@ describeIntegration('explore faceted search + live re-rank (Neo4j)', () => {
       expect(sortCodes((await rankParks({ activity: 'Astronomy' })).items)).toEqual(['glac', 'grca']);
       expect(sortCodes((await rankParks({ topic: 'Lakes' })).items)).toEqual(['glac']);
       expect(sortCodes((await rankParks({ darkSky: true })).items)).toEqual(['glac', 'grca']);
-      expect(sortCodes((await rankParks({ designation: 'National Park' })).items)).toEqual(['glac', 'grca', 'yell']);
+      expect(sortCodes((await rankParks({ designation: 'National Park' })).items)).toEqual(['glac', 'grca', 'yell', 'zion']);
       expect(sortCodes((await rankParks({ q: 'glacier' })).items)).toEqual(['glac']);
     });
     it('facets stack with the constraint sliders (MT + Astronomy + bortle ≤ 3 → glac)', async () => {

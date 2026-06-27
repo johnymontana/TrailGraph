@@ -16,7 +16,7 @@ const FOOTER_LINKS: { heading: string; links: { href: string; label: string }[] 
     heading: 'Plan',
     links: [
       { href: '/plan', label: 'Plan with the ranger' },
-      { href: '/trails', label: 'Thematic trails' },
+      { href: '/journeys', label: 'Journeys' },
       { href: '/me', label: 'Your memory' },
     ],
   },

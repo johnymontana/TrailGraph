@@ -242,6 +242,50 @@ export async function seedTestData(): Promise<void> {
     MERGE (lp2)-[:ABOUT]->(grca)
     MERGE (lp2)-[:RELATES_TO_TOPIC]->(geol)
   `);
+
+  // ── Real hiking trails (ADR-066/F-trails) — a small :Trail fixture set across grca/yell/glac/zion
+  // (incl. Angels Landing as a permit trail) so the /trails index, parksWithTrails, searchTrails, and
+  // trip INCLUDES_TRAIL have data without a live GIS sync. zion is added here as a 4th park.
+  await writeGraph(
+    `
+    MERGE (hike:Activity {id:'act-hike'}) SET hike.name='Hiking'
+    MERGE (ut:State {code:'UT'}) SET ut.name='Utah'
+    MERGE (zion:Park {parkCode:'zion'})
+      SET zion.name='Zion', zion.fullName='Zion National Park', zion.designation='National Park',
+          zion.description='Towering sandstone cliffs and the Virgin River narrows.',
+          zion.states='UT', zion.url='https://www.nps.gov/zion', zion.feeFree=false,
+          zion.images=[], zion.imagesFull='[]', zion.entranceFees='[]', zion.operatingHours='[]', zion.contacts='{}',
+          zion.location=point({latitude:37.3, longitude:-113.0})
+    MERGE (zion)-[:LOCATED_IN]->(ut)
+    MERGE (zion)-[:OFFERS]->(hike)
+    WITH hike
+    UNWIND $trails AS row
+    MATCH (p:Park {parkCode: row.parkCode})
+    MERGE (t:Trail {id: row.id})
+      SET t.name=row.name, t.parkCode=row.parkCode, t.source='nps',
+          t.lengthMiles=row.lengthMiles, t.routeType=row.routeType, t.difficulty=row.difficulty,
+          t.difficultyRating=row.difficultyRating, t.trailClass=row.trailClass, t.estTimeHrs=row.estTimeHrs,
+          t.elevationGainFt=row.elevationGainFt, t.elevationLossFt=row.elevationLossFt,
+          t.minElevationFt=row.minElevationFt, t.maxElevationFt=row.maxElevationFt,
+          t.allowedUses=row.allowedUses, t.surface=row.surface, t.wheelchairAccessible=row.wheelchairAccessible,
+          t.permitRequired=row.permitRequired, t.dogsAllowed=false, t.status='Existing',
+          t.segments=row.segments, t.dataConfidence='high', t.bbox=row.bbox,
+          t.trailheadPoint=point({latitude:row.thLat, longitude:row.thLng}),
+          t.geometryRef=row.parkCode + '#' + row.id, t.lastSyncedAt=datetime()
+    MERGE (t)-[:IN_PARK]->(p)
+    MERGE (t)-[:SUPPORTS]->(hike)
+    `,
+    {
+      trails: [
+        { id: 'nps:grca:bright-angel-trail', parkCode: 'grca', name: 'Bright Angel Trail', lengthMiles: 9.5, routeType: 'point-to-point', difficulty: 'strenuous', difficultyRating: 288.5, trailClass: 3, estTimeHrs: 5.4, elevationGainFt: 4380, elevationLossFt: 4380, minElevationFt: 2480, maxElevationFt: 6860, allowedUses: ['hike'], surface: 'Dirt', wheelchairAccessible: false, permitRequired: false, segments: 14, bbox: [-112.15, 36.05, -112.09, 36.11], thLat: 36.0573, thLng: -112.1436 },
+        { id: 'nps:grca:south-kaibab-trail', parkCode: 'grca', name: 'South Kaibab Trail', lengthMiles: 7.1, routeType: 'point-to-point', difficulty: 'strenuous', difficultyRating: 260.5, trailClass: 3, estTimeHrs: 4.8, elevationGainFt: 4780, elevationLossFt: 4780, minElevationFt: 2440, maxElevationFt: 7260, allowedUses: ['hike', 'horse'], surface: 'Dirt', wheelchairAccessible: false, permitRequired: false, segments: 9, bbox: [-112.09, 36.05, -112.05, 36.12], thLat: 36.0526, thLng: -112.0836 },
+        { id: 'nps:yell:storm-point-trail', parkCode: 'yell', name: 'Storm Point Trail', lengthMiles: 2.3, routeType: 'loop', difficulty: 'easy', difficultyRating: 21.4, trailClass: 4, estTimeHrs: 0.8, elevationGainFt: 100, elevationLossFt: 100, minElevationFt: 7730, maxElevationFt: 7830, allowedUses: ['hike'], surface: 'Dirt', wheelchairAccessible: false, permitRequired: false, segments: 3, bbox: [-110.35, 44.54, -110.31, 44.57], thLat: 44.5547, thLng: -110.3289 },
+        { id: 'nps:glac:avalanche-lake-trail', parkCode: 'glac', name: 'Avalanche Lake Trail', lengthMiles: 5.9, routeType: 'point-to-point', difficulty: 'moderate', difficultyRating: 92.8, trailClass: 3, estTimeHrs: 2.3, elevationGainFt: 730, elevationLossFt: 730, minElevationFt: 3500, maxElevationFt: 4230, allowedUses: ['hike'], surface: 'Dirt', wheelchairAccessible: false, permitRequired: false, segments: 5, bbox: [-113.84, 48.66, -113.80, 48.69], thLat: 48.6797, thLng: -113.8189 },
+        { id: 'nps:glac:highline-trail', parkCode: 'glac', name: 'Highline Trail', lengthMiles: 11.8, routeType: 'point-to-point', difficulty: 'strenuous', difficultyRating: 261.6, trailClass: 3, estTimeHrs: 5.4, elevationGainFt: 2900, elevationLossFt: 3400, minElevationFt: 4900, maxElevationFt: 7280, allowedUses: ['hike'], surface: 'Dirt', wheelchairAccessible: false, permitRequired: false, segments: 18, bbox: [-113.80, 48.68, -113.70, 48.78], thLat: 48.6967, thLng: -113.7186 },
+        { id: 'nps:zion:angels-landing-trail', parkCode: 'zion', name: 'Angels Landing Trail', lengthMiles: 5.4, routeType: 'point-to-point', difficulty: 'strenuous', difficultyRating: 127.3, trailClass: 2, estTimeHrs: 2.6, elevationGainFt: 1500, elevationLossFt: 1500, minElevationFt: 4300, maxElevationFt: 5790, allowedUses: ['hike'], surface: 'Paved/Rock', wheelchairAccessible: false, permitRequired: true, segments: 7, bbox: [-113.0, 37.26, -112.94, 37.28], thLat: 37.2592, thLng: -112.9510 },
+      ],
+    },
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

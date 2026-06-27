@@ -9,10 +9,11 @@ import {
   visitorCentersInBBox,
   thingsToDoInBBox,
   alertParksInBBox,
+  trailheadsInBBox,
   parksWithConditionFacts,
   parkCodesByFacet,
   parkEdgesInBBox,
-  thematicTrail,
+  journeyTrail,
   type BBox,
   type EdgeKind,
 } from '../../../lib/queries';
@@ -82,6 +83,8 @@ export async function GET(req: Request) {
             return Response.json({ items: await thingsToDoInBBox(box) });
           case 'alerts':
             return Response.json({ items: await alertParksInBBox(box) });
+          case 'trails':
+            return Response.json({ items: await trailheadsInBBox(box) });
           default:
             return Response.json({ parks: await parksInBBox(box) });
         }
@@ -92,7 +95,7 @@ export async function GET(req: Request) {
         const topic = url.searchParams.get('topic');
         const person = url.searchParams.get('person');
         if (topic || person) {
-          const trail = await thematicTrail({ topic: topic ?? undefined, person: person ?? undefined }, 40);
+          const trail = await journeyTrail({ topic: topic ?? undefined, person: person ?? undefined }, 40);
           const located = trail.filter((p) => p.lat != null && p.lng != null);
           const ordered = nearestNeighborOrder(located.map((p) => ({ id: p.parkCode, lat: p.lat as number, lng: p.lng as number })));
           const byCode = new Map(located.map((p) => [p.parkCode, p]));

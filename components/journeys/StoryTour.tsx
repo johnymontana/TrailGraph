@@ -166,7 +166,7 @@ export function StoryTour({ stops, theme, kind }: { stops: TourStop[]; theme: st
           <Text color="fg.muted" fontSize="sm" mb={4}>{stops.length} parks, one story — build it into a trip or see the full graph.</Text>
           <HStack gap={5}>
             <CLink asChild color="brand.fg" fontWeight="medium">
-              <NextLink href={`/trails?${kind}=${encodeURIComponent(theme)}`}>See all parks →</NextLink>
+              <NextLink href={`/journeys?${kind}=${encodeURIComponent(theme)}`}>See all parks →</NextLink>
             </CLink>
             <CLink asChild color="brand.fg" fontWeight="medium">
               <NextLink href="/plan">Plan a trip →</NextLink>

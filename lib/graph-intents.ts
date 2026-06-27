@@ -1,7 +1,7 @@
 import { readGraph } from './neo4j';
 import { embedQuery } from './embed-cache';
 import { nodeIdFor, type SeedNode, type SeedLink } from './graph-nvl';
-import { thematicTrail, similarParks, nearbyParks, searchParks } from './queries';
+import { journeyTrail, similarParks, nearbyParks, searchParks } from './queries';
 import { shortestPathBetween } from './graph-query';
 
 /**
@@ -85,7 +85,7 @@ const INTENTS: GraphIntent[] = [
     async run(params) {
       const person = String(params.person ?? '').trim();
       if (!person) return empty('Tell me a person to look up.');
-      const parks = await thematicTrail({ person }, 20);
+      const parks = await journeyTrail({ person }, 20);
       if (!parks.length) return empty(`No parks found connected to "${person}".`);
       const center = entityNode('Person', person, parks[0].via ?? person);
       return {
@@ -108,7 +108,7 @@ const INTENTS: GraphIntent[] = [
     async run(params) {
       const topic = String(params.topic ?? '').trim();
       if (!topic) return empty('Give me a topic.');
-      const parks = await thematicTrail({ topic }, 30);
+      const parks = await journeyTrail({ topic }, 30);
       if (!parks.length) return empty(`No parks found for the topic "${topic}".`);
       const center = entityNode('Topic', topic, topic);
       return {

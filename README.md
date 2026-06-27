@@ -100,7 +100,7 @@ A companion deep-dive on this integration is written up as a blog post [here](ht
   or by **live conditions** (weather + road events), so the map answers a question instead of plotting
   dots.
 - **See the graph on the map** — toggle **park-to-park edges** (the materialized `NEAR` proximity graph
-  plus shared-topic / shared-activity links) to trace thematic trails across the country, and flip on
+  plus shared-topic / shared-activity links) to trace journeys across the country, and flip on
   **"your map"** to light up the parks you've considered and the passport stamps you've collected.
 - **Ask the map** — a **ranger command bar** turns "dark-sky parks near Moab" into a focused, filtered
   view, and you can **build a trip right on the canvas**: click parks to add stops, watch live
@@ -108,15 +108,17 @@ A companion deep-dive on this integration is written up as a blog post [here](ht
 - **Take it into the field** — generate an **offline pack** (boundaries + POIs zipped for the area), a
   printable **field sheet**, or a **share-a-view** deep link that reopens the exact map someone else was
   looking at.
-- **Fly the parks in 3D** — with optional terrain enabled, trip routes and the `/trails` story tour
+- **Fly the parks in 3D** — with optional terrain enabled, trip routes and the `/journeys` story tour
   become cinematic **3D fly-throughs** (gracefully flat, pitched 2D when no elevation source is set).
 - **Plan** multi-park, multi-day trips with drive segments, day-by-day pacing, graph-aware route
   optimization, per-trip alert checks, **date-aware open/closed validation** (`check_open` flags a road
   or facility that's closed on your travel dates), a **real fees/passes budget** (per-vehicle/person/
   motorcycle entrance fees summed from NPS data, with the America-the-Beautiful break-even and fee-free-day
   nudges), shareable read-only links, and `.ics` export — or **seed a trip from an official NPS tour**.
-- **Trails** (`/trails`) — cross-park **thematic trails** connected by a historical figure or a shared
-  topic, highlighted on the graph constellation.
+- **Trails** (`/trails`) — real, hikeable **trails** by length, elevation, difficulty, dogs,
+  accessibility, and season (from NPS Public Trails GIS; elevation derived from a DEM).
+- **Journeys** (`/journeys`) — cross-park **thematic journeys** connected by a historical figure or a
+  shared topic, highlighted on the graph constellation, with a scrollytelling 3D tour.
 - **Chat** with the **ranger**, which recalls your preferences, recommends parks with reasons, builds
   trips, finds places/people semantically (`find_place`/`find_person`), and respects how you travel —
   remembering what you like across sessions.

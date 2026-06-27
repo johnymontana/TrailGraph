@@ -216,9 +216,9 @@ test('image-less park card shows the branded placeholder (ADR-039 #11)', async (
   await expect(page.getByText('🏞️ Grand Canyon National Park')).toBeVisible();
 });
 
-test('trails: theme chips render and a person trail shows the NVL mini-graph + parks (ADR-039 P1.5)', async ({ page }) => {
-  await page.goto('/trails');
-  // PageHeader h1 after the redesign ("Thematic trails" is now the eyebrow).
+test('journeys: theme chips render and a person journey shows the NVL mini-graph + parks (ADR-039 P1.5)', async ({ page }) => {
+  await page.goto('/journeys');
+  // PageHeader h1 ("Journeys" is the eyebrow).
   await expect(page.getByRole('heading', { name: 'Follow a story across the parks' })).toBeVisible();
   // Ferdinand Hayden is seeded across yell + glac (≥2 parks → a People chip).
   const chip = page.getByRole('link', { name: /Ferdinand Hayden/ });

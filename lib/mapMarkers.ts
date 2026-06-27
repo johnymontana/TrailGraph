@@ -21,6 +21,7 @@ export const MARKER_SVGS: Record<string, string> = {
   info: 'M12 2 a10 10 0 1 0 0 20 a10 10 0 1 0 0 -20 Z M11 6 H13 V9 H11 Z M11 10 H13 V17 H11 Z',
   star: 'M12 2 L15 9 L22 9 L16 14 L18 21 L12 17 L6 21 L8 14 L2 9 L9 9 Z',
   alert: 'M12 3 L22 20 H2 Z M11 9 H13 V14 H11 Z M11 16 H13 V18 H11 Z',
+  footprints: 'M8 5 a2 2.6 0 1 0 0.01 0 Z M8 10.6 a1.5 1.8 0 1 0 0.01 0 Z M16 9 a2 2.6 0 1 0 0.01 0 Z M16 14.6 a1.5 1.8 0 1 0 0.01 0 Z',
 };
 
 export const markerImageId = (shape: string): string => `mk-${shape}`;

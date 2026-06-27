@@ -129,6 +129,9 @@ export function MapExplorer({
   // Park boundary polygons (#2c): which parkCodes we've already fetched + the accumulated FeatureCollection.
   const fetchedBoundariesRef = useRef<Set<string>>(new Set());
   const boundariesFcRef = useRef<FeatureCollection | null>(null);
+  // Trail route lines (ADR-066): focused parks' Blob geometry, accumulated + re-applied across re-installs.
+  const trailLinesFcRef = useRef<FeatureCollection | null>(null);
+  const trailLinesLoadedRef = useRef<Set<string>>(new Set());
   // Vibe search + quick facet filters (#8): filter the already-loaded parks source to matches (re-clusters
   // the subset). vibeMatchRef = the op=vibe result parkCodes (null = no text search); facets = baked-prop
   // chips. Both held in refs so the filter survives the colorMode re-mount, mirrored in state for the UI.
@@ -439,6 +442,8 @@ export function MapExplorer({
     // float between now-hidden parks; boundaries/POIs just clutter). Restore it in 'all', honoring POI toggles.
     for (const id of ['connections-line', 'park-boundaries-glow', 'park-boundaries-fill', 'park-boundaries-line'])
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', mine ? 'none' : 'visible');
+    // Trail lines follow the trails toggle (and hide in 'mine' mode like the other overlays).
+    if (map.getLayer('trail-lines')) map.setLayoutProperty('trail-lines', 'visibility', !mine && enabledRef.current['trails'] ? 'visible' : 'none');
     for (const key of POI_ORDER)
       for (const id of [`poi-${key}`, `poi-${key}-icon`, `poi-${key}-clusters`, `poi-${key}-count`])
         if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', !mine && enabledRef.current[key] ? 'visible' : 'none');
@@ -618,6 +623,32 @@ export function MapExplorer({
     }
   }
 
+  // Load a focused park's trail route lines from Blob (ADR-066) — accumulate (deduped by park), drawn under
+  // the markers. Empty/skip when the park isn't trail-synced. Triggered by a trailhead click.
+  async function loadTrailLines(map: MlMap, parkCode: string) {
+    if (!parkCode || trailLinesLoadedRef.current.has(parkCode)) return;
+    trailLinesLoadedRef.current.add(parkCode);
+    try {
+      const res = await fetch(`/api/trails/${encodeURIComponent(parkCode)}`, { signal: abortRef.current?.signal });
+      if (!res.ok) {
+        trailLinesLoadedRef.current.delete(parkCode); // transient failure → allow a later retry
+        return;
+      }
+      const fc = (await res.json()) as FeatureCollection;
+      const feats = Array.isArray(fc?.features)
+        ? fc.features.filter((f) => f.geometry && (f.geometry.type === 'LineString' || f.geometry.type === 'MultiLineString'))
+        : [];
+      if (!feats.length) return;
+      const merged: FeatureCollection = { type: 'FeatureCollection', features: [...(trailLinesFcRef.current?.features ?? []), ...feats] };
+      trailLinesFcRef.current = merged;
+      (map.getSource('trail-lines') as GeoJSONSource | undefined)?.setData(merged);
+    } catch {
+      // Aborted (e.g. a color-mode toggle mid-fetch) or a network error → unmark so a later click retries.
+      // A successful empty-FC (trail-less park) stays marked above — correct memoization, not poisoning.
+      trailLinesLoadedRef.current.delete(parkCode);
+    }
+  }
+
   // Toggle a layer's visibility + (force) load when enabled.
   function toggleLayer(key: LayerKey, on: boolean) {
     const next = { ...enabledRef.current, [key]: on };
@@ -629,6 +660,7 @@ export function MapExplorer({
     // 'all' mode (the personal overlay hides them); we still update the ref + load so they're ready on return.
     const show = on && modeRef.current === 'all';
     for (const id of [`poi-${key}`, `poi-${key}-icon`, `poi-${key}-clusters`, `poi-${key}-count`]) map.setLayoutProperty(id, 'visibility', show ? 'visible' : 'none');
+    if (key === 'trails' && map.getLayer('trail-lines')) map.setLayoutProperty('trail-lines', 'visibility', show ? 'visible' : 'none');
     if (on) loadPoiLayer(map, key, true);
   }
 
@@ -744,6 +776,17 @@ export function MapExplorer({
             'line-opacity': ['match', ['get', 'kind'], 'trail', 0.85, 0.45] as unknown as ExpressionSpecification,
           } });
 
+        // Real trail route lines (ADR-066), under the markers, colored by difficulty. Loaded per focused
+        // park on demand (click a trailhead); empty until a park's geometry is synced to Blob.
+        map.addSource('trail-lines', { type: 'geojson', data: trailLinesFcRef.current ?? emptyFC() });
+        map.addLayer({ id: 'trail-lines', type: 'line', source: 'trail-lines',
+          layout: { 'line-join': 'round', 'line-cap': 'round', visibility: enabledRef.current['trails'] ? 'visible' : 'none' },
+          paint: {
+            'line-color': ['match', ['get', 'difficulty'], 'easy', '#2F9E44', 'moderate', '#E8A317', 'strenuous', '#D6451F', c.faded] as unknown as ExpressionSpecification,
+            'line-width': 2.5,
+            'line-opacity': 0.85,
+          } });
+
         map.addSource('parks', { type: 'geojson', data: emptyFC(), cluster: true, clusterMaxZoom: 8, clusterRadius: 50 });
         map.addLayer({ id: 'clusters', type: 'circle', source: 'parks', filter: ['has', 'point_count'],
           paint: { 'circle-color': c.pine, 'circle-opacity': 0.85, 'circle-radius': ['step', ['get', 'point_count'], 16, 10, 22, 30, 30] } });
@@ -791,6 +834,7 @@ export function MapExplorer({
 
       // A style swap recreates the source empty — re-apply whatever boundaries we've already fetched.
       if (boundariesFcRef.current) (map.getSource('park-boundaries') as GeoJSONSource | undefined)?.setData(boundariesFcRef.current);
+      if (trailLinesFcRef.current) (map.getSource('trail-lines') as GeoJSONSource | undefined)?.setData(trailLinesFcRef.current);
       // …same for the ranger highlight, so a basemap/colorMode swap keeps the rings (#7).
       if (rangerHighlightRef.current) (map.getSource('ranger-highlight') as GeoJSONSource | undefined)?.setData(rangerHighlightRef.current);
 
@@ -833,8 +877,8 @@ export function MapExplorer({
         const label = p.kind === 'near' ? `~${Math.round(p.weight)} mi apart`
           : p.kind === 'topic' ? `${p.weight} shared topic${p.weight === 1 ? '' : 's'}`
           : p.kind === 'activity' ? `${p.weight} shared activit${p.weight === 1 ? 'y' : 'ies'}`
-          : p.via ? `On the “${p.via}” thematic trail`
-          : 'On this thematic trail';
+          : p.via ? `On the “${p.via}” journey`
+          : 'On this journey';
         new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<strong>Why connected</strong><br/><span style="color:#777">${escapeHtml(label)}</span>`).addTo(map);
       });
       for (const key of POI_ORDER) {
@@ -842,10 +886,18 @@ export function MapExplorer({
         map.on('click', `poi-${key}`, (e) => {
           const f = e.features?.[0];
           if (!f) return;
-          const props = f.properties as { name: string; parkCode: string };
+          const props = f.properties as { name: string; parkCode: string; id?: string };
           const [lng, lat] = (f.geometry as Point).coordinates;
-          const link = props.parkCode ? `<br/><a href="/parks/${encodeURIComponent(props.parkCode)}" style="color:${pine[700]}">View park →</a>` : '';
+          // A trailhead links to the trail detail; every other POI links to its park.
+          const link =
+            key === 'trails' && props.id
+              ? `<br/><a href="/trails/${encodeURIComponent(props.id)}" style="color:${pine[700]}">View trail →</a>`
+              : props.parkCode
+                ? `<br/><a href="/parks/${encodeURIComponent(props.parkCode)}" style="color:${pine[700]}">View park →</a>`
+                : '';
           new maplibregl.Popup().setLngLat([lng, lat]).setHTML(`<strong>${escapeHtml(props.name)}</strong>${link}`).addTo(map);
+          // Focusing a trailhead loads that park's trail route lines (ADR-066).
+          if (key === 'trails' && props.parkCode) loadTrailLines(map, props.parkCode);
         });
         // POI cluster → zoom to expand (#11).
         map.on('click', `poi-${key}-clusters`, (e) => {
@@ -1080,7 +1132,7 @@ export function MapExplorer({
           </HStack>
         </Box>
 
-        {/* Graph connections (#5): draw edges between parks — proximity / shared topics-activities / a thematic trail. */}
+        {/* Graph connections (#5): draw edges between parks — proximity / shared topics-activities / a journey. */}
         <Box borderTopWidth="1px" borderColor="border" mt={3} pt={2}>
           <Field.Root>
             <Field.Label fontSize="xs" fontWeight="semibold" mb={1.5} textTransform="uppercase" letterSpacing="0.05em" color="fg.subtle">Connections</Field.Label>
@@ -1096,7 +1148,7 @@ export function MapExplorer({
           </Field.Root>
           {connectionOptions ? (
             <Field.Root mt={2}>
-              <Field.Label fontSize="2xs" color="fg.subtle" mb={0.5} textTransform="uppercase" letterSpacing="0.05em">Thematic trail</Field.Label>
+              <Field.Label fontSize="2xs" color="fg.subtle" mb={0.5} textTransform="uppercase" letterSpacing="0.05em">Journey</Field.Label>
               <NativeSelect.Root size="sm">
                 <NativeSelect.Field value={trailSel} onChange={(e) => changeTrail(e.currentTarget.value)}>
                   <option value="">—</option>

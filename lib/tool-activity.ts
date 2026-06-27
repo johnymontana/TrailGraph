@@ -115,7 +115,7 @@ const TOOL_LABELS: Record<string, string> = {
   trip_conditions: 'Trip conditions',
   recommend_for_user: 'Recommending parks',
   explain_recommendation: 'Why this park',
-  find_trail: 'Tracing a trail',
+  find_journey: 'Tracing a journey',
   find_place: 'Finding a place',
   find_person: 'Finding a person',
   save_preference: 'Saving a preference',

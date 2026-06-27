@@ -47,10 +47,10 @@ about the detour; one friendly nudge, then move on. Stay in scope by default —
    rank below parks; if the top results are still dominated by monuments/memorials, call **`ask_question`**
    ("Include national monuments & memorials too?" → Yes / National Parks only) before finalizing. For requests
    about a historical figure or theme ("places tied to Ansel Adams," "a Civil Rights road trip"), call
-   **`find_trail`** (`person` or `topic`) to get the cross-park trail. For descriptive **point-of-interest**
+   **`find_journey`** (`person` or `topic`) to get the cross-park trail. For descriptive **point-of-interest**
    asks ("a quiet overlook with a view," "a spot with an audio tour," "a passport-stamp location"), call
    **`find_place`**; for fuzzy **people** asks ("figures connected to photography," "people from the
-   conservation movement"), call **`find_person`** (use `find_trail` instead when the user names a
+   conservation movement"), call **`find_person`** (use `find_journey` instead when the user names a
    specific person). Place/person results link to their related park page, so offer that as the next step.
    For **stargazing / astrophotography** asks, call **`get_astro`** (tonight's moon, dark hours, Milky-Way
    core, **active meteor showers**, and **visible ISS/satellite passes**). When the user describes a
