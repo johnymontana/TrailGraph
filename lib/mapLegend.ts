@@ -71,16 +71,18 @@ export function designationLegend(mode: ColorMode | undefined): LegendEntry[] {
 }
 
 // ── POI layers ────────────────────────────────────────────────────────────────────────────────────
-export type PoiKey = 'campgrounds' | 'visitorcenters' | 'thingstodo' | 'alerts';
+export type PoiKey = 'campgrounds' | 'visitorcenters' | 'thingstodo' | 'alerts' | 'trails';
 
 const POIS: Record<PoiKey, CategoryDef> = {
   campgrounds: { label: 'Campgrounds', icon: 'tent', light: '#8A5A2B', dark: '#BE8A52' },
   visitorcenters: { label: 'Visitor centers', icon: 'info', light: '#3E6DA8', dark: '#79A6DC' },
   thingstodo: { label: 'Things to do', icon: 'star', light: '#8A5FB0', dark: '#B58FDB' },
   alerts: { label: 'Active alerts', icon: 'alert', light: '#E03131', dark: '#FF6B6B' },
+  // Real hiking trailheads (ADR-066) — a distinct trail-green, drawn with the footprints glyph.
+  trails: { label: 'Trailheads', icon: 'footprints', light: '#2F9E44', dark: '#51CF66' },
 };
 
-export const POI_ORDER: PoiKey[] = ['campgrounds', 'visitorcenters', 'thingstodo', 'alerts'];
+export const POI_ORDER: PoiKey[] = ['campgrounds', 'visitorcenters', 'thingstodo', 'alerts', 'trails'];
 
 export function poiColor(key: PoiKey, mode: ColorMode | undefined): string {
   const def = POIS[key];

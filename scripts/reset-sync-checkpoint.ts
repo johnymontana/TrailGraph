@@ -7,6 +7,12 @@ import { writeGraph, closeDriver } from '../lib/neo4j';
  * upsert/parse logic — far cheaper than `SYNC_FORCE=1`, which re-fetches the whole corpus.
  *
  *   pnpm sync:reset amenities-places amenities-vcs
+ *
+ * The resource name is the `step()` name in `lib/sync/index.ts#runSlowSync`. Trail steps (gated by
+ * `SYNC_TRAILS=1`): `trails` (NPS GIS → :Trail + Blob geometry), `derive-trail-logistics`,
+ * `join-thingstodo-trails`, `derive-trail-elevation` (`SYNC_TRAIL_ELEVATION=1`),
+ * `derive-trail-network` (CONNECTS loop graph, ADR-072/073), `embed-trails` (`EMBED_TRAILS=1`,
+ * vibe-search). E.g. after editing the loop-builder: `pnpm sync:reset derive-trail-network`.
  */
 export async function resetSyncCheckpoints(resources: string[]): Promise<number> {
   if (!resources.length) return 0;

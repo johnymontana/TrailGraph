@@ -4,7 +4,7 @@ import { MapExplorer } from '../../components/MapExplorer';
 import { RangerCommandBar } from '../../components/map/RangerCommandBar';
 import { getServerUserId } from '../../lib/session';
 import { consideredBounds } from '../../lib/memory-graph';
-import { facets, trailThemes } from '../../lib/queries';
+import { facets, journeyThemes } from '../../lib/queries';
 import { decodeMapView } from '../../lib/map-deeplink';
 import { unstable_cache } from 'next/cache';
 
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 // Facet/theme values change only on a sync, so cache them instead of re-querying on every page load (#8b/#5).
 const cachedFacets = unstable_cache(async () => facets(), ['map:facets'], { revalidate: 3600, tags: ['facets'] });
-const cachedTrailThemes = unstable_cache(async () => trailThemes(), ['map:trail-themes'], { revalidate: 3600, tags: ['facets'] });
+const cachedJourneyThemes = unstable_cache(async () => journeyThemes(), ['map:journey-themes'], { revalidate: 3600, tags: ['facets'] });
 
 export default async function MapPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   // A "share this view" deep-link (#10) seeds the camera + instrument settings; absent/invalid → ignored.
@@ -25,11 +25,11 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
     // Facet options for the map's state/activity/topic filters (#8b).
     cachedFacets().catch(() => ({ activities: [], topics: [], states: [] as { code: string; name: string }[] })),
     // Topic/person options for the connections layer (#5).
-    cachedTrailThemes().catch(() => ({ people: [] as { title: string; parks: number }[], topics: [] as { name: string; parks: number }[] })),
+    cachedJourneyThemes().catch(() => ({ people: [] as { title: string; parks: number }[], topics: [] as { name: string; parks: number }[] })),
   ]);
   const facetOptions = { states: facetData.states, activities: facetData.activities, topics: facetData.topics };
   // Connections/thematic-trail options must be the CURATED trail themes (topics shared by ≥3 parks, from
-  // trailThemes), not every graph topic — a 1–2-park topic makes no trail. People come from the same source.
+  // journeyThemes), not every graph topic — a 1–2-park topic makes no trail. People come from the same source.
   const connectionOptions = { topics: trailData.topics.map((t) => t.name), people: trailData.people.map((p) => p.title) };
   return (
     <Box position="fixed" top="57px" left={0} right={0} bottom={0} data-fullscreen>

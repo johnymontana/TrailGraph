@@ -7,6 +7,7 @@ import {
   type HoursSchedule,
 } from './hours';
 import { deriveAccessibilityAmenityIds, ACCESS_NAME_BY_ID } from '../datasources/accessibility';
+import type { AggregatedTrail } from './trail-aggregate';
 import type {
   NpsAlert,
   NpsCampground,
@@ -994,6 +995,95 @@ export async function upsertParkingLots(lots: NpsParkingLot[]): Promise<number> 
       ownerKey: l.id,
       amenityIds: normalizeParkingAccessibility(l.accessibility).wheelchairAccessible ? ['amen:accessible-parking'] : [],
     })),
+  );
+  return r[0]?.c ?? 0;
+}
+
+/** Maps a parsed allowed-use to a keyword that matches an existing `:Activity` name (for SUPPORTS). */
+const USE_TO_ACTIVITY: Record<string, string> = {
+  hike: 'hiking',
+  bike: 'biking',
+  horse: 'horse',
+  ski: 'skiing',
+  water: 'paddling',
+};
+
+/**
+ * Real hiking trails (ADR-066): MERGE the named-aggregate `:Trail` nodes for a park + `IN_PARK` and
+ * `SUPPORTS`→`:Activity` (mapped from allowed uses). Geometry stays in Blob — we store only metadata +
+ * `trailheadPoint` (point) + `bbox` + `geometryRef`. The park's geometry URL + a set-hash are stamped on
+ * `:Park` for the serve route + cheap re-sync skipping. STARTS_AT/NEAR + elevation/difficulty are separate
+ * derive steps. Idempotent.
+ */
+export async function upsertTrails(
+  parkCode: string,
+  trails: AggregatedTrail[],
+  geoUrl: string,
+): Promise<number> {
+  if (!trails.length) return 0;
+  const rows = trails.map((t) => ({
+    id: t.id,
+    name: t.name,
+    parkCode: t.parkCode,
+    source: t.source,
+    lengthMiles: t.lengthMiles,
+    routeType: t.routeType,
+    trailClass: t.trailClass,
+    surface: t.surface,
+    allowedUses: t.allowedUses,
+    dogsAllowed: t.dogsAllowed,
+    wheelchairAccessible: t.wheelchairAccessible,
+    status: t.status,
+    segments: t.segments,
+    dataConfidence: t.dataConfidence,
+    thLng: t.trailheadPoint[0],
+    thLat: t.trailheadPoint[1],
+    bbox: t.bbox,
+    contentHash: t.contentHash,
+    geometryRef: `${parkCode.toLowerCase()}#${t.id}`,
+    activityKeywords: t.allowedUses.map((u) => USE_TO_ACTIVITY[u]).filter(Boolean),
+  }));
+
+  const r = await writeGraph<{ c: number }>(
+    `
+    UNWIND $rows AS row
+    MATCH (p:Park {parkCode: row.parkCode})
+    MERGE (t:Trail {id: row.id})
+      SET t.name = row.name, t.parkCode = row.parkCode, t.source = row.source,
+          t.lengthMiles = row.lengthMiles, t.routeType = row.routeType, t.trailClass = row.trailClass,
+          t.surface = row.surface, t.allowedUses = row.allowedUses,
+          t.dogsAllowed = coalesce(row.dogsAllowed, t.dogsAllowed),
+          t.wheelchairAccessible = row.wheelchairAccessible, t.status = row.status,
+          t.segments = row.segments, t.dataConfidence = row.dataConfidence,
+          t.bbox = row.bbox, t.geometryRef = row.geometryRef, t.contentHash = row.contentHash,
+          t.trailheadPoint = CASE WHEN row.thLat IS NOT NULL AND row.thLng IS NOT NULL
+                                  THEN point({latitude: row.thLat, longitude: row.thLng})
+                                  ELSE t.trailheadPoint END,
+          t.lastSyncedAt = datetime()
+    MERGE (t)-[:IN_PARK]->(p)
+    WITH t, row
+    CALL {
+      WITH t, row
+      UNWIND row.activityKeywords AS kw
+      MATCH (a:Activity) WHERE toLower(a.name) CONTAINS kw
+      MERGE (t)-[:SUPPORTS]->(a)
+    }
+    RETURN count(t) AS c
+    `,
+    { rows },
+  );
+
+  // Prune trails that vanished upstream (renamed → new id, or removed) so re-sync doesn't accumulate
+  // orphans whose geometryRef dangles against the overwritten Blob. Scoped to this park (cf. EntranceFee).
+  await writeGraph(
+    `MATCH (t:Trail)-[:IN_PARK]->(:Park {parkCode: $parkCode})
+     WHERE NOT t.id IN $ids DETACH DELETE t`,
+    { parkCode: parkCode.toLowerCase(), ids: rows.map((row) => row.id) },
+  );
+
+  await writeGraph(
+    `MATCH (p:Park {parkCode: $parkCode}) SET p.trailsGeoUrl = $geoUrl, p.trailsSyncedAt = datetime()`,
+    { parkCode: parkCode.toLowerCase(), geoUrl },
   );
   return r[0]?.c ?? 0;
 }

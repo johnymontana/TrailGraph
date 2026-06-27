@@ -51,3 +51,6 @@ pnpm-debug.log*
 /*.md
 !/README.md
 .vercel
+
+# data files
+public/trails/

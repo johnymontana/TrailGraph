@@ -72,5 +72,6 @@ test('trip cost model estimates entrance fees (P2)', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Trip cost' }).click();
   await expect(page.getByText('Estimated entrance fees')).toBeVisible();
-  await expect(page.getByText('$35')).toBeVisible(); // Yellowstone seeded at $35
+  // A single-park trip renders $35 twice (per-park line + bold total), so scope to the first match.
+  await expect(page.getByText('$35').first()).toBeVisible(); // Yellowstone seeded at $35
 });

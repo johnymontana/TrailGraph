@@ -106,6 +106,8 @@ describe('contextToNvl (/me context graph + two-graph overlay merge keys, ADR-04
     passes: [{ id: 'atb-annual', name: 'America the Beautiful' }],
     stamps: [{ id: 's1', label: 'Canyon stamp' }],
     availability: { start: '2026-02-10', end: '2026-02-20' },
+    trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
+    trailHistory: { saved: [], wishlisted: [], done: [] },
   };
 
   it('anchors a "You" node and links every bridge with its literal relationship caption', () => {
@@ -135,8 +137,26 @@ describe('contextToNvl (/me context graph + two-graph overlay merge keys, ADR-04
     expect(isContextParkId('ctx:Activity:Stargazing')).toBe(false);
   });
 
+  it('renders trail-preference and saved/wishlisted/did trail bridges (ADR-071)', () => {
+    const withTrails = {
+      ...memory,
+      trailPreferences: { maxMiles: 6, maxGainFt: null, difficulty: 'moderate', avoidExposure: true, dogsRequired: false },
+      trailHistory: {
+        saved: [{ id: 'nps:grca:bright-angel', name: 'Bright Angel' }],
+        wishlisted: [],
+        done: [{ id: 'nps:zion:angels-landing', name: 'Angels Landing' }],
+      },
+    };
+    const { nodes, rels } = contextToNvl(withTrails);
+    expect(nodes.find((n) => n.id === 'ctx:TrailPrefs:trail')?.caption).toBe('moderate · ≤ 6mi · no exposure');
+    expect(nodes.find((n) => n.id === 'ctx:Trail:nps:grca:bright-angel')?.caption).toBe('Bright Angel');
+    const trailRels = rels.filter((r) => ['PREFERS_TRAIL', 'SAVED', 'DID'].includes(r.caption ?? ''));
+    expect(trailRels.map((r) => r.caption).sort()).toEqual(['DID', 'PREFERS_TRAIL', 'SAVED']);
+    expect(trailRels.every((r) => r.from === 'ctx:You')).toBe(true);
+  });
+
   it('renders just the You node for empty memory (nothing to overlay)', () => {
-    const empty = { preferences: [], considered: [], planned: [], travel: { wheelchair: false, rvMaxLengthFt: null, requiredAmenities: [] }, passes: [], stamps: [], availability: { start: null, end: null } };
+    const empty = { preferences: [], considered: [], planned: [], travel: { wheelchair: false, rvMaxLengthFt: null, requiredAmenities: [] }, passes: [], stamps: [], availability: { start: null, end: null }, trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false }, trailHistory: { saved: [], wishlisted: [], done: [] } };
     const { nodes, rels } = contextToNvl(empty);
     expect(nodes).toHaveLength(1);
     expect(rels).toHaveLength(0);
@@ -156,6 +176,8 @@ describe('contextToNvl edge de-duplication (review finding)', () => {
       passes: [],
       stamps: [],
       availability: { start: null, end: null },
+      trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
+      trailHistory: { saved: [], wishlisted: [], done: [] },
     };
     const { nodes, rels } = contextToNvl(mem);
     // one Stargazing node, one Restrooms node (deduped), and exactly one edge each.
@@ -247,6 +269,8 @@ describe('bridgesToRels (#8 — you-in-the-graph)', () => {
       passes: [],
       stamps: [{ id: 's1', label: 'Yellowstone' }],
       availability: { start: null, end: null },
+      trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
+      trailHistory: { saved: [], wishlisted: [], done: [] },
     };
     const ctx = contextToNvl(mem);
     const ctxIds = new Set(ctx.nodes.map((n) => n.id));
@@ -307,6 +331,8 @@ describe('provenanceSubgraphIds (#9 — why this park is in your world)', () => 
       passes: [],
       stamps: [],
       availability: { start: null, end: null },
+      trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
+      trailHistory: { saved: [], wishlisted: [], done: [] },
     };
     const ctx = contextToNvl(mem);
     const ctxNodeIds = new Set(ctx.nodes.map((n) => n.id));

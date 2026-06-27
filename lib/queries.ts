@@ -42,6 +42,22 @@ export const PARK_SUMMARY_RETURN = `
   coalesce(p.feeFree, false) AS feeFree
 `;
 
+/**
+ * Sanitize raw user text into a SAFE Lucene fulltext query: lowercase, drop syntax metacharacters (so a
+ * '/', '(', '*', '~', ':' etc. can't throw a ParseException and 500 the page), and prefix-wildcard each
+ * term. Returns '' when nothing usable remains (callers fall back to a plain MATCH). Mirrors
+ * learn-queries#toFulltextQuery; kept local to avoid a queries↔learn-queries import cycle.
+ */
+function toFulltextQuery(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((t) => `${t}*`)
+    .join(' ');
+}
+
 /** Faceted + full-text park search (A1, A3) with paging + accurate total (§2.9). */
 export async function searchParks(opts: {
   q?: string;
@@ -83,13 +99,14 @@ export async function searchParks(opts: {
   if (groupSites) where.push('EXISTS { (p)<-[:IN_PARK]-(cg:Campground) WHERE cg.groupSites > 0 }'); // F3
   if (region) where.push('(p)-[:IN_REGION]->(:Region {name:$region})'); // F9
   const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
-  const source = q
+  const ftq = q ? toFulltextQuery(q) : '';
+  const source = ftq
     ? `CALL db.index.fulltext.queryNodes('park_fulltext', $q) YIELD node AS p, score ${whereClause}`
     : `MATCH (p:Park) ${whereClause} WITH p, 0.0 AS score`;
-  const order = q ? 'ORDER BY score DESC, name ASC' : 'ORDER BY name ASC';
+  const order = ftq ? 'ORDER BY score DESC, name ASC' : 'ORDER BY name ASC';
 
   const params = {
-    q: q ?? null,
+    q: ftq || null,
     stateCode: stateCode ?? null,
     activity: activity ?? null,
     topic: topic ?? null,
@@ -517,6 +534,23 @@ export async function parksWithConditionFacts(box: BBox, limit = 60): Promise<Pa
             p.operatingHours AS hours, p.seasonalClosureSummary AS seasonalClosureSummary,
             p.crowdLevel AS crowdLevel,
             EXISTS { (a:Alert)-[:AFFECTS]->(p) WHERE a.active = true AND a.category IN ['Closure','Danger'] } AS alert
+     LIMIT toInteger($limit)`,
+    { minLat: box.minLat, minLng: box.minLng, maxLat: box.maxLat, maxLng: box.maxLng, limit },
+  );
+}
+
+/** Real trailheads in the viewport (ADR-066) — the clustered map "trails" POI layer, keyed off the
+ *  persisted `:Trail.trailheadPoint` (backed by the `trail_trailhead` point index). Item shape matches the
+ *  other bbox POI layers (id/parkCode/name/lat/lng) so MapExplorer's generic POI machinery picks it up. */
+export async function trailheadsInBBox(box: BBox, limit = POI_BBOX_LIMIT) {
+  return readGraph<{ id: string; parkCode: string; name: string; lat: number; lng: number; difficulty: string | null; lengthMiles: number | null }>(
+    `MATCH (t:Trail)-[:IN_PARK]->(p:Park)
+     WHERE t.trailheadPoint IS NOT NULL
+       AND point.withinBBox(t.trailheadPoint, point({latitude:$minLat, longitude:$minLng}), point({latitude:$maxLat, longitude:$maxLng}))
+     RETURN t.id AS id, t.parkCode AS parkCode, t.name AS name,
+            t.trailheadPoint.latitude AS lat, t.trailheadPoint.longitude AS lng,
+            t.difficulty AS difficulty, t.lengthMiles AS lengthMiles
+     ORDER BY coalesce(t.lengthMiles, 0) DESC
      LIMIT toInteger($limit)`,
     { minLat: box.minLat, minLng: box.minLng, maxLat: box.maxLat, maxLng: box.maxLng, limit },
   );
@@ -1087,10 +1121,10 @@ export async function parkGraph(
 }
 
 /**
- * Thematic cross-park trail (NPS-expansion P0 #2): the parks connected by a historical Person
+ * Thematic cross-park JOURNEY (NPS-expansion P0 #2, /journeys): the parks connected by a historical Person
  * (`ASSOCIATED_WITH`) or a Topic (`HAS_TOPIC`) — a multi-hop traversal no single park page reveals.
  */
-export async function thematicTrail(
+export async function journeyTrail(
   opts: { person?: string; topic?: string },
   limit = 12,
 ): Promise<(ParkSummary & { via: string })[]> {
@@ -1116,10 +1150,10 @@ export async function thematicTrail(
 }
 
 /**
- * Browse-able thematic trails (NPS-expansion P0 #2, `/trails`): historical figures who span ≥2 parks
+ * Browse-able journeys (NPS-expansion P0 #2, `/journeys`): historical figures who span ≥2 parks
  * and the topics shared across the most parks — each is a ready-made cross-park traversal.
  */
-export async function trailThemes(limit = 24): Promise<{
+export async function journeyThemes(limit = 24): Promise<{
   people: { title: string; parks: number }[];
   topics: { name: string; parks: number }[];
 }> {
@@ -1148,6 +1182,344 @@ export async function trailThemes(limit = 24): Promise<{
     people: [...r.people].sort((a, b) => b.parks - a.parks),
     topics: [...r.topics].sort((a, b) => b.parks - a.parks),
   };
+}
+
+/**
+ * Parks that have real (synced) hiking trails, with a trail count — backs the minimal `/trails` index
+ * until the full finder (Phase 2). Empty until `SYNC_TRAILS=1` has run (degrades to an empty state).
+ */
+export async function parksWithTrails(
+  limit = 200,
+): Promise<(ParkSummary & { trailCount: number })[]> {
+  return readGraph(
+    `MATCH (t:Trail)-[:IN_PARK]->(p:Park)
+     WITH p, count(t) AS trailCount
+     RETURN ${PARK_SUMMARY_RETURN}, trailCount
+     ORDER BY trailCount DESC, name ASC LIMIT toInteger($limit)`,
+    { limit },
+  );
+}
+
+// ── Real hiking trails (ADR-066): the trail finder + detail reads ────────────────────────────────────
+export interface TrailSummary {
+  id: string;
+  name: string;
+  parkCode: string;
+  parkName: string;
+  lengthMiles: number | null;
+  elevationGainFt: number | null;
+  difficulty: string | null;
+  difficultyRating: number | null;
+  routeType: string | null;
+  estTimeHrs: number | null;
+  allowedUses: string[];
+  surface: string | null;
+  dogsAllowed: boolean | null;
+  wheelchairAccessible: boolean;
+  permitRequired: boolean;
+  source: string;
+  dataConfidence: string | null;
+  lat: number | null; // trailhead
+  lng: number | null;
+}
+
+const TRAIL_SUMMARY_RETURN = `
+  t.id AS id, t.name AS name, t.parkCode AS parkCode, p.fullName AS parkName,
+  t.lengthMiles AS lengthMiles, t.elevationGainFt AS elevationGainFt,
+  t.difficulty AS difficulty, t.difficultyRating AS difficultyRating, t.routeType AS routeType,
+  t.estTimeHrs AS estTimeHrs, coalesce(t.allowedUses, []) AS allowedUses, t.surface AS surface,
+  t.dogsAllowed AS dogsAllowed, coalesce(t.wheelchairAccessible, false) AS wheelchairAccessible,
+  coalesce(t.permitRequired, false) AS permitRequired, t.source AS source, t.dataConfidence AS dataConfidence,
+  t.trailheadPoint.latitude AS lat, t.trailheadPoint.longitude AS lng
+`;
+
+/**
+ * Multi-constraint trail finder (ADR-066) — the graph-over-vector payoff: one traversal filters by
+ * length/gain/difficulty/route/use/dogs/accessibility/permit/surface/activity/scenery. Returns paged
+ * summaries + an accurate total. `q` uses the `trail_fulltext` index over the trail name.
+ */
+/** Difficulty bands ranked low→high so a "maxDifficulty" ceiling ("moderate or easier") can be applied. */
+const DIFFICULTY_RANK: Record<string, number> = { easy: 1, moderate: 2, strenuous: 3 };
+
+export async function searchTrails(opts: {
+  q?: string;
+  parkCode?: string;
+  region?: string;
+  difficulty?: string; // EXACT match (a finder-facet pick)
+  maxDifficulty?: string; // CEILING — this band or easier (a saved-preference ceiling); excludes unranked
+  minMiles?: number;
+  maxMiles?: number;
+  maxGainFt?: number;
+  routeType?: string;
+  allowedUse?: string;
+  dogsAllowed?: boolean;
+  wheelchairAccessible?: boolean;
+  permitRequired?: boolean;
+  surface?: string;
+  activity?: string;
+  topic?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ items: TrailSummary[]; total: number }> {
+  const o = opts;
+  const limit = o.limit ?? 24;
+  const offset = o.offset ?? 0;
+  const where: string[] = [];
+  if (o.parkCode) where.push('t.parkCode = $parkCode');
+  if (o.region) where.push('(p)-[:IN_REGION]->(:Region {name:$region})');
+  if (o.difficulty) where.push('t.difficulty = $difficulty');
+  if (o.maxDifficulty && DIFFICULTY_RANK[o.maxDifficulty]) {
+    // Ceiling: keep trails whose band is this hard or easier; trails with an unknown band are excluded
+    // (we can't guarantee they're within the ceiling).
+    where.push(`(CASE t.difficulty WHEN 'easy' THEN 1 WHEN 'moderate' THEN 2 WHEN 'strenuous' THEN 3 ELSE 99 END) <= $maxDifficultyRank`);
+  }
+  if (o.minMiles != null) where.push('t.lengthMiles >= $minMiles');
+  if (o.maxMiles != null) where.push('t.lengthMiles <= $maxMiles');
+  if (o.maxGainFt != null) where.push('coalesce(t.elevationGainFt, 0) <= $maxGainFt');
+  if (o.routeType) where.push('t.routeType = $routeType');
+  if (o.allowedUse) where.push('$allowedUse IN coalesce(t.allowedUses, [])');
+  if (o.dogsAllowed) where.push('t.dogsAllowed = true');
+  if (o.wheelchairAccessible) where.push('coalesce(t.wheelchairAccessible, false) = true');
+  if (o.permitRequired != null) where.push('coalesce(t.permitRequired, false) = $permitRequired');
+  if (o.surface) where.push('t.surface = $surface');
+  if (o.activity) where.push('(t)-[:SUPPORTS]->(:Activity {name:$activity})');
+  if (o.topic) where.push('(t)-[:HIGHLIGHTS]->(:Topic {name:$topic})');
+  const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const ftq = o.q ? toFulltextQuery(o.q) : '';
+  const source = ftq
+    ? `CALL db.index.fulltext.queryNodes('trail_fulltext', $q) YIELD node AS t, score
+       MATCH (t)-[:IN_PARK]->(p:Park) ${whereClause}`
+    : `MATCH (t:Trail)-[:IN_PARK]->(p:Park) ${whereClause} WITH t, p, 0.0 AS score`;
+  const order = ftq
+    ? 'ORDER BY score DESC, coalesce(t.lengthMiles, 0) DESC'
+    : 'ORDER BY coalesce(t.lengthMiles, 0) DESC, t.id ASC';
+  const params = {
+    q: ftq || null,
+    parkCode: o.parkCode ?? null,
+    region: o.region ?? null,
+    difficulty: o.difficulty ?? null,
+    maxDifficultyRank: o.maxDifficulty ? DIFFICULTY_RANK[o.maxDifficulty] ?? null : null,
+    minMiles: o.minMiles ?? null,
+    maxMiles: o.maxMiles ?? null,
+    maxGainFt: o.maxGainFt ?? null,
+    routeType: o.routeType ?? null,
+    allowedUse: o.allowedUse ?? null,
+    permitRequired: o.permitRequired ?? null,
+    surface: o.surface ?? null,
+    activity: o.activity ?? null,
+    topic: o.topic ?? null,
+    limit,
+    offset,
+  };
+  const items = await readGraph<TrailSummary>(
+    `${source} RETURN ${TRAIL_SUMMARY_RETURN}, score ${order} SKIP toInteger($offset) LIMIT toInteger($limit)`,
+    params,
+  );
+  const totalRows = await readGraph<{ total: number }>(`${source} RETURN count(t) AS total`, params);
+  return { items, total: totalRows[0]?.total ?? items.length };
+}
+
+/** Blob geo URLs for a set of parks (ADR-067/071) — lets the offline pack read each park's trail
+ *  FeatureCollection (lines + embedded elevation profiles) without going through the per-park serve route. */
+export async function trailGeoUrlsForParks(codes: string[]): Promise<{ parkCode: string; geoUrl: string | null }[]> {
+  if (!codes.length) return [];
+  return readGraph<{ parkCode: string; geoUrl: string | null }>(
+    `MATCH (p:Park) WHERE p.parkCode IN $codes AND p.trailsGeoUrl IS NOT NULL
+     RETURN p.parkCode AS parkCode, p.trailsGeoUrl AS geoUrl`,
+    { codes },
+  );
+}
+
+/** Filter-dropdown options for the trail finder (parks with trails + distinct surfaces/route types). */
+export async function trailFacets(): Promise<{
+  parks: { parkCode: string; name: string }[];
+  surfaces: string[];
+  routeTypes: string[];
+}> {
+  const rows = await readGraph<{
+    parks: { parkCode: string; name: string }[];
+    surfaces: (string | null)[];
+    routeTypes: (string | null)[];
+  }>(
+    `MATCH (t:Trail)-[:IN_PARK]->(p:Park)
+     WITH collect(DISTINCT {parkCode: p.parkCode, name: p.fullName}) AS parks,
+          collect(DISTINCT t.surface) AS surfaces, collect(DISTINCT t.routeType) AS routeTypes
+     RETURN parks, surfaces, routeTypes`,
+  );
+  const r = rows[0] ?? { parks: [], surfaces: [], routeTypes: [] };
+  return {
+    parks: [...r.parks].sort((a, b) => a.name.localeCompare(b.name)),
+    surfaces: r.surfaces.filter((s): s is string => !!s).sort(),
+    routeTypes: r.routeTypes.filter((s): s is string => !!s).sort(),
+  };
+}
+
+export interface TrailDetail {
+  id: string;
+  name: string;
+  parkCode: string;
+  parkName: string;
+  source: string;
+  lengthMiles: number | null;
+  routeType: string | null;
+  difficulty: string | null;
+  difficultyRating: number | null;
+  trailClass: number | null;
+  estTimeHrs: number | null;
+  elevationGainFt: number | null;
+  elevationLossFt: number | null;
+  minElevationFt: number | null;
+  maxElevationFt: number | null;
+  allowedUses: string[];
+  surface: string | null;
+  status: string | null;
+  dogsAllowed: boolean | null;
+  wheelchairAccessible: boolean;
+  permitRequired: boolean;
+  dataConfidence: string | null;
+  bbox: number[] | null;
+  geometryRef: string | null;
+  geoUrl: string | null;
+  trailheadLat: number | null;
+  trailheadLng: number | null;
+  trailheads: { name: string; kind: string; accessibleSpaces: number | null }[];
+  nearby: { name: string; kind: string }[];
+  curated: { id: string; title: string; season: string[]; petsAllowed: boolean | null; feesApply: boolean | null; durationText: string | null }[];
+}
+
+/** Full trail detail (ADR-066): metadata + logistics (trailhead parking, nearby services) + the curated
+ *  :ThingToDo join. Geometry + elevation profile load separately from Blob via `geoUrl` (degrades if unset). */
+export async function trailDetail(id: string): Promise<TrailDetail | null> {
+  const rows = await readGraph<TrailDetail>(
+    `MATCH (t:Trail {id:$id})-[:IN_PARK]->(p:Park)
+     CALL { WITH t OPTIONAL MATCH (t)-[:STARTS_AT]->(th)
+            RETURN collect(DISTINCT th{.name, .accessibleSpaces, kind: head(labels(th))}) AS trailheads }
+     CALL { WITH t OPTIONAL MATCH (t)-[:NEAR_SERVICE]->(svc)
+            RETURN collect(DISTINCT svc{.name, kind: head(labels(svc))})[..6] AS nearby }
+     CALL { WITH t OPTIONAL MATCH (ttd:ThingToDo)-[:ALONG]->(t)
+            RETURN collect(DISTINCT ttd{.id, .title, season: coalesce(ttd.season, []),
+                   petsAllowed: ttd.petsAllowed, feesApply: ttd.feesApply, durationText: ttd.durationText})[..3] AS curated }
+     RETURN t.id AS id, t.name AS name, t.parkCode AS parkCode, p.fullName AS parkName, t.source AS source,
+            t.lengthMiles AS lengthMiles, t.routeType AS routeType, t.difficulty AS difficulty,
+            t.difficultyRating AS difficultyRating, t.trailClass AS trailClass, t.estTimeHrs AS estTimeHrs,
+            t.elevationGainFt AS elevationGainFt, t.elevationLossFt AS elevationLossFt,
+            t.minElevationFt AS minElevationFt, t.maxElevationFt AS maxElevationFt,
+            coalesce(t.allowedUses, []) AS allowedUses, t.surface AS surface, t.status AS status,
+            t.dogsAllowed AS dogsAllowed, coalesce(t.wheelchairAccessible, false) AS wheelchairAccessible,
+            coalesce(t.permitRequired, false) AS permitRequired, t.dataConfidence AS dataConfidence,
+            t.bbox AS bbox, t.geometryRef AS geometryRef, p.trailsGeoUrl AS geoUrl,
+            t.trailheadPoint.latitude AS trailheadLat, t.trailheadPoint.longitude AS trailheadLng,
+            trailheads, nearby, curated`,
+    { id },
+  );
+  return rows[0] ?? null;
+}
+
+// ── Phase 4 — trail network (loop builder) + semantic vibe-search (ADR-072) ──────────────────────────
+
+export interface LoopTrailRow {
+  id: string;
+  name: string;
+  lengthMiles: number | null;
+  elevationGainFt: number | null;
+  elevationLossFt: number | null;
+  routeType: string | null;
+  difficulty: string | null;
+}
+export interface ParkTrailNetwork {
+  trails: LoopTrailRow[];
+  connections: { from: string; to: string; junctions: number }[];
+}
+
+/** A park's trails + their CONNECTS edges (ADR-072) — fed to `suggestLoops` (the pure loop builder). */
+export async function parkTrailNetwork(parkCode: string): Promise<ParkTrailNetwork> {
+  const trails = await readGraph<LoopTrailRow>(
+    `MATCH (t:Trail {parkCode:$parkCode})
+     RETURN t.id AS id, t.name AS name, t.lengthMiles AS lengthMiles, t.elevationGainFt AS elevationGainFt,
+            t.elevationLossFt AS elevationLossFt, t.routeType AS routeType, t.difficulty AS difficulty`,
+    { parkCode },
+  );
+  const connections = await readGraph<{ from: string; to: string; junctions: number }>(
+    `MATCH (a:Trail {parkCode:$parkCode})-[r:CONNECTS]->(b:Trail {parkCode:$parkCode})
+     RETURN a.id AS from, b.id AS to, r.junctions AS junctions`,
+    { parkCode },
+  );
+  return { trails, connections };
+}
+
+/** Trails that CONNECT to a given trail (ADR-072) — for the trail page's "Connects to / build a loop" rail.
+ *  CONNECTS is stored one-directional (id-ordered like derive-shared), so match it undirected. */
+export async function connectedTrails(
+  trailId: string,
+): Promise<{ id: string; name: string; lengthMiles: number | null; difficulty: string | null; junctions: number }[]> {
+  return readGraph(
+    `MATCH (t:Trail {id:$trailId})-[r:CONNECTS]-(o:Trail)
+     RETURN o.id AS id, o.name AS name, o.lengthMiles AS lengthMiles, o.difficulty AS difficulty, r.junctions AS junctions
+     ORDER BY r.junctions DESC, coalesce(o.lengthMiles, 0) ASC`,
+    { trailId },
+  );
+}
+
+/** Semantic "vibe" trail search (ADR-072, Phase 4) over the `trail_embedding` index — "quiet alpine-lake
+ *  hike with wildflowers under 5 mi". Returns trail summaries (same shape the finder + cards use). Empty
+ *  until the `EMBED_TRAILS=1` pass runs — degrades to [] gracefully. */
+export async function semanticTrails(query: string, limit = 8, vector?: number[]): Promise<TrailSummary[]> {
+  const v = vector ?? (await embedQuery(query));
+  return readGraph<TrailSummary>(
+    `CALL db.index.vector.queryNodes('trail_embedding', toInteger($k), $vector) YIELD node AS t, score
+     MATCH (t)-[:IN_PARK]->(p:Park)
+     RETURN ${TRAIL_SUMMARY_RETURN}, score
+     ORDER BY score DESC LIMIT toInteger($limit)`,
+    { k: limit, vector: v, limit },
+  );
+}
+
+export interface TrailCrossLinks {
+  lessons: { id: string; title: string }[]; // Ranger School lessons (Learn) → /learn/[id]
+  people: { id: string; title: string }[]; // person-journeys → /journeys?person=<title>
+  topics: string[]; // topic-journeys → /journeys?topic=<name>
+}
+
+/**
+ * Trail ↔ Learn ↔ Journeys cross-links (ADR-072, Phase 4) — the graph tying activities to learning + theme.
+ * A trail connects to a Ranger School lesson (ABOUT its park OR sharing a HIGHLIGHTS topic), to the people
+ * whose journeys pass through its park, and to its scenery topics (each a thematic journey). Used by the
+ * trail detail page's "Connect the dots" rail.
+ */
+export async function trailCrossLinks(trailId: string): Promise<TrailCrossLinks> {
+  const rows = await readGraph<TrailCrossLinks>(
+    `MATCH (t:Trail {id:$trailId})-[:IN_PARK]->(p:Park)
+     CALL {
+       WITH t, p
+       OPTIONAL MATCH (lp:LessonPlan)
+       WHERE EXISTS { (lp)-[:ABOUT]->(p) } OR EXISTS { (t)-[:HIGHLIGHTS]->(:Topic)<-[:RELATES_TO_TOPIC]-(lp) }
+       RETURN [x IN collect(DISTINCT {id: lp.id, title: lp.title}) WHERE x.id IS NOT NULL][0..6] AS lessons
+     }
+     CALL {
+       WITH p
+       OPTIONAL MATCH (per:Person)-[:ASSOCIATED_WITH]->(p)
+       RETURN [x IN collect(DISTINCT {id: per.id, title: per.title}) WHERE x.title IS NOT NULL][0..6] AS people
+     }
+     CALL {
+       WITH t
+       OPTIONAL MATCH (t)-[:HIGHLIGHTS]->(tp:Topic)
+       RETURN [x IN collect(DISTINCT tp.name) WHERE x IS NOT NULL][0..6] AS topics
+     }
+     RETURN lessons, people, topics`,
+    { trailId },
+  );
+  const r = rows[0];
+  return { lessons: r?.lessons ?? [], people: r?.people ?? [], topics: r?.topics ?? [] };
+}
+
+/** "Surprise me" — a random trail or few (ADR-072, Phase 4). */
+export async function randomTrails(limit = 1): Promise<TrailSummary[]> {
+  return readGraph<TrailSummary>(
+    `MATCH (t:Trail)-[:IN_PARK]->(p:Park)
+     WITH t, p, rand() AS r ORDER BY r LIMIT toInteger($limit)
+     RETURN ${TRAIL_SUMMARY_RETURN}, 0.0 AS score`,
+    { limit },
+  );
 }
 
 /** Historical figures associated with a park (for the park-page "People & stories" section). */

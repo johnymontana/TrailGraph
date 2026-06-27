@@ -7,9 +7,9 @@ import { test, expect } from '@playwright/test';
  * intentionally NOT asserted here (coverage/quota-dependent → flaky).
  */
 
-test('thematic trails page lists people and traces a cross-park trail', async ({ page }) => {
-  await page.goto('/trails');
-  // PageHeader h1 after the redesign ("Thematic trails" is now the eyebrow).
+test('journeys page lists people and traces a cross-park journey', async ({ page }) => {
+  await page.goto('/journeys');
+  // PageHeader h1 ("Journeys" is the eyebrow).
   await expect(page.getByRole('heading', { name: 'Follow a story across the parks' })).toBeVisible();
 
   // Pick a multi-park figure → see the trail.
@@ -24,7 +24,7 @@ test('thematic trails page lists people and traces a cross-park trail', async ({
 
 test('trails nav link is present in the header', async ({ page }) => {
   await page.goto('/');
-  // `exact` so the nav "Trails" link doesn't also match the footer's "Thematic trails" link.
+  // `exact` matches the nav "Trails" link (the footer now links "Journeys", not "Thematic trails").
   await expect(page.getByRole('link', { name: 'Trails', exact: true })).toBeVisible();
 });
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   composeParkText,
+  composeTrailText,
   composePlaceText,
   composePersonText,
   composeArticleText,
@@ -53,6 +54,27 @@ describe('composeArticleText', () => {
   it('includes the full body for semantic search (F8)', () => {
     expect(composeArticleText({ title: 'Geysers', description: 'Blurb.', body: 'The caldera powers 10,000 features.' }))
       .toBe('Geysers\nBlurb.\nThe caldera powers 10,000 features.');
+  });
+});
+
+describe('composeTrailText (ADR-072 vibe-search)', () => {
+  it('folds name + park + stats + topics + activities + blurb, dropping empties', () => {
+    const text = composeTrailText({
+      name: 'Avalanche Lake Trail',
+      parkName: 'Glacier National Park',
+      difficulty: 'moderate',
+      routeType: 'out-and-back',
+      lengthMiles: 5.9,
+      topics: ['Alpine Lakes', 'Waterfalls'],
+      activities: ['Hiking'],
+      blurb: 'A forested walk to a cirque lake.',
+    });
+    expect(text).toBe(
+      'Avalanche Lake Trail\nGlacier National Park\n5.9 mi · moderate · out-and-back\nAlpine Lakes, Waterfalls\nHiking\nA forested walk to a cirque lake.',
+    );
+  });
+  it('omits a stats line when no stats are present', () => {
+    expect(composeTrailText({ name: 'X', topics: [], activities: [] })).toBe('X');
   });
 });
 

@@ -96,6 +96,22 @@ describe('isRenderableToolOutput', () => {
     expect(isRenderableToolOutput('media_card', { error: 'none' })).toBe(true); // error always renders
   });
 
+  it('trail_card: at least one trail; trail_detail_card: id + name', () => {
+    expect(isRenderableToolOutput('trail_card', { trails: [{ id: 'nps:zion:angels-landing' }] })).toBe(true);
+    expect(isRenderableToolOutput('trail_card', { trails: [] })).toBe(false);
+    expect(isRenderableToolOutput('trail_card', {})).toBe(false);
+    expect(isRenderableToolOutput('trail_detail_card', { id: 'nps:zion:angels-landing', name: 'Angels Landing' })).toBe(true);
+    expect(isRenderableToolOutput('trail_detail_card', { id: 'nps:zion:angels-landing' })).toBe(false); // no name
+    expect(isRenderableToolOutput('trail_detail_card', { error: 'No trail found' })).toBe(true); // error always renders
+  });
+
+  it('loop_card: renders whenever loops is an array (incl. empty "no loops yet")', () => {
+    expect(isRenderableToolOutput('loop_card', { loops: [{ trailIds: ['a', 'b'] }] })).toBe(true);
+    expect(isRenderableToolOutput('loop_card', { loops: [] })).toBe(true); // explains "no loops yet"
+    expect(isRenderableToolOutput('loop_card', {})).toBe(false);
+    expect(isRenderableToolOutput('loop_card', { error: 'pick a park' })).toBe(true); // error always renders
+  });
+
   it('question_card: needs a prompt and at least one option', () => {
     expect(isRenderableToolOutput('question_card', { prompt: 'Pick one', options: [{}] })).toBe(true);
     expect(isRenderableToolOutput('question_card', { prompt: 'Pick one', options: [] })).toBe(false);

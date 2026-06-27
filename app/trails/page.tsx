@@ -1,135 +1,254 @@
-import { Box, Container, Heading, SimpleGrid, Stack, Text, HStack, Icon, Link as CLink } from '@chakra-ui/react';
+import {
+  Box,
+  Button,
+  Checkbox,
+  Container,
+  Field,
+  Flex,
+  HStack,
+  Icon,
+  Input,
+  NativeSelect,
+  SimpleGrid,
+  Text,
+  Badge,
+  Wrap,
+  WrapItem,
+  Link as CLink,
+} from '@chakra-ui/react';
 import NextLink from 'next/link';
-import { LuMountainSnow } from 'react-icons/lu';
-import { thematicTrail, trailThemes } from '../../lib/queries';
-import { ParkCard } from '../../components/ParkCard';
-import { ThemeChips, type ThemeChipItem } from '../../components/trails/ThemeChips';
-import { TrailMiniGraph } from '../../components/graph/TrailMiniGraph';
+import { unstable_cache } from 'next/cache';
+import { LuChevronLeft, LuChevronRight, LuSearch, LuFootprints } from 'react-icons/lu';
+import { searchTrails, trailFacets } from '../../lib/queries';
+import { trailProfiles } from '../../lib/trail-profiles';
+import { TrailCard } from '../../components/trails/TrailCard';
 import { PageHeader } from '../../components/ui/page-header';
-import { SectionHeading } from '../../components/ui/section-heading';
+import { EmptyState } from '../../components/ui/empty-state';
+
+// Facets change only on a sync → cache for an hour (like /explore).
+const cachedTrailFacets = unstable_cache(trailFacets, ['trail-facets'], { revalidate: 3600 });
 
 /**
- * Thematic trails (NPS-expansion P0 #2) — RSC. A "trail" is the set of parks connected by a
- * historical figure (`Person`-[:ASSOCIATED_WITH]->`Park`) or a shared `Topic`: a multi-hop graph
- * traversal no single park page reveals. Pick a theme → see the cross-park trail → open it on /graph.
+ * Trails finder (ADR-066/070) — RSC, faceted GET form (works without JS), results from Neo4j. The
+ * center of gravity is hiking trails; a thin "activities" strip points at the broader park-activity data
+ * in Explore until the activity-first lenses land (Phase 4). Thematic cross-park stories live at /journeys.
  */
 export const dynamic = 'force-dynamic';
 
 type SP = Record<string, string | undefined>;
+const DIFFICULTIES = ['easy', 'moderate', 'strenuous'];
+const USES = ['hike', 'bike', 'horse', 'ski', 'water'];
+const MAX_MILES = ['3', '6', '10', '15'];
+const MAX_GAIN = ['500', '1500', '3000'];
 
 export default async function TrailsPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
-  const person = sp.person?.trim() || undefined;
-  const topic = sp.topic?.trim() || undefined;
-  const selected = person || topic;
-
-  const [themes, trail] = await Promise.all([
-    // Pull the full taxonomy (capped high) — ThemeChips collapses + searches client-side so the list
-    // no longer looks silently truncated (friction #6).
-    trailThemes(500),
-    selected ? thematicTrail({ person, topic }) : Promise.resolve([]),
+  const pageSize = 24;
+  const page = Math.max(1, Number(sp.page) || 1);
+  const [search, f] = await Promise.all([
+    searchTrails({
+      q: sp.q,
+      parkCode: sp.park,
+      difficulty: sp.difficulty,
+      routeType: sp.routeType,
+      surface: sp.surface,
+      allowedUse: sp.use,
+      maxMiles: sp.maxMiles ? Number(sp.maxMiles) : undefined,
+      maxGainFt: sp.maxGainFt ? Number(sp.maxGainFt) : undefined,
+      dogsAllowed: sp.dogs === '1',
+      wheelchairAccessible: sp.accessible === '1',
+      permitRequired: sp.permit === '1' ? true : undefined,
+      limit: pageSize,
+      offset: (page - 1) * pageSize,
+    }),
+    cachedTrailFacets().catch(() => ({ parks: [], surfaces: [], routeTypes: [] })),
   ]);
 
-  const graphHref = person ? `/graph?person=${encodeURIComponent(person)}` : topic ? `/graph?topic=${encodeURIComponent(topic)}` : '/graph';
-  const tourHref = person ? `/trails/tour?person=${encodeURIComponent(person)}` : topic ? `/trails/tour?topic=${encodeURIComponent(topic)}` : '/trails/tour';
-
-  const peopleChips: ThemeChipItem[] = themes.people.map((p) => ({
-    key: p.title,
-    label: p.title,
-    parks: p.parks,
-    href: `/trails?person=${encodeURIComponent(p.title)}`,
-    active: person === p.title,
-  }));
-  const topicChips: ThemeChipItem[] = themes.topics.map((t) => ({
-    key: t.name,
-    label: t.name,
-    parks: t.parks,
-    href: `/trails?topic=${encodeURIComponent(t.name)}`,
-    active: topic === t.name,
-  }));
+  const results = search.items;
+  const total = search.total;
+  // Elevation sparklines: load the result parks' profiles from Blob (deduped; empty until elevation-synced).
+  const profiles = await trailProfiles(results.map((t) => t.parkCode)).catch(
+    () => ({}) as Record<string, { distMi: number; elevFt: number }[]>,
+  );
+  const firstIdx = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const lastIdx = (page - 1) * pageSize + results.length;
+  const hasPrev = page > 1;
+  const hasNext = lastIdx < total;
+  const pageHref = (p: number) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(sp)) if (v && k !== 'page') qs.set(k, v);
+    if (p > 1) qs.set('page', String(p));
+    const s = qs.toString();
+    return s ? `/trails?${s}` : '/trails';
+  };
+  const anyTrails = total > 0 || Object.keys(sp).some((k) => sp[k] && k !== 'page');
 
   return (
     <Box>
       <PageHeader
-        eyebrow="Thematic trails"
-        title="Follow a story across the parks"
-        subtitle="Cross-park journeys connected by the people who shaped them or a theme they share — each one a single graph traversal."
+        eyebrow="Trails"
+        title="Find your hike"
+        subtitle="Real, hikeable trails by length, elevation, difficulty, route type, dogs, accessibility, and permits."
         contour
       />
 
       <Container maxW="6xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 10 }}>
-        {/* Theme pickers */}
-        <Stack gap={6} mb={10}>
-          <Box>
-            <Heading as="h2" size="md" mb={3}>People &amp; stories</Heading>
-            {peopleChips.length === 0 ? (
-              <Text color="fg.muted" fontSize="sm">No multi-park figures yet — run the data sync to populate them.</Text>
-            ) : (
-              <ThemeChips items={peopleChips} activeColor="pine" />
-            )}
-          </Box>
-          <Box>
-            <Heading as="h2" size="md" mb={3}>Topics</Heading>
-            {topicChips.length === 0 ? (
-              <Text color="fg.muted" fontSize="sm">No topics span enough parks yet.</Text>
-            ) : (
-              <ThemeChips items={topicChips} activeColor="trail" />
-            )}
-          </Box>
-        </Stack>
+        {/* Activity strip — hiking-first; the rest of the park-activity data lives in Explore for now.
+            Wrap (not an HStack with standalone "·" separators) so it wraps cleanly on mobile with no
+            orphaned middots when the long links break to new lines. */}
+        <Wrap mb={6} gap={3} align="center">
+          <WrapItem>
+            <Badge colorPalette="pine" variant="solid" gap={1}><Icon boxSize={3}><LuFootprints /></Icon> Hiking</Badge>
+          </WrapItem>
+          <WrapItem>
+            <CLink asChild fontSize="sm" color="fg.muted" _hover={{ color: 'brand.fg' }}>
+              <NextLink href="/explore">Biking, paddling, stargazing &amp; more in Explore →</NextLink>
+            </CLink>
+          </WrapItem>
+          <WrapItem>
+            <CLink asChild fontSize="sm" color="fg.muted" _hover={{ color: 'brand.fg' }}>
+              <NextLink href="/journeys">Thematic Journeys →</NextLink>
+            </CLink>
+          </WrapItem>
+        </Wrap>
 
-        {/* Selected trail */}
-        {selected ? (
-          <Box>
-            <SectionHeading
-              title={person ? `Parks tied to ${person}` : `${topic} trail`}
-              badge={`${trail.length} park${trail.length === 1 ? '' : 's'}`}
-              badgeTone="brand"
-              action={{ href: graphHref, label: 'See it on the graph' }}
-            />
-            {trail.length === 0 ? (
-              <Text color="fg.muted">No parks found for this theme.</Text>
-            ) : (
-              <>
-                {/* Fly the trail in 3D before the static grid (#11B). */}
-                {trail.some((p) => p.lat != null && p.lng != null) ? (
-                  <HStack mb={5}>
-                    <CLink
-                      asChild
-                      display="inline-flex"
-                      alignItems="center"
-                      bg="brand.solid"
-                      color="brand.contrast"
-                      borderRadius="full"
-                      px={4}
-                      py={2}
-                      fontSize="sm"
-                      fontWeight="medium"
-                      _hover={{ textDecoration: 'none', opacity: 0.92 }}
-                    >
-                      <NextLink href={tourHref}><Icon mr={2}><LuMountainSnow /></Icon>Fly the 3D tour</NextLink>
-                    </CLink>
-                  </HStack>
-                ) : null}
-                {/* See the trail as a connected graph before the card grid (ADR-039, friction #5). */}
-                <Box mb={6}>
-                  <TrailMiniGraph
-                    themeLabel={selected}
-                    parks={trail.map((p) => ({ parkCode: p.parkCode, name: p.name }))}
-                  />
+        {/* Filter bar — plain GET form, works without JS. */}
+        <Box borderWidth="1px" borderColor="border" borderRadius="l2" bg="bg.panel" p={{ base: 4, md: 5 }} mb={6}>
+          <form method="get">
+            <Flex gap={4} wrap="wrap" align="end">
+              <Field.Root w={{ base: 'full', sm: '220px' }}>
+                <Field.Label>Search</Field.Label>
+                <Box position="relative" w="full">
+                  <Box position="absolute" left={3} top="50%" transform="translateY(-50%)" color="fg.subtle" pointerEvents="none" zIndex={1}>
+                    <Icon boxSize={4}><LuSearch /></Icon>
+                  </Box>
+                  <Input name="q" defaultValue={sp.q ?? ''} placeholder="trail name" ps={9} />
                 </Box>
-                <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={5}>
-                  {trail.map((p) => (
-                    <ParkCard key={p.parkCode} park={p} />
-                  ))}
-                </SimpleGrid>
-              </>
-            )}
-          </Box>
+              </Field.Root>
+              <ParkSelect value={sp.park} options={f.parks} />
+              <FacetSelect name="difficulty" label="Difficulty" value={sp.difficulty} options={DIFFICULTIES} capitalize />
+              <FacetSelect name="maxMiles" label="Max length" value={sp.maxMiles} options={MAX_MILES} suffix=" mi" />
+              <FacetSelect name="maxGainFt" label="Max gain" value={sp.maxGainFt} options={MAX_GAIN} suffix=" ft" />
+              <FacetSelect name="routeType" label="Route type" value={sp.routeType} options={f.routeTypes} capitalize />
+              <FacetSelect name="use" label="Allowed use" value={sp.use} options={USES} capitalize />
+              {f.surfaces.length > 0 ? <FacetSelect name="surface" label="Surface" value={sp.surface} options={f.surfaces} /> : null}
+              <Button type="submit" colorPalette="pine">Apply</Button>
+            </Flex>
+            <Flex gap={4} wrap="wrap" mt={3} pt={3} borderTopWidth="1px" borderColor="border">
+              <FacetCheck name="dogs" label="Dog-friendly" checked={sp.dogs === '1'} />
+              <FacetCheck name="accessible" label="Wheelchair accessible" checked={sp.accessible === '1'} />
+              <FacetCheck name="permit" label="Permit-required only" checked={sp.permit === '1'} />
+            </Flex>
+          </form>
+        </Box>
+
+        <Text color="fg.muted" mb={4} fontSize="sm">
+          {total === 0 ? '0 trails' : `Showing ${firstIdx}–${lastIdx} of ${total} trail${total === 1 ? '' : 's'}`}
+        </Text>
+
+        {results.length === 0 ? (
+          <EmptyState
+            icon={<LuFootprints />}
+            title={anyTrails ? 'No trails matched' : 'Trail data is on its way'}
+            description={
+              anyTrails
+                ? 'Try clearing a filter or widening the length / elevation range.'
+                : "We're ingesting real trail geometry, elevation, and difficulty from NPS Public Trails GIS. Meanwhile, browse parks or a thematic journey."
+            }
+            py={16}
+          >
+            <Button asChild colorPalette="pine" variant="outline" mt={2}>
+              <NextLink href={anyTrails ? '/trails' : '/explore'}>{anyTrails ? 'Reset filters' : 'Browse parks'}</NextLink>
+            </Button>
+          </EmptyState>
         ) : (
-          <Text color="fg.muted">Pick a person or topic above to trace its trail across the parks.</Text>
+          <>
+            <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={5}>
+              {results.map((t) => (
+                <TrailCard key={t.id} trail={t} profile={profiles[t.id]} />
+              ))}
+            </SimpleGrid>
+            {hasPrev || hasNext ? (
+              <Flex justify="center" align="center" gap={4} mt={10}>
+                {hasPrev ? (
+                  <Button asChild variant="outline" size="sm">
+                    <NextLink href={pageHref(page - 1)}><Icon><LuChevronLeft /></Icon> Prev</NextLink>
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" disabled><Icon><LuChevronLeft /></Icon> Prev</Button>
+                )}
+                <Text fontSize="sm" color="fg.muted">Page {page}</Text>
+                {hasNext ? (
+                  <Button asChild variant="outline" size="sm">
+                    <NextLink href={pageHref(page + 1)}>Next <Icon><LuChevronRight /></Icon></NextLink>
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" disabled>Next <Icon><LuChevronRight /></Icon></Button>
+                )}
+              </Flex>
+            ) : null}
+          </>
         )}
       </Container>
     </Box>
+  );
+}
+
+function ParkSelect({ value, options }: { value?: string; options: { parkCode: string; name: string }[] }) {
+  if (options.length === 0) return null;
+  return (
+    <Field.Root w={{ base: 'full', sm: '200px' }}>
+      <Field.Label>Park</Field.Label>
+      <NativeSelect.Root>
+        <NativeSelect.Field name="park" defaultValue={value ?? ''}>
+          <option value="">Any park</option>
+          {options.map((o) => (
+            <option key={o.parkCode} value={o.parkCode}>{o.name}</option>
+          ))}
+        </NativeSelect.Field>
+        <NativeSelect.Indicator />
+      </NativeSelect.Root>
+    </Field.Root>
+  );
+}
+
+function FacetSelect({
+  name,
+  label,
+  value,
+  options,
+  capitalize,
+  suffix,
+}: {
+  name: string;
+  label: string;
+  value?: string;
+  options: string[];
+  capitalize?: boolean;
+  suffix?: string;
+}) {
+  return (
+    <Field.Root w={{ base: 'full', sm: '170px' }}>
+      <Field.Label>{label}</Field.Label>
+      <NativeSelect.Root>
+        <NativeSelect.Field name={name} defaultValue={value ?? ''} textTransform={capitalize ? 'capitalize' : undefined}>
+          <option value="">Any</option>
+          {options.filter(Boolean).map((o) => (
+            <option key={o} value={o}>{`${o}${suffix ?? ''}`}</option>
+          ))}
+        </NativeSelect.Field>
+        <NativeSelect.Indicator />
+      </NativeSelect.Root>
+    </Field.Root>
+  );
+}
+
+function FacetCheck({ name, label, checked }: { name: string; label: string; checked: boolean }) {
+  return (
+    <Checkbox.Root name={name} value="1" defaultChecked={checked} colorPalette="pine">
+      <Checkbox.HiddenInput />
+      <Checkbox.Control />
+      <Checkbox.Label fontSize="sm">{label}</Checkbox.Label>
+    </Checkbox.Root>
   );
 }

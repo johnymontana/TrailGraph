@@ -58,6 +58,25 @@ export const env = {
       return optional('ORS_BASE_URL', 'https://api.openrouteservice.org');
     },
   },
+  trails: {
+    // NPS Public Trails ArcGIS FeatureServer layer (ADR-066). Public-domain; keyed by UNITCODE.
+    get featureServerUrl() {
+      return optional(
+        'NPS_TRAILS_URL',
+        'https://mapservices.nps.gov/arcgis/rest/services/NationalDatasets/NPS_Public_Trails/FeatureServer/0',
+      );
+    },
+    // Douglas–Peucker tolerance in degrees (~9m at mid-latitudes) for stored geometry (ADR-067).
+    // Guard NaN: a malformed override must fall back, not silently collapse every line to its endpoints.
+    get simplifyTolerance() {
+      const n = Number(optional('TRAIL_SIMPLIFY_TOLERANCE', '0.00008'));
+      return Number.isFinite(n) && n > 0 ? n : 0.00008;
+    },
+    // Batch elevation API (opentopodata-compatible) for the elevation derive step (ADR-068). Empty → no-op.
+    get elevationApiUrl() {
+      return optional('ELEVATION_API_URL');
+    },
+  },
   models: {
     get embedding() {
       return optional('EMBEDDING_MODEL', 'openai/text-embedding-3-small');

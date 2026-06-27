@@ -13,6 +13,9 @@ export interface UserMemory {
   passes: { id: string; name: string }[];
   stamps: { id: string; label: string }[];
   availability: { start: string | null; end: string | null };
+  // Trail memory (ADR-071): preferences anchor + saved/wishlisted/done trails.
+  trailPreferences: { maxMiles: number | null; maxGainFt: number | null; difficulty: string | null; avoidExposure: boolean; dogsRequired: boolean };
+  trailHistory: { saved: { id: string; name: string }[]; wishlisted: { id: string; name: string }[]; done: { id: string; name: string }[] };
 }
 
 /**
@@ -69,12 +72,18 @@ export async function collectedStampParksGeo(userId: string): Promise<MapPin[]> 
 
 export async function getUserMemory(userId: string): Promise<UserMemory> {
   const rows = await readGraph<
-    Omit<UserMemory, 'travel' | 'availability'> & {
+    Omit<UserMemory, 'travel' | 'availability' | 'trailPreferences' | 'trailHistory'> & {
       wheelchair: boolean | null;
       rvMaxLengthFt: number | null;
       requiredAmenities: string[];
       availStart: string | null;
       availEnd: string | null;
+      tpMaxMiles: number | null;
+      tpMaxGainFt: number | null;
+      tpDifficulty: string | null;
+      tpAvoidExposure: boolean;
+      tpDogsRequired: boolean;
+      trailHistory: { id: string; name: string; kind: string }[];
     }
   >(
     `
@@ -98,9 +107,17 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
     OPTIONAL MATCH (u)-[:COLLECTED]->(ps:PassportStamp)
     WITH u, preferences, considered, planned, con, requiredAmenities, passes,
          [x IN collect(DISTINCT {id: ps.id, label: ps.label}) WHERE x.id IS NOT NULL] AS stamps
+    OPTIONAL MATCH (u)-[:PREFERS_TRAIL]->(tp:TrailPrefs)
+    WITH u, preferences, considered, planned, con, requiredAmenities, passes, stamps, tp
+    OPTIONAL MATCH (u)-[sv:SAVED|WISHLISTED|DID]->(tr:Trail)
+    WITH u, preferences, considered, planned, con, requiredAmenities, passes, stamps, tp,
+         [x IN collect(DISTINCT CASE WHEN tr IS NULL THEN null ELSE {id: tr.id, name: tr.name, kind: type(sv)} END) WHERE x IS NOT NULL] AS trailHistory
     OPTIONAL MATCH (u)-[av:AVAILABLE]->(:Season)
     RETURN preferences, considered, planned,
            con.wheelchair AS wheelchair, con.rvMaxLengthFt AS rvMaxLengthFt, requiredAmenities, passes, stamps,
+           tp.maxMiles AS tpMaxMiles, tp.maxGainFt AS tpMaxGainFt, tp.difficulty AS tpDifficulty,
+           coalesce(tp.avoidExposure, false) AS tpAvoidExposure, coalesce(tp.dogsRequired, false) AS tpDogsRequired,
+           trailHistory,
            av.start AS availStart, av.end AS availEnd
     `,
     { userId },
@@ -118,6 +135,18 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
     passes: r?.passes ?? [],
     stamps: r?.stamps ?? [],
     availability: { start: r?.availStart ?? null, end: r?.availEnd ?? null },
+    trailPreferences: {
+      maxMiles: r?.tpMaxMiles ?? null,
+      maxGainFt: r?.tpMaxGainFt ?? null,
+      difficulty: r?.tpDifficulty ?? null,
+      avoidExposure: r?.tpAvoidExposure ?? false,
+      dogsRequired: r?.tpDogsRequired ?? false,
+    },
+    trailHistory: {
+      saved: (r?.trailHistory ?? []).filter((t) => t.kind === 'SAVED').map((t) => ({ id: t.id, name: t.name })),
+      wishlisted: (r?.trailHistory ?? []).filter((t) => t.kind === 'WISHLISTED').map((t) => ({ id: t.id, name: t.name })),
+      done: (r?.trailHistory ?? []).filter((t) => t.kind === 'DID').map((t) => ({ id: t.id, name: t.name })),
+    },
   };
 }
 

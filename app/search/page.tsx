@@ -3,7 +3,7 @@ import NextLink from 'next/link';
 import NextImage from 'next/image';
 import { LuSearch, LuSparkles } from 'react-icons/lu';
 import { headers } from 'next/headers';
-import { vibeSearch, semanticSearch, semanticArticles, type SemanticHit, type ArticleHit } from '../../lib/queries';
+import { vibeSearch, semanticSearch, semanticArticles, semanticTrails, type SemanticHit, type ArticleHit, type TrailSummary } from '../../lib/queries';
 import { embedQuery } from '../../lib/embed-cache';
 import { rateLimit, rlIp, clientIpFrom } from '../../lib/rate-limit';
 import { ParkCard } from '../../components/ParkCard';
@@ -36,6 +36,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
   type ParkHit = Awaited<ReturnType<typeof vibeSearch>>[number];
   let parks: ParkHit[] = [];
+  let trails: TrailSummary[] = [];
   let places: SemanticHit[] = [];
   let people: SemanticHit[] = [];
   let articles: ArticleHit[] = [];
@@ -51,8 +52,9 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     } else {
       const vec = await embedQuery(q).catch(() => null);
       if (vec) {
-        [parks, places, people, articles] = await Promise.all([
+        [parks, trails, places, people, articles] = await Promise.all([
           vibeSearch(q, { limit, vector: vec }).catch(() => [] as ParkHit[]),
+          semanticTrails(q, limit, vec).catch(() => [] as TrailSummary[]),
           semanticSearch('place', q, limit, vec).catch(() => [] as SemanticHit[]),
           semanticSearch('person', q, limit, vec).catch(() => [] as SemanticHit[]),
           semanticArticles(q, limit, vec).catch(() => [] as ArticleHit[]),
@@ -119,6 +121,18 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               )}
             </Section>
 
+            <Section title="Trails" count={trails.length}>
+              {trails.length === 0 ? (
+                <Empty />
+              ) : (
+                <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={5}>
+                  {trails.map((t) => (
+                    <TrailHitCard key={t.id} hit={t} />
+                  ))}
+                </SimpleGrid>
+              )}
+            </Section>
+
             <Section title="Places" count={places.length}>
               {places.length === 0 ? (
                 <Empty />
@@ -175,6 +189,36 @@ function Empty() {
     <Text color="fg.muted" fontSize="sm">
       No matches.
     </Text>
+  );
+}
+
+const TRAIL_DIFF_PALETTE: Record<string, string> = { easy: 'teal', moderate: 'trail', strenuous: 'red' };
+
+/** Trail result card (ADR-072 vibe-search) — links to the trail detail page. */
+function TrailHitCard({ hit }: { hit: TrailSummary }) {
+  const stats = [
+    hit.lengthMiles != null ? `${hit.lengthMiles} mi` : null,
+    hit.elevationGainFt != null ? `+${hit.elevationGainFt.toLocaleString()} ft` : null,
+    hit.estTimeHrs != null ? `~${hit.estTimeHrs} hr` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <CLink asChild _hover={{ textDecoration: 'none' }} display="block" w="full" h="full">
+      <NextLink href={`/trails/${encodeURIComponent(hit.id)}`}>
+        <Card.Root variant="interactive" w="full" h="100%">
+          <Card.Body p={3} gap={1}>
+            <HStack wrap="wrap" gap={2}>
+              <Badge colorPalette={TRAIL_DIFF_PALETTE[hit.difficulty ?? ''] ?? 'gray'}>{hit.difficulty ?? 'trail'}</Badge>
+              <Text fontWeight="semibold" fontFamily="heading" lineClamp={1} flex="1">{hit.name}</Text>
+              {hit.permitRequired ? <Badge colorPalette="orange">permit</Badge> : null}
+            </HStack>
+            {hit.parkName ? <Text fontSize="xs" color="fg.muted" lineClamp={1}>{hit.parkName}</Text> : null}
+            {stats ? <Text fontSize="sm">{stats}</Text> : null}
+          </Card.Body>
+        </Card.Root>
+      </NextLink>
+    </CLink>
   );
 }
 

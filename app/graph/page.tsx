@@ -1,5 +1,5 @@
 import { Box, Heading, Text } from '@chakra-ui/react';
-import { graphSeed, thematicTrail } from '../../lib/queries';
+import { graphSeed, journeyTrail } from '../../lib/queries';
 import { getServerUserId } from '../../lib/session';
 import { getUserMemory, userContextGraph, userContextBridges } from '../../lib/memory-graph';
 import { bridgesToRels } from '../../lib/graph-nvl';
@@ -14,7 +14,7 @@ type SP = Record<string, string | undefined>;
 export default async function GraphPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const userId = await getServerUserId();
-  // A `?person=`/`?topic=` link from /trails highlights that thematic trail's parks instead of the
+  // A `?person=`/`?topic=` link from /journeys highlights that journey's parks instead of the
   // user's considered set — the cross-park traversal made literal on the constellation.
   const person = sp.person?.trim() || undefined;
   const topic = sp.topic?.trim() || undefined;
@@ -22,7 +22,7 @@ export default async function GraphPage({ searchParams }: { searchParams: Promis
   const [data, mem, trail, context] = await Promise.all([
     graphSeed().catch(() => ({ nodes: [], links: [] })),
     userId ? getUserMemory(userId).catch(() => null) : Promise.resolve(null),
-    trailTheme ? thematicTrail({ person, topic }).catch(() => []) : Promise.resolve([]),
+    trailTheme ? journeyTrail({ person, topic }).catch(() => []) : Promise.resolve([]),
     userId ? userContextGraph(userId).catch(() => undefined) : Promise.resolve(undefined),
   ]);
   const highlight = trailTheme ? trail.map((p) => p.parkCode) : (mem?.considered.map((c) => c.parkCode) ?? []);

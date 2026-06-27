@@ -524,7 +524,7 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
       {people.length > 0 ? (
         <Box mt={12}>
           <Heading size="md" mb={1}>People &amp; stories</Heading>
-          <Text fontSize="sm" color="fg.muted" mb={3}>Figures tied to {park.name as string} — each spans a cross-park trail.</Text>
+          <Text fontSize="sm" color="fg.muted" mb={3}>Figures tied to {park.name as string} — each spans a cross-park journey.</Text>
           <Stack gap={2}>
             {people.map((per) => {
               const tags = cleanTags(per.title, per.tags);

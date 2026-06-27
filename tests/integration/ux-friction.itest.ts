@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { describeIntegration } from './db';
 import { seedTestData } from '../../scripts/seed-test-data';
 import { closeDriver, readGraph, writeGraph } from '../../lib/neo4j';
-import { searchParks, parkDetail, thematicTrail } from '../../lib/queries';
+import { searchParks, parkDetail, journeyTrail } from '../../lib/queries';
 import { considerPark, deleteConsidered } from '../../lib/bridges';
 import { getUserMemory } from '../../lib/memory-graph';
 
@@ -82,8 +82,8 @@ describeIntegration('new-user UX friction (Neo4j)', () => {
   });
 
   // ── Thematic trail shape feeding the mini-graph (ADR-039 P1.5) ───────────
-  it('thematicTrail returns parkCode + name per park, ready for trailToNvl', async () => {
-    const trail = await thematicTrail({ person: 'Ferdinand Hayden' });
+  it('journeyTrail returns parkCode + name per park, ready for trailToNvl', async () => {
+    const trail = await journeyTrail({ person: 'Ferdinand Hayden' });
     const codes = trail.map((p) => p.parkCode);
     expect(codes).toEqual(expect.arrayContaining(['yell', 'glac'])); // seeded ASSOCIATED_WITH both
     for (const p of trail) {

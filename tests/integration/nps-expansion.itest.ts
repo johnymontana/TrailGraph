@@ -3,9 +3,9 @@ import { describeIntegration } from './db';
 import { seedTestData } from '../../scripts/seed-test-data';
 import { closeDriver, writeGraph, readGraph } from '../../lib/neo4j';
 import {
-  thematicTrail,
+  journeyTrail,
   peopleForPark,
-  trailThemes,
+  journeyThemes,
   toursForPark,
   stampsForPark,
   eventsForPark,
@@ -46,24 +46,24 @@ describeIntegration('NPS expansion domain (Neo4j)', () => {
   });
 
   // ── Thematic trails (P0 #2) ──────────────────────────────────────────────
-  it('thematicTrail(person) traverses ASSOCIATED_WITH to every park a figure touches', async () => {
-    const trail = await thematicTrail({ person: 'Hayden' });
+  it('journeyTrail(person) traverses ASSOCIATED_WITH to every park a figure touches', async () => {
+    const trail = await journeyTrail({ person: 'Hayden' });
     const codes = trail.map((p) => p.parkCode);
     expect(codes).toEqual(expect.arrayContaining(['yell', 'glac'])); // seeded: Ferdinand Hayden → yell + glac
     expect(trail.every((p) => p.via === 'Ferdinand Hayden')).toBe(true);
   });
 
-  it('thematicTrail(topic) returns parks sharing a topic', async () => {
-    const trail = await thematicTrail({ topic: 'Volcanoes' });
+  it('journeyTrail(topic) returns parks sharing a topic', async () => {
+    const trail = await journeyTrail({ topic: 'Volcanoes' });
     expect(trail.map((p) => p.parkCode)).toContain('yell');
     expect(trail.every((p) => p.via === 'Volcanoes')).toBe(true);
   });
 
-  it('peopleForPark + trailThemes surface multi-park figures', async () => {
+  it('peopleForPark + journeyThemes surface multi-park figures', async () => {
     const people = await peopleForPark('yell');
     expect(people.some((p) => p.title === 'Ferdinand Hayden')).toBe(true);
 
-    const themes = await trailThemes();
+    const themes = await journeyThemes();
     const hayden = themes.people.find((p) => p.title === 'Ferdinand Hayden');
     expect(hayden).toBeTruthy();
     expect(hayden!.parks).toBeGreaterThanOrEqual(2);

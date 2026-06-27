@@ -102,6 +102,12 @@ export async function getTrip(userId: string, tripId: string) {
     OPTIONAL MATCH (s)-[d:DRIVE_TO]->(:Stop)
     WITH t, s, p, c, poi, pl, d
     ORDER BY s.order ASC
+    // Hikes nested under a stop (ADR-071) — a subquery so many INCLUDES_TRAIL edges don't multiply the row.
+    CALL {
+      WITH s
+      OPTIONAL MATCH (s)-[:INCLUDES_TRAIL]->(tr:Trail)
+      RETURN collect(DISTINCT tr{.id, .name, .lengthMiles, .estTimeHrs, .difficulty, permitRequired: coalesce(tr.permitRequired, false)}) AS hikes
+    }
     RETURN t.id AS id, t.name AS name, t.startDate AS startDate, t.endDate AS endDate,
       collect(CASE WHEN s IS NULL THEN null ELSE {
         id: s.id, order: s.order, day: s.day, nights: s.nights, name: s.name,
@@ -110,6 +116,7 @@ export async function getTrip(userId: string, tripId: string) {
         lng: coalesce(s.location.longitude, p.location.longitude, c.location.longitude, poi.location.longitude, pl.location.longitude),
         parkCode: p.parkCode, parkName: p.fullName,
         campgroundName: c.name, poiTitle: poi.title, placeTitle: pl.title,
+        hikes: hikes,
         driveTo: CASE WHEN d IS NULL THEN null ELSE {miles: d.miles, minutes: d.minutes, source: d.source} END
       } END) AS stops
     `,
@@ -123,6 +130,16 @@ export async function getTrip(userId: string, tripId: string) {
     (s) => s && (s.parkName || s.campgroundName || s.poiTitle || s.placeTitle || s.name || (s.lat != null && s.lng != null)),
   );
   return trip;
+}
+
+/** A hike attached to a stop (ADR-071): the trip-side of `(:Stop)-[:INCLUDES_TRAIL]->(:Trail)`. */
+export interface TripHike {
+  id: string;
+  name: string;
+  lengthMiles: number | null;
+  estTimeHrs: number | null;
+  difficulty: string | null;
+  permitRequired: boolean;
 }
 
 interface StopRow {
@@ -139,7 +156,57 @@ interface StopRow {
   campgroundName: string | null;
   poiTitle: string | null;
   placeTitle: string | null;
+  hikes: TripHike[];
   driveTo: { miles: number; minutes: number; source: string } | null;
+}
+
+/**
+ * Attach a hike to a stop (ADR-071): `(:Stop)-[:INCLUDES_TRAIL]->(:Trail)`. Both must exist + the trip
+ * must be the caller's. Returns false on an unknown stop/trail (so the ranger learns it wasn't added).
+ */
+export async function addTrailToStop(
+  userId: string,
+  tripId: string,
+  stopId: string,
+  trailId: string,
+): Promise<boolean> {
+  const rows = await writeGraph<{ ok: boolean }>(
+    `MATCH (t:Trip {id:$tripId, userId:$userId})-[:HAS_STOP]->(s:Stop {id:$stopId})
+     MATCH (tr:Trail {id:$trailId})
+     MERGE (s)-[:INCLUDES_TRAIL]->(tr)
+     RETURN true AS ok`,
+    { userId, tripId, stopId, trailId },
+  );
+  return rows.length > 0;
+}
+
+export async function removeTrailFromStop(
+  userId: string,
+  tripId: string,
+  stopId: string,
+  trailId: string,
+): Promise<void> {
+  await writeGraph(
+    `MATCH (t:Trip {id:$tripId, userId:$userId})-[:HAS_STOP]->(s:Stop {id:$stopId})-[r:INCLUDES_TRAIL]->(:Trail {id:$trailId})
+     DELETE r`,
+    { userId, tripId, stopId, trailId },
+  );
+}
+
+/** A trip's hikes paired with their park's Blob geo URL (ADR-067/071) — geometry lives in Blob, not the
+ *  graph, so GPX/offline read the real polyline from `:Park.trailsGeoUrl`. Distinct per trail. */
+export interface TripHikeRef {
+  trailId: string;
+  name: string;
+  parkCode: string | null;
+  geoUrl: string | null;
+}
+export async function tripHikeRefs(userId: string, tripId: string): Promise<TripHikeRef[]> {
+  return readGraph<TripHikeRef>(
+    `MATCH (:Trip {id:$tripId, userId:$userId})-[:HAS_STOP]->(:Stop)-[:INCLUDES_TRAIL]->(tr:Trail)-[:IN_PARK]->(p:Park)
+     RETURN DISTINCT tr.id AS trailId, tr.name AS name, tr.parkCode AS parkCode, p.trailsGeoUrl AS geoUrl`,
+    { userId, tripId },
+  );
 }
 
 export async function addStop(userId: string, tripId: string, stop: NewStop): Promise<string | null> {

@@ -2,20 +2,31 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Box, Stack, Heading, Text, Input, Button, Flex, HStack, IconButton, Separator, Badge, Icon } from '@chakra-ui/react';
 import { Reorder } from 'motion/react';
-import { LuX, LuGripVertical } from 'react-icons/lu';
+import { LuX, LuGripVertical, LuFootprints, LuTriangleAlert } from 'react-icons/lu';
 import { MapTripCanvas } from './MapTripCanvas';
 import { ParkSearchInput } from './ParkSearchInput';
 import { toast } from '../../lib/toast';
 import { TripDashboardCard } from '../conditions/ConditionCards';
 import { AlertList } from '../chat/Cards';
 import { decodeEntities } from '../../lib/html-entities';
+import { tripDayLoads } from '../../lib/itinerary';
 import type { TripDashboard } from '../../lib/conditions';
 import type { TripMetrics } from '../../lib/trip-lab';
 
 /** Itinerary builder (C1-C4) — drives the Trip service via /api/trips. Fully functional without the agent. */
+interface TripHike {
+  id: string;
+  name: string;
+  lengthMiles?: number | null;
+  estTimeHrs?: number | null;
+  difficulty?: string | null;
+  permitRequired?: boolean;
+}
+
 interface Stop {
   id: string;
   order: number;
+  day?: number | null;
   parkCode?: string | null;
   parkName?: string;
   campgroundName?: string;
@@ -24,6 +35,7 @@ interface Stop {
   name?: string;
   lat?: number | null;
   lng?: number | null;
+  hikes?: TripHike[];
   driveTo?: { miles: number; minutes: number; source: string } | null;
 }
 
@@ -199,6 +211,18 @@ export function TripBuilder() {
     if (rateLimited(res)) return;
     if (res.ok) applyMutation(await res.json());
   }
+  // Detach a hike from a stop (ADR-071) — `(:Stop)-[:INCLUDES_TRAIL]->(:Trail)`. Adding hikes happens via the
+  // ranger or a trail page; the builder shows them and lets you drop one.
+  async function removeHike(stopId: string, trailId: string) {
+    if (!trip) return;
+    const res = await fetch(`/api/trips/${trip.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op: 'excludeTrail', stopId, trailId }),
+    });
+    if (rateLimited(res)) return;
+    if (res.ok) applyMutation(await res.json());
+  }
   // Persist a drag-reorder on drop (#9). Skip the round-trip if the order didn't actually change. The 30/60s
   // trip-mutation cap is server-side; a 429 surfaces as a toast and the next openTrip resyncs the true order.
   async function persistReorder() {
@@ -356,6 +380,17 @@ export function TripBuilder() {
     () => ((trip?.stops ?? []).filter(Boolean) as Stop[]).map((s) => s.parkCode).filter((code): code is string => !!code),
     [trip],
   );
+  // Schedule-aware "over-packed day" warning (ADR-071): aggregate each day's hike hours + drive hours and
+  // flag the days over ~8 h. Uses dayMap (Suggest day plan) or the stop's persisted day; empty until days exist.
+  const overPackedDays = useMemo(() => {
+    const loadStops = ((trip?.stops ?? []).filter(Boolean) as Stop[]).map((s) => ({
+      day: dayMap[s.id] ?? s.day ?? null,
+      driveMinutesToHere: s.driveTo?.minutes ?? 0,
+      hikeMiles: (s.hikes ?? []).reduce((m, h) => m + (h.lengthMiles ?? 0), 0),
+      hikeHours: (s.hikes ?? []).reduce((m, h) => m + (h.estTimeHrs ?? 0), 0),
+    }));
+    return tripDayLoads(loadStops).filter((d) => d.overPacked);
+  }, [trip, dayMap]);
 
   return (
     <Stack p={4} gap={4} h="100%" overflowY="auto">
@@ -454,10 +489,53 @@ export function TripBuilder() {
                       {s.driveTo.source === 'great_circle' ? ' (approx)' : ''}
                     </Text>
                   ) : null}
+                  {/* Hikes nested under this park stop (ADR-071) — add via the ranger or a trail page; remove here. */}
+                  {s.hikes?.length ? (
+                    <Stack gap={0.5} pl={4} mt={1}>
+                      <Text fontSize="2xs" fontWeight="bold" color="fg.muted" textTransform="uppercase" letterSpacing="wide">
+                        Hikes here
+                      </Text>
+                      {s.hikes.map((h) => (
+                        <HStack key={h.id} gap={1.5}>
+                          <Icon color="pine.solid" boxSize={3}><LuFootprints /></Icon>
+                          <Text fontSize="xs" flex="1" lineClamp={1}>
+                            {h.name}
+                            {h.lengthMiles != null || h.estTimeHrs != null ? (
+                              <Text as="span" color="fg.muted">
+                                {' '}· {[h.lengthMiles != null ? `${h.lengthMiles} mi` : null, h.estTimeHrs != null ? `~${h.estTimeHrs} hr` : null].filter(Boolean).join(' · ')}
+                              </Text>
+                            ) : null}
+                          </Text>
+                          {h.permitRequired ? <Badge size="xs" colorPalette="orange">permit</Badge> : null}
+                          <IconButton size="2xs" variant="ghost" colorPalette="red" aria-label={`Remove ${h.name}`} onClick={() => removeHike(s.id, h.id)}>
+                            <LuX />
+                          </IconButton>
+                        </HStack>
+                      ))}
+                    </Stack>
+                  ) : null}
                 </Reorder.Item>
               );
             })}
           </Reorder.Group>
+          {overPackedDays.length ? (
+            <Box borderWidth="1px" borderColor="orange.emphasized" bg="orange.subtle" borderRadius="l2" p={3}>
+              <HStack gap={2} align="start">
+                <Icon color="orange.fg" mt={0.5} flexShrink={0}><LuTriangleAlert /></Icon>
+                <Box>
+                  <Text fontSize="sm" fontWeight="semibold" color="orange.fg">
+                    Heavy day{overPackedDays.length > 1 ? 's' : ''}
+                  </Text>
+                  {overPackedDays.map((d) => (
+                    <Text key={d.day} fontSize="xs" color="orange.fg">
+                      Day {d.day}: {d.hikeMiles} mi hiking{d.hikeHours ? ` (~${d.hikeHours} hr)` : ''}
+                      {d.driveHours ? ` + ${d.driveHours}-hr drive` : ''} — consider splitting it.
+                    </Text>
+                  ))}
+                </Box>
+              </HStack>
+            </Box>
+          ) : null}
           {stops.length > 0 ? (
             <Stack gap={2}>
               <HStack wrap="wrap">

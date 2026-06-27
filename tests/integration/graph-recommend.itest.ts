@@ -117,10 +117,11 @@ describeIntegration('forYouFromNode + context bridges (Neo4j)', () => {
   });
 
   it('returns an empty list when novelty filters exhaust every 2-hop match', async () => {
-    // From the glac seed the only 2-hop matches are grca + yell (both OFFER Hiking; grca also shares
-    // Astronomy). Mark both CONSIDERED → no fresh recs survive the WHERE novelty filter.
+    // From the glac seed the 2-hop matches are grca + yell + zion (all OFFER Hiking; grca also shares
+    // Astronomy). Mark all CONSIDERED → no fresh recs survive the WHERE novelty filter.
     await considerPark(userId, 'grca', 'viewed');
     await considerPark(userId, 'yell', 'viewed');
+    await considerPark(userId, 'zion', 'viewed');
     try {
       const { seedName, parks } = await forYouFromNode(userId, 'glac');
       expect(parks).toEqual([]);
@@ -130,6 +131,7 @@ describeIntegration('forYouFromNode + context bridges (Neo4j)', () => {
     } finally {
       await deleteConsidered(userId, 'grca');
       await deleteConsidered(userId, 'yell');
+      await deleteConsidered(userId, 'zion');
     }
   });
 

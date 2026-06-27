@@ -45,6 +45,8 @@ describe('getUserMemory (E3 — context subgraph read)', () => {
       passes: [],
       stamps: [],
       availability: { start: null, end: null },
+      trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
+      trailHistory: { saved: [], wishlisted: [], done: [] },
     });
   });
 });

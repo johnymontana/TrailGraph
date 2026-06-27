@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const readGraph = vi.fn();
 const embedQuery = vi.fn();
-const thematicTrail = vi.fn();
+const journeyTrail = vi.fn();
 const similarParks = vi.fn();
 const nearbyParks = vi.fn();
 const searchParks = vi.fn();
@@ -10,7 +10,7 @@ const searchParks = vi.fn();
 vi.mock('./neo4j', () => ({ readGraph: (...a: unknown[]) => readGraph(...a) }));
 vi.mock('./embed-cache', () => ({ embedQuery: (...a: unknown[]) => embedQuery(...a) }));
 vi.mock('./queries', () => ({
-  thematicTrail: (...a: unknown[]) => thematicTrail(...a),
+  journeyTrail: (...a: unknown[]) => journeyTrail(...a),
   similarParks: (...a: unknown[]) => similarParks(...a),
   nearbyParks: (...a: unknown[]) => nearbyParks(...a),
   searchParks: (...a: unknown[]) => searchParks(...a),
@@ -21,7 +21,7 @@ import { runIntent, answerGraphQuery, INTENT_IDS } from './graph-intents';
 beforeEach(() => {
   readGraph.mockReset();
   embedQuery.mockReset();
-  thematicTrail.mockReset();
+  journeyTrail.mockReset();
   similarParks.mockReset();
   nearbyParks.mockReset();
   searchParks.mockReset();
@@ -31,12 +31,12 @@ const park = (parkCode: string, name: string) => ({ parkCode, name, lat: 1, lng:
 
 describe('runIntent', () => {
   it('parks_by_person → person center + park nodes + ASSOCIATED_WITH links', async () => {
-    thematicTrail.mockResolvedValueOnce([
+    journeyTrail.mockResolvedValueOnce([
       { ...park('yose', 'Yosemite'), via: 'John Muir' },
       { ...park('seki', 'Sequoia'), via: 'John Muir' },
     ]);
     const r = await runIntent('parks_by_person', { person: 'John Muir' });
-    expect(thematicTrail).toHaveBeenCalledWith({ person: 'John Muir' }, 20);
+    expect(journeyTrail).toHaveBeenCalledWith({ person: 'John Muir' }, 20);
     expect(r.nodes.find((n) => n.label === 'Person')).toMatchObject({ id: 'Person:John Muir', name: 'John Muir' });
     expect(r.nodes.filter((n) => n.label === 'Park').map((n) => n.id).sort()).toEqual(['seki', 'yose']);
     expect(r.links).toHaveLength(2);
@@ -45,7 +45,7 @@ describe('runIntent', () => {
   });
 
   it('parks_by_person → narrated empty when nothing connects', async () => {
-    thematicTrail.mockResolvedValueOnce([]);
+    journeyTrail.mockResolvedValueOnce([]);
     const r = await runIntent('parks_by_person', { person: 'Nobody' });
     expect(r.nodes).toEqual([]);
     expect(r.narration).toContain('No parks');
@@ -102,7 +102,7 @@ describe('answerGraphQuery (on-page bar classify + extract)', () => {
 
   it('classifies + extracts a single-entity intent and runs it', async () => {
     embedQuery.mockImplementation(async (t: string) => kwVec(t));
-    thematicTrail.mockResolvedValueOnce([{ ...park('yose', 'Yosemite'), via: 'John Muir' }]);
+    journeyTrail.mockResolvedValueOnce([{ ...park('yose', 'Yosemite'), via: 'John Muir' }]);
     const r = await answerGraphQuery('parks connected to John Muir');
     expect(r.intent).toBe('parks_by_person');
     expect(r.nodes.some((n) => n.id === 'yose')).toBe(true);

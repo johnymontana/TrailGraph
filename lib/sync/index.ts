@@ -43,9 +43,10 @@ import {
   upsertLessonPlans,
 } from './upserts';
 import { embedParks } from './embed-parks';
-import { embedPlaces, embedPeople, embedArticles } from './embed-nodes';
+import { embedPlaces, embedPeople, embedArticles, embedTrails } from './embed-nodes';
 import { deriveNear } from './derive-near';
 import { deriveSharedEdges } from './derive-shared';
+import { deriveTrailNetwork } from './derive-trail-network';
 import { deriveCentrality } from './derive-centrality';
 import { deriveCommunities } from './derive-communities';
 import { refreshNearProjection } from './project-near';
@@ -53,6 +54,11 @@ import { deriveCoConsidered } from './derive-co-considered';
 import { deriveLessonJoins } from './derive-lesson-joins';
 import { deriveLessonTopics } from './derive-lesson-topics';
 import { decomposeLessons } from './decompose-lessons';
+import { syncTrails } from './sync-trails';
+import { deriveTrailElevation } from './derive-trail-elevation';
+import { deriveTrailLogistics } from './derive-trail-logistics';
+import { joinThingsToDoTrails } from './join-thingstodo-trails';
+import { enrichTrailsOSM } from './enrich-trails-osm';
 
 /**
  * NPS sync orchestrator (ADR-007).
@@ -314,6 +320,13 @@ export async function runSlowSync(): Promise<StepResult[]> {
     })),
   );
 
+  // Real hiking trails (ADR-066/067): per-park NPS GIS → named :Trail + simplified Blob geometry. Opt-in
+  // (heavy: per-park ArcGIS fetch + Blob writes); the national 470-park ingest is a progressive ops rollout,
+  // content-hash gated per park so re-runs are cheap. Runs after parks/parkinglots/places exist.
+  if (process.env.SYNC_TRAILS === '1') {
+    out.push(await step('trails', 'slow', async () => syncTrails()));
+  }
+
   out.push(await step('embeddings', 'slow', async () => embedParks()));
   // Semantic vectors for the new nodes (content-hash gated; first run is a large one-time backfill).
   // Places + people are the high-value semantic targets and embed by default. Articles are bulky P3
@@ -352,6 +365,27 @@ export async function runSlowSync(): Promise<StepResult[]> {
   // Derivations run last (need the full corpus): NEAR proximity (F9) + materialized shared-topic/activity (bonus).
   out.push(await step('derive-near', 'slow', async () => deriveNear()));
   out.push(await step('derive-shared', 'slow', async () => deriveSharedEdges()));
+  // Trail derivations (ADR-068/069/072): spatial logistics + the curated :ThingToDo join, then (opt-in)
+  // elevation+difficulty (needs an elevation sampler). Each needs trails to exist.
+  if (process.env.SYNC_TRAILS === '1') {
+    out.push(await step('derive-trail-logistics', 'slow', async () => deriveTrailLogistics()));
+    out.push(await step('join-thingstodo-trails', 'slow', async () => joinThingsToDoTrails()));
+    if (process.env.SYNC_TRAIL_ELEVATION === '1') {
+      out.push(await step('derive-trail-elevation', 'slow', async () => deriveTrailElevation()));
+    }
+    // Trail network for the loop builder (ADR-072, Phase 4): CONNECTS from shared endpoint junctions.
+    // Reads Blob geometry, so it runs after sync-trails wrote it; degrades when geometry isn't synced.
+    out.push(await step('derive-trail-network', 'slow', async () => deriveTrailNetwork()));
+    // Semantic trail vibe-search (ADR-072, Phase 4) — opt-in (spends embedding tokens), content-hash gated.
+    if (process.env.EMBED_TRAILS === '1') {
+      out.push(await step('embed-trails', 'slow', async () => embedTrails()));
+    }
+  }
+  // OSM-fill (ADR-072, Phase 2): fill trails for NPS-empty parks. Opt-in; runs after sync-trails so the
+  // "NPS-empty" set is accurate. ODbL attribution rides on source='osm'.
+  if (process.env.ENRICH_OSM_TRAILS === '1') {
+    out.push(await step('enrich-trails-osm', 'slow', async () => enrichTrailsOSM()));
+  }
   // Co-considered lens (#4): cross-user CONSIDERED overlap, k-anonymity ≥5. Independent of the NPS corpus
   // (rides the slow sync because that's where derivations live; sparse until the user base grows).
   out.push(await step('derive-co-considered', 'slow', async () => deriveCoConsidered()));

@@ -240,6 +240,96 @@ export async function getTravelConstraints(userId: string): Promise<TravelConstr
   };
 }
 
+// ── Trail memory (ADR-071): preferences + saved/wishlisted/done trails ────────────────────────────────
+export interface TrailPreferences {
+  maxMiles: number | null;
+  maxGainFt: number | null;
+  difficulty: string | null;
+  avoidExposure: boolean;
+  dogsRequired: boolean;
+}
+
+/**
+ * Trail preferences — a single per-user `(:User)-[:PREFERS_TRAIL]->(:TrailPrefs {userId})` anchor (mirrors
+ * `setTravelConstraints`; the `:TrailPrefs` UNIQUE constraint is migration 025). Partial: a null field keeps
+ * the saved value. The ranger sets these once (scope-confirmed); find_trails/recommend honor them.
+ */
+export async function setTrailPreferences(
+  userId: string,
+  p: {
+    maxMiles?: number | null;
+    maxGainFt?: number | null;
+    difficulty?: string | null;
+    avoidExposure?: boolean | null;
+    dogsRequired?: boolean | null;
+  },
+): Promise<void> {
+  await writeGraph(
+    `MERGE (u:User {userId:$userId})
+     MERGE (u)-[:PREFERS_TRAIL]->(tp:TrailPrefs {userId:$userId})
+     SET tp.maxMiles = CASE WHEN $maxMiles IS NULL THEN tp.maxMiles ELSE $maxMiles END,
+         tp.maxGainFt = CASE WHEN $maxGainFt IS NULL THEN tp.maxGainFt ELSE toInteger($maxGainFt) END,
+         tp.difficulty = CASE WHEN $difficulty IS NULL THEN tp.difficulty ELSE $difficulty END,
+         tp.avoidExposure = CASE WHEN $avoidExposure IS NULL THEN tp.avoidExposure ELSE $avoidExposure END,
+         tp.dogsRequired = CASE WHEN $dogsRequired IS NULL THEN tp.dogsRequired ELSE $dogsRequired END,
+         tp.at = datetime()`,
+    {
+      userId,
+      maxMiles: p.maxMiles ?? null,
+      maxGainFt: p.maxGainFt ?? null,
+      difficulty: p.difficulty ?? null,
+      avoidExposure: p.avoidExposure ?? null,
+      dogsRequired: p.dogsRequired ?? null,
+    },
+  );
+}
+
+export async function getTrailPreferences(userId: string): Promise<TrailPreferences> {
+  const rows = await readGraph<TrailPreferences>(
+    `MATCH (u:User {userId:$userId})
+     OPTIONAL MATCH (u)-[:PREFERS_TRAIL]->(tp:TrailPrefs)
+     RETURN tp.maxMiles AS maxMiles, tp.maxGainFt AS maxGainFt, tp.difficulty AS difficulty,
+            coalesce(tp.avoidExposure, false) AS avoidExposure, coalesce(tp.dogsRequired, false) AS dogsRequired`,
+    { userId },
+  );
+  const r = rows[0];
+  return {
+    maxMiles: r?.maxMiles ?? null,
+    maxGainFt: r?.maxGainFt ?? null,
+    difficulty: r?.difficulty ?? null,
+    avoidExposure: r?.avoidExposure ?? false,
+    dogsRequired: r?.dogsRequired ?? false,
+  };
+}
+
+export async function clearTrailPreferences(userId: string): Promise<void> {
+  await writeGraph(`MATCH (:User {userId:$userId})-[:PREFERS_TRAIL]->(tp:TrailPrefs) DETACH DELETE tp`, { userId });
+}
+
+export type TrailSaveKind = 'saved' | 'wishlisted' | 'did';
+const SAVE_REL: Record<TrailSaveKind, string> = { saved: 'SAVED', wishlisted: 'WISHLISTED', did: 'DID' };
+
+/** Save / wishlist / record-done a trail: `(:User)-[:SAVED|WISHLISTED|DID]->(:Trail)`. The rel type comes
+ *  from a fixed map (never user input), so the interpolation is safe. Returns false on an unknown trail. */
+export async function saveTrail(userId: string, trailId: string, kind: TrailSaveKind = 'saved'): Promise<boolean> {
+  const rows = await writeGraph<{ ok: boolean }>(
+    `MATCH (tr:Trail {id:$trailId})
+     MERGE (u:User {userId:$userId})
+     MERGE (u)-[r:${SAVE_REL[kind]}]->(tr)
+     SET r.at = datetime()
+     RETURN true AS ok`,
+    { userId, trailId },
+  );
+  return rows.length > 0;
+}
+
+export async function unsaveTrail(userId: string, trailId: string, kind: TrailSaveKind = 'saved'): Promise<void> {
+  await writeGraph(
+    `MATCH (:User {userId:$userId})-[r:${SAVE_REL[kind]}]->(:Trail {id:$trailId}) DELETE r`,
+    { userId, trailId },
+  );
+}
+
 /** Clear accessibility/travel constraints (the TRAVELS_WITH constraint + all REQUIRES edges). */
 export async function clearTravelConstraints(userId: string): Promise<void> {
   await writeGraph(

@@ -76,6 +76,12 @@ export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: un
       return <NewsCard data={data} />;
     case 'media_card':
       return <MediaCard data={data} />;
+    case 'trail_card':
+      return <TrailResultsCard data={data} />;
+    case 'trail_detail_card':
+      return <TrailDetailCard data={data} />;
+    case 'loop_card':
+      return <LoopCard data={data} />;
     case 'graph_result':
       return <GraphResultCard data={data} />;
     case 'why_this':
@@ -672,6 +678,179 @@ function NewsCard({ data }: { data: Record<string, unknown> }) {
           {n.releaseDate ? <Text as="span" fontSize="xs" color="fg.muted"> · {n.releaseDate}</Text> : null}
           {n.abstract ? <Text fontSize="sm" color="fg.muted" lineClamp={2}>{n.abstract}</Text> : null}
         </Box>
+      ))}
+    </Stack>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Trails (ADR-071) — finder results + one trail's detail
+// ---------------------------------------------------------------------------
+
+const DIFFICULTY_PALETTE: Record<string, string> = { easy: 'teal', moderate: 'trail', strenuous: 'red' };
+
+interface TrailCardView {
+  id: string;
+  name: string;
+  parkName?: string | null;
+  lengthMiles?: number | null;
+  elevationGainFt?: number | null;
+  estTimeHrs?: number | null;
+  routeType?: string | null;
+  difficulty?: string | null;
+  permitRequired?: boolean | null;
+  dogsAllowed?: boolean | null;
+  wheelchairAccessible?: boolean | null;
+  hikers?: number | null; // collective: "N hikers like you also did this" (ADR-072)
+}
+
+/** A "2.4 mi · +1,200 ft · ~3 hr · loop" stats line shared by the list + detail cards. */
+function trailMetaLine(t: TrailCardView): string {
+  const parts: string[] = [];
+  if (t.lengthMiles != null) parts.push(`${t.lengthMiles} mi`);
+  if (t.elevationGainFt != null) parts.push(`+${t.elevationGainFt.toLocaleString()} ft`);
+  if (t.estTimeHrs != null) parts.push(`~${t.estTimeHrs} hr`);
+  if (t.routeType) parts.push(t.routeType);
+  if (t.hikers != null && t.hikers > 0) parts.push(`${t.hikers} hiker${t.hikers === 1 ? '' : 's'} like you`);
+  return parts.join(' · ');
+}
+
+/** Trail finder results in chat (find_trails → trail_card) — compact cards linking to the trail page. */
+function TrailResultsCard({ data }: { data: Record<string, unknown> }) {
+  const trails = (data.trails ?? []) as TrailCardView[];
+  const applied = (data.appliedPreferences as string[] | undefined)?.filter(Boolean) ?? [];
+  const total = typeof data.total === 'number' ? data.total : trails.length;
+  if (!trails.length) return <Text fontSize="sm" color="fg.muted" my={2}>No trails matched those filters.</Text>;
+  return (
+    <Stack gap={2} my={2}>
+      {applied.length ? (
+        <Text fontSize="xs" color="fg.muted">Narrowed to your trail preferences: {applied.join(' · ')}</Text>
+      ) : null}
+      {trails.map((t) => (
+        <CLink key={t.id} asChild _hover={{ textDecoration: 'none' }} display="block" w="full">
+          <NextLink href={`/trails/${encodeURIComponent(t.id)}`}>
+            <Card.Root variant="interactive" size="sm" w="full">
+              <Card.Body p={3}>
+                <HStack gap={2} wrap="wrap">
+                  <Text as="span" fontWeight="semibold" fontFamily="heading">{t.name}</Text>
+                  {t.difficulty ? <Badge colorPalette={DIFFICULTY_PALETTE[t.difficulty] ?? 'gray'}>{t.difficulty}</Badge> : null}
+                  {t.permitRequired ? <Badge colorPalette="orange">permit</Badge> : null}
+                  {t.dogsAllowed ? <Badge colorPalette="pine" variant="surface">dogs</Badge> : null}
+                  {t.wheelchairAccessible ? <Badge colorPalette="blue" variant="surface">accessible</Badge> : null}
+                </HStack>
+                {t.parkName ? <Text fontSize="xs" color="fg.muted" mt={0.5}>{t.parkName}</Text> : null}
+                {trailMetaLine(t) ? <Text fontSize="sm" mt={1}>{trailMetaLine(t)}</Text> : null}
+              </Card.Body>
+            </Card.Root>
+          </NextLink>
+        </CLink>
+      ))}
+      {total > trails.length ? (
+        <Text fontSize="xs" color="fg.muted">Showing {trails.length} of {total} — ask me to narrow further.</Text>
+      ) : null}
+    </Stack>
+  );
+}
+
+interface TrailDetailView extends TrailCardView {
+  parkName?: string | null;
+  source?: string | null;
+  elevationLossFt?: number | null;
+  maxElevationFt?: number | null;
+  dataConfidence?: string | null;
+  trailheads?: { name: string; kind: string; accessibleSpaces: number | null }[];
+  curated?: { id: string; title: string }[];
+}
+
+/** One trail's detail in chat (trail_detail / add_trail_to_trip → trail_detail_card). Honest about the
+ *  source + that length/elevation/difficulty are estimates; carries the add-to-trip preview/confirmation. */
+function TrailDetailCard({ data }: { data: Record<string, unknown> }) {
+  const t = data as unknown as TrailDetailView;
+  const pendingAdd = data.pendingAdd as { stopLabel: string; day: number | null } | undefined;
+  const addedTo = data.addedTo as { stopLabel: string; day: number | null } | undefined;
+  const trailheads = t.trailheads ?? [];
+  const curated = t.curated ?? [];
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <HStack gap={2} wrap="wrap" mb={1}>
+          <CLink asChild fontWeight="semibold" fontFamily="heading">
+            <NextLink href={`/trails/${encodeURIComponent(t.id)}`}>{t.name}</NextLink>
+          </CLink>
+          {t.difficulty ? <Badge colorPalette={DIFFICULTY_PALETTE[t.difficulty] ?? 'gray'}>{t.difficulty}</Badge> : null}
+          {t.permitRequired ? <Badge colorPalette="orange">permit required</Badge> : null}
+        </HStack>
+        {t.parkName ? <Text fontSize="xs" color="fg.muted">{t.parkName}</Text> : null}
+        {trailMetaLine(t) ? <Text fontSize="sm" mt={1}>{trailMetaLine(t)}</Text> : null}
+        {t.elevationLossFt != null || t.maxElevationFt != null ? (
+          <Text fontSize="xs" color="fg.muted" mt={0.5}>
+            {t.elevationLossFt != null ? `−${t.elevationLossFt.toLocaleString()} ft loss` : ''}
+            {t.elevationLossFt != null && t.maxElevationFt != null ? ' · ' : ''}
+            {t.maxElevationFt != null ? `peaks ${t.maxElevationFt.toLocaleString()} ft` : ''}
+          </Text>
+        ) : null}
+        {trailheads.length ? (
+          <Text fontSize="xs" color="fg.muted" mt={1}>
+            Trailhead: {trailheads.map((th) => th.name + (th.accessibleSpaces != null ? ` (${th.accessibleSpaces} accessible spaces)` : '')).join(', ')}
+          </Text>
+        ) : null}
+        {curated.length ? (
+          <Text fontSize="xs" color="fg.muted" mt={1}>NPS notes: {curated.map((c) => c.title).join(', ')}</Text>
+        ) : null}
+        {t.dataConfidence ? (
+          <Text fontSize="xs" color="fg.muted" mt={1}>
+            {t.source === 'osm' ? 'OpenStreetMap' : 'NPS GIS'} · {t.dataConfidence} confidence · length/elevation/difficulty are estimates — verify at the trailhead.
+          </Text>
+        ) : null}
+        {pendingAdd ? (
+          <Text fontSize="sm" color="brand.fg" mt={2}>
+            Add this hike to {pendingAdd.stopLabel}{pendingAdd.day != null ? ` (day ${pendingAdd.day})` : ''}? Say the word and I&apos;ll save it.
+          </Text>
+        ) : null}
+        {addedTo ? (
+          <Text fontSize="sm" color="brand.fg" mt={2}>
+            Added to {addedTo.stopLabel}{addedTo.day != null ? ` (day ${addedTo.day})` : ''}.
+          </Text>
+        ) : null}
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+interface SuggestedLoopView {
+  trailIds: string[];
+  names: string[];
+  kind: 'single' | 'pair';
+  lengthMiles: number;
+  elevationGainFt: number;
+  estTimeHrs: number;
+}
+
+/** Loop builder results (ADR-072 — build_loop → loop_card): stitched loops with combined stats. */
+function LoopCard({ data }: { data: Record<string, unknown> }) {
+  const loops = (data.loops ?? []) as SuggestedLoopView[];
+  if (!loops.length) {
+    return (
+      <Text fontSize="sm" color="fg.muted" my={2}>
+        No loops to stitch here yet — I need connected trails with shared junctions (try the loop builder after a trail sync).
+      </Text>
+    );
+  }
+  return (
+    <Stack gap={2} my={2}>
+      <Text fontSize="xs" color="fg.muted">Suggested loops — combined stats are estimates; verify at the trailhead.</Text>
+      {loops.map((l) => (
+        <Card.Root key={l.trailIds.join('|')} variant="subtle" size="sm" w="full">
+          <Card.Body p={3}>
+            <HStack gap={2} wrap="wrap" mb={1}>
+              <Text as="span" fontWeight="semibold" fontFamily="heading">{l.names.join(' + ')}</Text>
+              <Badge colorPalette="trail" variant="surface">{l.kind === 'pair' ? 'stitched loop' : 'loop'}</Badge>
+            </HStack>
+            <Text fontSize="sm">
+              {[`${l.lengthMiles} mi`, `+${l.elevationGainFt.toLocaleString()} ft`, `~${l.estTimeHrs} hr`].join(' · ')}
+            </Text>
+          </Card.Body>
+        </Card.Root>
       ))}
     </Stack>
   );

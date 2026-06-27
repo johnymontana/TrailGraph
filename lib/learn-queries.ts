@@ -344,7 +344,7 @@ export async function searchCourses(
 
 // ---------------------------------------------------------------------------
 // Cross-park learning trails (design §13) — a topic taught across multiple parks.
-// Query-time (like lib/queries.ts#thematicTrail), reusing (:Topic)<-[:RELATES_TO_TOPIC]-(:LessonPlan)-[:ABOUT]->(:Park).
+// Query-time (like lib/queries.ts#journeyTrail), reusing (:Topic)<-[:RELATES_TO_TOPIC]-(:LessonPlan)-[:ABOUT]->(:Park).
 // ---------------------------------------------------------------------------
 
 export interface CrossParkTopic {

@@ -63,12 +63,14 @@ export const TripActionSchema = z.object({
   op: z.enum([
     'addStop', 'removeStop', 'reorder', 'alerts', 'cost', 'conditions',
     'suggestDays', 'optimize', 'rename', 'fork', 'diff',
+    'includeTrail', 'excludeTrail',
   ]),
   stop: NewStopSchema.optional(),
   stopId: id.optional(),
   orderedStopIds: z.array(id).max(200).optional(),
   name: z.string().max(200).optional(),
   otherTripId: id.optional(),
+  trailId: z.string().max(200).optional(), // ADR-071: (:Stop)-[:INCLUDES_TRAIL]->(:Trail)
 });
 
 // ── Memory ───────────────────────────────────────────────────────────────────

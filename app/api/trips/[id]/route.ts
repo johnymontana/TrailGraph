@@ -9,6 +9,8 @@ import {
   checkTripAlerts,
   tripCost,
   tripConditions,
+  addTrailToStop,
+  removeTrailFromStop,
 } from '../../../../lib/trips';
 import { suggestDays } from '../../../../lib/itinerary';
 import { nearestNeighborOrder } from '../../../../lib/route-order';
@@ -100,6 +102,17 @@ export async function POST(req: Request, { params }: Ctx) {
       if (!body.orderedStopIds) return Response.json({ error: 'orderedStopIds required' }, { status: 400 });
       await reorderStops(userId, id, body.orderedStopIds);
       return Response.json({ trip: await getTrip(userId, id), metrics: await liveMetrics(userId, id) });
+    }
+    case 'includeTrail': {
+      if (!body.stopId || !body.trailId) return Response.json({ error: 'stopId and trailId required' }, { status: 400 });
+      const ok = await addTrailToStop(userId, id, body.stopId, body.trailId);
+      if (!ok) return Response.json({ error: 'not found' }, { status: 404 });
+      return Response.json({ trip: await getTrip(userId, id) });
+    }
+    case 'excludeTrail': {
+      if (!body.stopId || !body.trailId) return Response.json({ error: 'stopId and trailId required' }, { status: 400 });
+      await removeTrailFromStop(userId, id, body.stopId, body.trailId);
+      return Response.json({ trip: await getTrip(userId, id) });
     }
     case 'alerts':
       return Response.json({ alerts: await checkTripAlerts(userId, id) });

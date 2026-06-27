@@ -1,5 +1,5 @@
 import { readGraph, writeGraph } from '../neo4j';
-import { embed, contentHash, composePlaceText, composePersonText, composeArticleText, clampForEmbedding } from '../embeddings';
+import { embed, contentHash, composePlaceText, composePersonText, composeArticleText, composeTrailText, clampForEmbedding } from '../embeddings';
 
 /**
  * Content-hash-gated embedding for the NPS-expansion nodes (Place/Person/Article), mirroring
@@ -62,4 +62,48 @@ export const embedArticles = (): Promise<{ embedded: number; skipped: number }> 
     'Article',
     `MATCH (n:Article) RETURN n.id AS key, n.title AS title, n.description AS description, n.body AS body, n.embeddingHash AS hash`,
     (r) => composeArticleText({ title: r.title ?? undefined, description: r.description ?? undefined, body: r.body ?? undefined }),
+  );
+
+type TrailEmbedRow = {
+  key: string;
+  hash: string | null;
+  name: string | null;
+  parkName: string | null;
+  difficulty: string | null;
+  routeType: string | null;
+  lengthMiles: number | null;
+  topics: string[];
+  activities: string[];
+  blurb: string | null;
+};
+
+/**
+ * Content-hash-gated trail embeddings (ADR-072, Phase-4 vibe-search) — fills the `trail_embedding` index
+ * reserved in migration 025. Folds the trail's scenery topics (HIGHLIGHTS), supported activities
+ * (SUPPORTS), and the curated NPS blurb (ALONG) into the vector. Opt-in via `EMBED_TRAILS=1`.
+ */
+export const embedTrails = (): Promise<{ embedded: number; skipped: number }> =>
+  embedLabeledNodes<TrailEmbedRow>(
+    'Trail',
+    `MATCH (t:Trail)-[:IN_PARK]->(p:Park)
+     OPTIONAL MATCH (t)-[:HIGHLIGHTS]->(tp:Topic)
+     OPTIONAL MATCH (t)-[:SUPPORTS]->(ac:Activity)
+     OPTIONAL MATCH (ttd:ThingToDo)-[:ALONG]->(t)
+     WITH t, p, [x IN collect(DISTINCT tp.name) WHERE x IS NOT NULL] AS topics,
+          [x IN collect(DISTINCT ac.name) WHERE x IS NOT NULL] AS activities,
+          collect(DISTINCT ttd.title)[0] AS blurb
+     RETURN t.id AS key, t.name AS name, p.fullName AS parkName, t.difficulty AS difficulty,
+            t.routeType AS routeType, t.lengthMiles AS lengthMiles, topics, activities, blurb,
+            t.embeddingHash AS hash`,
+    (r) =>
+      composeTrailText({
+        name: r.name ?? undefined,
+        parkName: r.parkName ?? undefined,
+        difficulty: r.difficulty ?? undefined,
+        routeType: r.routeType ?? undefined,
+        lengthMiles: r.lengthMiles,
+        topics: r.topics,
+        activities: r.activities,
+        blurb: r.blurb ?? undefined,
+      }),
   );
