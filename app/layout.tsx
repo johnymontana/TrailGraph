@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { Bricolage_Grotesque, Inter } from 'next/font/google';
 import { Analytics } from '@vercel/analytics/next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import { Provider } from './provider';
 import { SiteNav } from '../components/SiteNav';
 import { SiteFooter } from '../components/SiteFooter';
@@ -46,6 +47,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               nothing until a `trailgraph:memory-formed` event fires, so it never affects first paint. */}
           <MemoryFormingLayer />
           <Analytics />
+          <SpeedInsights />
         </Provider>
       </body>
     </html>
