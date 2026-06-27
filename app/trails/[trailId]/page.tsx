@@ -14,7 +14,8 @@ import {
   LuTentTree,
   LuSquareParking,
 } from 'react-icons/lu';
-import { trailDetail } from '../../../lib/queries';
+import { trailDetail, connectedTrails, parkTrailNetwork, trailCrossLinks } from '../../../lib/queries';
+import { suggestLoops } from '../../../lib/loop-builder';
 import { readParkTrails } from '../../../lib/blob-trails';
 import { TrailRouteMap } from '../../../components/trails/TrailRouteMap';
 import { ElevationProfileChart, type ProfilePoint } from '../../../components/trails/ElevationProfileChart';
@@ -55,6 +56,16 @@ export default async function TrailDetailPage({ params }: { params: Promise<{ tr
   const geometry =
     feature?.geometry && feature.geometry.type === 'MultiLineString' ? (feature.geometry as MultiLineString) : null;
   const profile = (feature?.properties as { profile?: ProfilePoint[] } | null)?.profile ?? null;
+
+  // Phase 4 (ADR-072): connected trails + suggested loops involving THIS trail + Learn/Journeys cross-links.
+  const [connections, network, crossLinks] = await Promise.all([
+    connectedTrails(trailId),
+    parkTrailNetwork(t.parkCode),
+    trailCrossLinks(trailId),
+  ]);
+  const loops = suggestLoops(network.trails, network.connections)
+    .filter((l) => l.trailIds.includes(t.id))
+    .slice(0, 4);
 
   const bar = DIFF_COLOR[t.difficulty ?? ''] ?? 'border.emphasized';
   const time = formatHrs(t.estTimeHrs);
@@ -169,6 +180,77 @@ export default async function TrailDetailPage({ params }: { params: Promise<{ tr
                 </HStack>
               </Box>
             ))}
+          </Stack>
+        </Box>
+      ) : null}
+
+      {/* Build a loop (ADR-072 Phase 4) — loops that include this trail + the connected-trail network. */}
+      {loops.length > 0 || connections.length > 0 ? (
+        <Box mb={6}>
+          <Heading as="h2" size="md" mb={3}>Build a loop</Heading>
+          {loops.length > 0 ? (
+            <Stack gap={2} mb={connections.length ? 3 : 0}>
+              {loops.map((l) => (
+                <HStack key={l.trailIds.join('|')} gap={2} flexWrap="wrap">
+                  <Badge colorPalette="trail" variant="surface">{l.kind === 'pair' ? 'stitched loop' : 'loop'}</Badge>
+                  <Text fontSize="sm" fontWeight="medium">{l.names.join(' + ')}</Text>
+                  <Text fontSize="sm" color="fg.muted">
+                    {l.lengthMiles} mi · +{l.elevationGainFt.toLocaleString()} ft · ~{l.estTimeHrs} hr (est.)
+                  </Text>
+                </HStack>
+              ))}
+            </Stack>
+          ) : null}
+          {connections.length > 0 ? (
+            <HStack gap={2} flexWrap="wrap">
+              <Text fontSize="sm" color="fg.muted">Connects to:</Text>
+              {connections.map((c) => (
+                <CLink key={c.id} asChild color="brand.fg" fontSize="sm">
+                  <NextLink href={`/trails/${encodeURIComponent(c.id)}`}>{c.name}</NextLink>
+                </CLink>
+              ))}
+            </HStack>
+          ) : null}
+        </Box>
+      ) : null}
+
+      {/* Connect the dots (ADR-072 Phase 4) — Trail ↔ Learn ↔ Journeys cross-links. */}
+      {crossLinks.lessons.length > 0 || crossLinks.people.length > 0 || crossLinks.topics.length > 0 ? (
+        <Box mb={6}>
+          <Heading as="h2" size="md" mb={3}>Connect the dots</Heading>
+          <Stack gap={2}>
+            {crossLinks.lessons.length > 0 ? (
+              <HStack gap={2} flexWrap="wrap">
+                <Text fontSize="sm" color="fg.muted">Learn:</Text>
+                {crossLinks.lessons.map((l) => (
+                  <CLink key={l.id} asChild color="brand.fg" fontSize="sm">
+                    <NextLink href={`/learn/${encodeURIComponent(l.id)}`}>{l.title}</NextLink>
+                  </CLink>
+                ))}
+              </HStack>
+            ) : null}
+            {crossLinks.people.length > 0 ? (
+              <HStack gap={2} flexWrap="wrap">
+                <Text fontSize="sm" color="fg.muted">Journeys:</Text>
+                {crossLinks.people.map((p) => (
+                  <CLink key={p.id} asChild color="brand.fg" fontSize="sm">
+                    <NextLink href={`/journeys?person=${encodeURIComponent(p.title)}`}>{p.title}</NextLink>
+                  </CLink>
+                ))}
+              </HStack>
+            ) : null}
+            {crossLinks.topics.length > 0 ? (
+              <HStack gap={2} flexWrap="wrap">
+                <Text fontSize="sm" color="fg.muted">Themes:</Text>
+                {crossLinks.topics.map((tp) => (
+                  <CLink key={tp} asChild _hover={{ textDecoration: 'none' }}>
+                    <NextLink href={`/journeys?topic=${encodeURIComponent(tp)}`}>
+                      <Badge colorPalette="sand" variant="subtle" cursor="pointer" _hover={{ bg: 'sand.muted' }}>{tp}</Badge>
+                    </NextLink>
+                  </CLink>
+                ))}
+              </HStack>
+            ) : null}
           </Stack>
         </Box>
       ) : null}

@@ -1415,6 +1415,113 @@ export async function trailDetail(id: string): Promise<TrailDetail | null> {
   return rows[0] ?? null;
 }
 
+// ── Phase 4 — trail network (loop builder) + semantic vibe-search (ADR-072) ──────────────────────────
+
+export interface LoopTrailRow {
+  id: string;
+  name: string;
+  lengthMiles: number | null;
+  elevationGainFt: number | null;
+  elevationLossFt: number | null;
+  routeType: string | null;
+  difficulty: string | null;
+}
+export interface ParkTrailNetwork {
+  trails: LoopTrailRow[];
+  connections: { from: string; to: string; junctions: number }[];
+}
+
+/** A park's trails + their CONNECTS edges (ADR-072) — fed to `suggestLoops` (the pure loop builder). */
+export async function parkTrailNetwork(parkCode: string): Promise<ParkTrailNetwork> {
+  const trails = await readGraph<LoopTrailRow>(
+    `MATCH (t:Trail {parkCode:$parkCode})
+     RETURN t.id AS id, t.name AS name, t.lengthMiles AS lengthMiles, t.elevationGainFt AS elevationGainFt,
+            t.elevationLossFt AS elevationLossFt, t.routeType AS routeType, t.difficulty AS difficulty`,
+    { parkCode },
+  );
+  const connections = await readGraph<{ from: string; to: string; junctions: number }>(
+    `MATCH (a:Trail {parkCode:$parkCode})-[r:CONNECTS]->(b:Trail {parkCode:$parkCode})
+     RETURN a.id AS from, b.id AS to, r.junctions AS junctions`,
+    { parkCode },
+  );
+  return { trails, connections };
+}
+
+/** Trails that CONNECT to a given trail (ADR-072) — for the trail page's "Connects to / build a loop" rail.
+ *  CONNECTS is stored one-directional (id-ordered like derive-shared), so match it undirected. */
+export async function connectedTrails(
+  trailId: string,
+): Promise<{ id: string; name: string; lengthMiles: number | null; difficulty: string | null; junctions: number }[]> {
+  return readGraph(
+    `MATCH (t:Trail {id:$trailId})-[r:CONNECTS]-(o:Trail)
+     RETURN o.id AS id, o.name AS name, o.lengthMiles AS lengthMiles, o.difficulty AS difficulty, r.junctions AS junctions
+     ORDER BY r.junctions DESC, coalesce(o.lengthMiles, 0) ASC`,
+    { trailId },
+  );
+}
+
+/** Semantic "vibe" trail search (ADR-072, Phase 4) over the `trail_embedding` index — "quiet alpine-lake
+ *  hike with wildflowers under 5 mi". Returns trail summaries (same shape the finder + cards use). Empty
+ *  until the `EMBED_TRAILS=1` pass runs — degrades to [] gracefully. */
+export async function semanticTrails(query: string, limit = 8, vector?: number[]): Promise<TrailSummary[]> {
+  const v = vector ?? (await embedQuery(query));
+  return readGraph<TrailSummary>(
+    `CALL db.index.vector.queryNodes('trail_embedding', toInteger($k), $vector) YIELD node AS t, score
+     MATCH (t)-[:IN_PARK]->(p:Park)
+     RETURN ${TRAIL_SUMMARY_RETURN}, score
+     ORDER BY score DESC LIMIT toInteger($limit)`,
+    { k: limit, vector: v, limit },
+  );
+}
+
+export interface TrailCrossLinks {
+  lessons: { id: string; title: string }[]; // Ranger School lessons (Learn) → /learn/[id]
+  people: { id: string; title: string }[]; // person-journeys → /journeys?person=<title>
+  topics: string[]; // topic-journeys → /journeys?topic=<name>
+}
+
+/**
+ * Trail ↔ Learn ↔ Journeys cross-links (ADR-072, Phase 4) — the graph tying activities to learning + theme.
+ * A trail connects to a Ranger School lesson (ABOUT its park OR sharing a HIGHLIGHTS topic), to the people
+ * whose journeys pass through its park, and to its scenery topics (each a thematic journey). Used by the
+ * trail detail page's "Connect the dots" rail.
+ */
+export async function trailCrossLinks(trailId: string): Promise<TrailCrossLinks> {
+  const rows = await readGraph<TrailCrossLinks>(
+    `MATCH (t:Trail {id:$trailId})-[:IN_PARK]->(p:Park)
+     CALL {
+       WITH t, p
+       OPTIONAL MATCH (lp:LessonPlan)
+       WHERE EXISTS { (lp)-[:ABOUT]->(p) } OR EXISTS { (t)-[:HIGHLIGHTS]->(:Topic)<-[:RELATES_TO_TOPIC]-(lp) }
+       RETURN [x IN collect(DISTINCT {id: lp.id, title: lp.title}) WHERE x.id IS NOT NULL][0..6] AS lessons
+     }
+     CALL {
+       WITH p
+       OPTIONAL MATCH (per:Person)-[:ASSOCIATED_WITH]->(p)
+       RETURN [x IN collect(DISTINCT {id: per.id, title: per.title}) WHERE x.title IS NOT NULL][0..6] AS people
+     }
+     CALL {
+       WITH t
+       OPTIONAL MATCH (t)-[:HIGHLIGHTS]->(tp:Topic)
+       RETURN [x IN collect(DISTINCT tp.name) WHERE x IS NOT NULL][0..6] AS topics
+     }
+     RETURN lessons, people, topics`,
+    { trailId },
+  );
+  const r = rows[0];
+  return { lessons: r?.lessons ?? [], people: r?.people ?? [], topics: r?.topics ?? [] };
+}
+
+/** "Surprise me" — a random trail or few (ADR-072, Phase 4). */
+export async function randomTrails(limit = 1): Promise<TrailSummary[]> {
+  return readGraph<TrailSummary>(
+    `MATCH (t:Trail)-[:IN_PARK]->(p:Park)
+     WITH t, p, rand() AS r ORDER BY r LIMIT toInteger($limit)
+     RETURN ${TRAIL_SUMMARY_RETURN}, 0.0 AS score`,
+    { limit },
+  );
+}
+
 /** Historical figures associated with a park (for the park-page "People & stories" section). */
 export async function peopleForPark(
   parkCode: string,

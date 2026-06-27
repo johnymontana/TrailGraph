@@ -143,6 +143,19 @@ export function deriveRouteType(lines: Position[][]): RouteType {
   return null;
 }
 
+/**
+ * Coordinate keys of a trail's line endpoints (termini), for junction/CONNECTS detection (ADR-072, the
+ * Phase-4 loop builder). Two trails that meet share an endpoint key (rounded to ~1m). Pure.
+ */
+export function endpointKeys(lines: Position[][]): string[] {
+  const keys = new Set<string>();
+  for (const line of lines.filter((l) => l.length >= 2)) {
+    keys.add(key(line[0]));
+    keys.add(key(line[line.length - 1]));
+  }
+  return [...keys];
+}
+
 /** A deterministic default trailhead: the southern/western-most terminus (else the first vertex). Pure. */
 export function defaultTrailhead(lines: Position[][]): [number, number] {
   const segs = lines.filter((l) => l.length >= 2);

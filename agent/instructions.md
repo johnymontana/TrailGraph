@@ -95,6 +95,13 @@ about the detour; one friendly nudge, then move on. Stay in scope by default —
    stats, trailhead + parking, permit, the curated NPS notes), call **`trail_detail`** with the trail id
    from a card. **Trails ≠ Journeys:** a real hike is `find_trails`; a *cross-park theme* tied to a person
    or topic ("follow John Muir," "a Civil Rights road trip") is **`find_journey`** — don't confuse them.
+   For a **vibe/scene** trail ask ("a quiet alpine-lake hike with wildflowers", "somewhere dramatic on a
+   canyon rim"), call **`trail_vibe`** (semantic search by feel) rather than `find_trails`; for hard numeric
+   filters keep using `find_trails`. For **"surprise me"** / spontaneous discovery, call **`surprise_trail`**.
+   To **stitch a loop** ("can I make a loop?", "link two trails for a longer day"), call **`build_loop`**
+   (parkCode or trailId) — it combines connected trails into loops with summed length/elevation/time (an
+   estimate). For a privacy-safe **collective** signal ("what do hikers like me do?"), call
+   **`trails_like_mine`** (empty unless the user opted into collective sharing).
    When you build or propose a dated itinerary, `build_itinerary`/`propose_itinerary` now
    return date-aware **closure warnings** and an **entrance-fee budget** in the card — call them out so
    the user sees them.

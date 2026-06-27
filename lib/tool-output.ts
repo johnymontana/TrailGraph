@@ -25,6 +25,7 @@ export function isRenderableToolOutput(kind: string, data: unknown): boolean {
   if (kind === 'news_card') return Array.isArray(d.news); // F8: render even when empty ("no recent news")
   if (kind === 'trail_card') return ((d.trails as unknown[])?.length ?? 0) > 0; // ADR-071: trail finder results
   if (kind === 'trail_detail_card') return !!d.id && !!d.name; // ADR-071: one trail's detail
+  if (kind === 'loop_card') return Array.isArray(d.loops); // ADR-072: render even when empty ("no loops yet")
   if (kind === 'media_card') return ((d.audio as unknown[])?.length ?? 0) + ((d.videos as unknown[])?.length ?? 0) + ((d.galleries as unknown[])?.length ?? 0) > 0; // F6
   if (kind === 'digest_card') return Array.isArray(d.items); // render even when empty ("all clear")
   if (kind === 'why_this') return ((d.prefPaths as unknown[])?.length ?? 0) > 0 || ((d.constraints as unknown[])?.length ?? 0) > 0 || !!d.park;

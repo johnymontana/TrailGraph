@@ -52,6 +52,27 @@ export function composeArticleText(a: { title?: string; description?: string; bo
   return [a.title, a.description, a.body].filter(Boolean).join('\n');
 }
 
+/** Embedding document for a Trail (ADR-072, Phase-4 vibe-search) — name + park + the hiker-facing stats +
+ *  scenery topics + supported activities + the curated NPS blurb. Folds the relationships into the vector
+ *  so "quiet alpine-lake hike with wildflowers under 5 mi" matches on scenery, not just the name. */
+export function composeTrailText(t: {
+  name?: string;
+  parkName?: string;
+  difficulty?: string;
+  routeType?: string;
+  lengthMiles?: number | null;
+  topics?: string[];
+  activities?: string[];
+  blurb?: string;
+}): string {
+  const stats = [t.lengthMiles != null ? `${t.lengthMiles} mi` : null, t.difficulty, t.routeType]
+    .filter(Boolean)
+    .join(' · ');
+  return [t.name, t.parkName, stats, (t.topics ?? []).join(', '), (t.activities ?? []).join(', '), t.blurb]
+    .filter(Boolean)
+    .join('\n');
+}
+
 /**
  * Embedding models cap input length (text-embedding-3-small: 8192 tokens). Some `:Place` bodies far
  * exceed that, so we clamp by characters as a tokenizer-free guard before sending. ~12k chars is well

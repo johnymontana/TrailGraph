@@ -26,11 +26,26 @@ test('trail card links to a detail page with metadata + safety callout', async (
   await page.getByText('Angels Landing Trail').click();
   await expect(page).toHaveURL(/\/trails\/nps%3Azion%3Aangels-landing-trail/);
   await expect(page.getByRole('heading', { name: 'Angels Landing Trail' })).toBeVisible();
-  await expect(page.getByRole('link', { name: /Zion National Park/ })).toBeVisible();
+  // Exact match: the page also has a "View Zion National Park →" action link, so /Zion National Park/ is ambiguous.
+  await expect(page.getByRole('link', { name: 'Zion National Park', exact: true })).toBeVisible();
   await expect(page.getByText('Permit required')).toBeVisible();
   await expect(page.getByText('Plan smart, verify on site')).toBeVisible();
-  // Geometry isn't synced in e2e → the route map degrades to its note.
-  await expect(page.getByText(/route map appears once/i)).toBeVisible();
+  // Route section renders whether or not Blob geometry is present (map when synced, a note when not) — assert
+  // a geometry-independent metadata badge so the test doesn't depend on local trail geometry being absent.
+  await expect(page.getByText('Point-to-point')).toBeVisible();
+});
+
+test('trail detail shows the Phase-4 loop builder + Learn/Journeys cross-links (ADR-072)', async ({ page }) => {
+  // Bright Angel is seeded with a CONNECTS (junctions 2) to South Kaibab → a rim-to-rim loop, and a
+  // HIGHLIGHTS→Geology topic that cross-links the "Geology of Yellowstone" lesson.
+  await page.goto('/trails/nps%3Agrca%3Abright-angel-trail');
+  await expect(page.getByRole('heading', { name: 'Bright Angel Trail' })).toBeVisible();
+  // Build a loop — the seeded two-junction connection stitches a loop + lists the connected trail.
+  await expect(page.getByRole('heading', { name: 'Build a loop' })).toBeVisible();
+  await expect(page.getByText('South Kaibab Trail').first()).toBeVisible();
+  // Connect the dots — the shared Geology topic links the Ranger School lesson (Learn).
+  await expect(page.getByRole('heading', { name: 'Connect the dots' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Geology of Yellowstone' })).toBeVisible();
 });
 
 test('the new /trails is real trails, not the thematic feature (now /journeys)', async ({ page }) => {

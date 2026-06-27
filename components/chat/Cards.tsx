@@ -80,6 +80,8 @@ export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: un
       return <TrailResultsCard data={data} />;
     case 'trail_detail_card':
       return <TrailDetailCard data={data} />;
+    case 'loop_card':
+      return <LoopCard data={data} />;
     case 'graph_result':
       return <GraphResultCard data={data} />;
     case 'why_this':
@@ -699,6 +701,7 @@ interface TrailCardView {
   permitRequired?: boolean | null;
   dogsAllowed?: boolean | null;
   wheelchairAccessible?: boolean | null;
+  hikers?: number | null; // collective: "N hikers like you also did this" (ADR-072)
 }
 
 /** A "2.4 mi · +1,200 ft · ~3 hr · loop" stats line shared by the list + detail cards. */
@@ -708,6 +711,7 @@ function trailMetaLine(t: TrailCardView): string {
   if (t.elevationGainFt != null) parts.push(`+${t.elevationGainFt.toLocaleString()} ft`);
   if (t.estTimeHrs != null) parts.push(`~${t.estTimeHrs} hr`);
   if (t.routeType) parts.push(t.routeType);
+  if (t.hikers != null && t.hikers > 0) parts.push(`${t.hikers} hiker${t.hikers === 1 ? '' : 's'} like you`);
   return parts.join(' · ');
 }
 
@@ -810,6 +814,45 @@ function TrailDetailCard({ data }: { data: Record<string, unknown> }) {
         ) : null}
       </Card.Body>
     </Card.Root>
+  );
+}
+
+interface SuggestedLoopView {
+  trailIds: string[];
+  names: string[];
+  kind: 'single' | 'pair';
+  lengthMiles: number;
+  elevationGainFt: number;
+  estTimeHrs: number;
+}
+
+/** Loop builder results (ADR-072 — build_loop → loop_card): stitched loops with combined stats. */
+function LoopCard({ data }: { data: Record<string, unknown> }) {
+  const loops = (data.loops ?? []) as SuggestedLoopView[];
+  if (!loops.length) {
+    return (
+      <Text fontSize="sm" color="fg.muted" my={2}>
+        No loops to stitch here yet — I need connected trails with shared junctions (try the loop builder after a trail sync).
+      </Text>
+    );
+  }
+  return (
+    <Stack gap={2} my={2}>
+      <Text fontSize="xs" color="fg.muted">Suggested loops — combined stats are estimates; verify at the trailhead.</Text>
+      {loops.map((l) => (
+        <Card.Root key={l.trailIds.join('|')} variant="subtle" size="sm" w="full">
+          <Card.Body p={3}>
+            <HStack gap={2} wrap="wrap" mb={1}>
+              <Text as="span" fontWeight="semibold" fontFamily="heading">{l.names.join(' + ')}</Text>
+              <Badge colorPalette="trail" variant="surface">{l.kind === 'pair' ? 'stitched loop' : 'loop'}</Badge>
+            </HStack>
+            <Text fontSize="sm">
+              {[`${l.lengthMiles} mi`, `+${l.elevationGainFt.toLocaleString()} ft`, `~${l.estTimeHrs} hr`].join(' · ')}
+            </Text>
+          </Card.Body>
+        </Card.Root>
+      ))}
+    </Stack>
   );
 }
 

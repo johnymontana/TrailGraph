@@ -53,3 +53,38 @@ export async function travelersAlsoLoved(userId: string, limit = 8): Promise<Col
     { userId, limit },
   );
 }
+
+export interface CollectiveTrail {
+  id: string;
+  name: string;
+  parkCode: string | null;
+  parkName: string | null;
+  difficulty: string | null;
+  lengthMiles: number | null;
+  hikers: number; // how many similar opted-in hikers did it
+}
+
+/**
+ * "Hikers like you also did…" (ADR-072, Phase 4) — trails DONE by opted-in users who share ≥1 trail with
+ * this user (via DID/SAVED), excluding trails the user already did/saved. The trail-graph analogue of
+ * `travelersAlsoLoved`: anonymized counts only, opt-in gated (no collective data for non-participants).
+ */
+export async function trailsHikersAlsoDid(userId: string, limit = 8): Promise<CollectiveTrail[]> {
+  if (!(await getCollectiveOptIn(userId))) return [];
+  return readGraph<CollectiveTrail>(
+    `
+    MATCH (me:User {userId:$userId})-[:DID|SAVED]->(:Trail)<-[:DID|SAVED]-(other:User)
+    WHERE other.userId <> $userId AND other.shareCollective = true
+    WITH DISTINCT me, other
+    MATCH (other)-[:DID]->(t:Trail)
+    WHERE NOT (me)-[:DID|SAVED]->(t)
+    OPTIONAL MATCH (t)-[:IN_PARK]->(p:Park)
+    WITH t, p, count(DISTINCT other) AS hikers
+    RETURN t.id AS id, t.name AS name, t.parkCode AS parkCode, p.fullName AS parkName,
+           t.difficulty AS difficulty, t.lengthMiles AS lengthMiles, hikers
+    ORDER BY hikers DESC, t.name ASC
+    LIMIT toInteger($limit)
+    `,
+    { userId, limit },
+  );
+}

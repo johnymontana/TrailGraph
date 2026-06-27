@@ -286,6 +286,19 @@ export async function seedTestData(): Promise<void> {
       ],
     },
   );
+
+  // Phase 4 (ADR-072): a loopable connection (Bright Angel + South Kaibab → rim-to-rim) + scenery topics,
+  // so the loop builder (CONNECTS, junctions≥2), connected-trail reads, and the Trail↔Learn↔Journeys
+  // cross-links have deterministic fixtures. Blob geometry is not seeded, so CONNECTS is written directly
+  // here (derive-trail-network would otherwise compute it from the polyline endpoints).
+  await writeGraph(`
+    MATCH (ba:Trail {id:'nps:grca:bright-angel-trail'}), (sk:Trail {id:'nps:grca:south-kaibab-trail'})
+    MERGE (ba)-[c:CONNECTS]->(sk) SET c.junctions = 2
+    WITH ba, sk
+    MATCH (geol:Topic {id:'top-geology'})
+    MERGE (ba)-[:HIGHLIGHTS]->(geol)
+    MERGE (sk)-[:HIGHLIGHTS]->(geol)
+  `);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

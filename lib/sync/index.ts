@@ -43,9 +43,10 @@ import {
   upsertLessonPlans,
 } from './upserts';
 import { embedParks } from './embed-parks';
-import { embedPlaces, embedPeople, embedArticles } from './embed-nodes';
+import { embedPlaces, embedPeople, embedArticles, embedTrails } from './embed-nodes';
 import { deriveNear } from './derive-near';
 import { deriveSharedEdges } from './derive-shared';
+import { deriveTrailNetwork } from './derive-trail-network';
 import { deriveCentrality } from './derive-centrality';
 import { deriveCommunities } from './derive-communities';
 import { refreshNearProjection } from './project-near';
@@ -371,6 +372,13 @@ export async function runSlowSync(): Promise<StepResult[]> {
     out.push(await step('join-thingstodo-trails', 'slow', async () => joinThingsToDoTrails()));
     if (process.env.SYNC_TRAIL_ELEVATION === '1') {
       out.push(await step('derive-trail-elevation', 'slow', async () => deriveTrailElevation()));
+    }
+    // Trail network for the loop builder (ADR-072, Phase 4): CONNECTS from shared endpoint junctions.
+    // Reads Blob geometry, so it runs after sync-trails wrote it; degrades when geometry isn't synced.
+    out.push(await step('derive-trail-network', 'slow', async () => deriveTrailNetwork()));
+    // Semantic trail vibe-search (ADR-072, Phase 4) — opt-in (spends embedding tokens), content-hash gated.
+    if (process.env.EMBED_TRAILS === '1') {
+      out.push(await step('embed-trails', 'slow', async () => embedTrails()));
     }
   }
   // OSM-fill (ADR-072, Phase 2): fill trails for NPS-empty parks. Opt-in; runs after sync-trails so the
