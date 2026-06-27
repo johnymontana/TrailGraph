@@ -19,6 +19,9 @@ export function renderMemoryBlock(m: UserMemory): string {
   const trailPrefs = summarizeTrailPreferences(m.trailPreferences);
   if (trailPrefs) lines.push(`- Trail preferences: ${trailPrefs}`);
 
+  const campPrefs = summarizeCampPreferences(m.campPreferences);
+  if (campPrefs) lines.push(`- Camp preferences: ${campPrefs}`);
+
   const passes = m.passes.map((p) => p.name).filter(Boolean).sort();
   const availability = summarizeAvailability(m.availability);
   if (passes.length || availability) {
@@ -54,6 +57,13 @@ export function renderMemoryBlock(m: UserMemory): string {
     .slice(0, 6);
   if (doneTrails.length) lines.push(`- Trails already hiked: ${doneTrails.join(', ')}`);
 
+  const savedCamps = m.campHistory.saved
+    .map((c) => c.name)
+    .filter(Boolean)
+    .sort()
+    .slice(0, 6);
+  if (savedCamps.length) lines.push(`- Saved campgrounds: ${savedCamps.join(', ')}`);
+
   if (!lines.length) return '';
 
   return [
@@ -85,6 +95,20 @@ function summarizeTrailPreferences(tp: UserMemory['trailPreferences']): string {
   if (tp.maxGainFt != null) parts.push(`≤ ${tp.maxGainFt} ft gain`);
   if (tp.avoidExposure) parts.push('no exposure');
   if (tp.dogsRequired) parts.push('dog-friendly');
+  return parts.join(' · ');
+}
+
+function summarizeCampPreferences(cp: UserMemory['campPreferences']): string {
+  const parts: string[] = [];
+  if (cp.rig) parts.push(cp.maxLengthFt != null ? `${cp.maxLengthFt}-ft ${cp.rig}` : cp.rig);
+  else if (cp.maxLengthFt != null) parts.push(`${cp.maxLengthFt}-ft rig`);
+  if (cp.hookups && cp.hookups !== 'none') parts.push(cp.hookups);
+  if (cp.tentOk) parts.push('tent ok');
+  if (cp.ada) parts.push('ADA');
+  if (cp.pets) parts.push('pets');
+  if (cp.quiet) parts.push('quiet');
+  // Raw number (NOT toLocaleString) — byte-stable for cache (see summarizeTrailPreferences).
+  if (cp.budget != null) parts.push(`≤ $${cp.budget}`);
   return parts.join(' · ');
 }
 

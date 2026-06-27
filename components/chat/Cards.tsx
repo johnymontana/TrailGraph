@@ -82,6 +82,14 @@ export function ToolCard({ kind, data: raw, onAnswer }: { kind: string; data: un
       return <TrailDetailCard data={data} />;
     case 'loop_card':
       return <LoopCard data={data} />;
+    case 'campground_card':
+      return <CampgroundResultsCard data={data} />;
+    case 'availability_card':
+      return <AvailabilityCard data={data} />;
+    case 'camp_watch_card':
+      return <CampWatchCard data={data} />;
+    case 'booking_window_card':
+      return <BookingWindowCard data={data} />;
     case 'graph_result':
       return <GraphResultCard data={data} />;
     case 'why_this':
@@ -812,6 +820,206 @@ function TrailDetailCard({ data }: { data: Record<string, unknown> }) {
             Added to {addedTo.stopLabel}{addedTo.day != null ? ` (day ${addedTo.day})` : ''}.
           </Text>
         ) : null}
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+// ── Campgrounds feature chat cards ────────────────────────────────────────────────────────────────
+
+interface CampgroundCardView {
+  id: string;
+  name: string;
+  agency?: string | null;
+  source?: string | null;
+  parkName?: string | null;
+  recAreaName?: string | null;
+  totalSites?: number | null;
+  free?: boolean;
+  feeUSD?: number | null;
+  hasHookups?: boolean;
+  maxAmps?: number | null;
+  ada?: boolean;
+  dispersed?: boolean;
+  dataConfidence?: string | null;
+}
+
+const AGENCY_BADGE: Record<string, string> = { NPS: 'pine', USFS: 'green', BLM: 'sand', USACE: 'blue', STATE: 'trail', PRIVATE: 'purple' };
+
+function campMetaLine(c: CampgroundCardView): string {
+  return [
+    c.totalSites != null ? `${c.totalSites} sites` : null,
+    c.free ? 'free' : c.feeUSD != null ? `$${c.feeUSD}/night` : null,
+    c.hasHookups ? (c.maxAmps ? `${c.maxAmps}A hookups` : 'hookups') : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** Campground finder results in chat (find_campgrounds → campground_card). Also handles the single-campground
+ *  add-to-trip preview/confirmation (add_campground_to_trip returns {campground, pendingAdd|addedTo}). */
+function CampgroundResultsCard({ data }: { data: Record<string, unknown> }) {
+  const single = data.campground as CampgroundCardView | undefined;
+  const pendingAdd = data.pendingAdd as { stopLabel: string; date?: string | null } | undefined;
+  const addedTo = data.addedTo as { stopLabel: string; date?: string | null } | undefined;
+  if (single) {
+    return (
+      <Card.Root variant="subtle" size="sm" my={2}>
+        <Card.Body p={3}>
+          <HStack gap={2} wrap="wrap" mb={1}>
+            <CLink asChild fontWeight="semibold" fontFamily="heading">
+              <NextLink href={`/campgrounds/${encodeURIComponent(single.id)}`}>{single.name}</NextLink>
+            </CLink>
+            {single.agency ? <Badge colorPalette={AGENCY_BADGE[single.agency] ?? 'gray'}>{single.agency}</Badge> : null}
+            {single.dispersed ? <Badge colorPalette="sand" variant="surface">dispersed</Badge> : null}
+          </HStack>
+          {single.parkName ?? single.recAreaName ? <Text fontSize="xs" color="fg.muted">{single.parkName ?? single.recAreaName}</Text> : null}
+          {campMetaLine(single) ? <Text fontSize="sm" mt={1}>{campMetaLine(single)}</Text> : null}
+          {pendingAdd ? (
+            <Text fontSize="sm" color="brand.fg" mt={2}>
+              Set {single.name} as the lodging for {pendingAdd.stopLabel}{pendingAdd.date ? ` (${pendingAdd.date})` : ''}? Say the word and I&apos;ll save it. (I won&apos;t book it — you&apos;ll reserve on recreation.gov.)
+            </Text>
+          ) : null}
+          {addedTo ? (
+            <Text fontSize="sm" color="brand.fg" mt={2}>
+              Added as lodging for {addedTo.stopLabel}{addedTo.date ? ` (${addedTo.date})` : ''}. Reserve it on recreation.gov when you&apos;re ready.
+            </Text>
+          ) : null}
+        </Card.Body>
+      </Card.Root>
+    );
+  }
+
+  const camps = (data.campgrounds ?? []) as CampgroundCardView[];
+  const applied = (data.appliedPreferences as string[] | undefined)?.filter(Boolean) ?? [];
+  const total = typeof data.total === 'number' ? data.total : camps.length;
+  if (!camps.length) return <Text fontSize="sm" color="fg.muted" my={2}>No campgrounds matched those filters.</Text>;
+  return (
+    <Stack gap={2} my={2}>
+      {applied.length ? <Text fontSize="xs" color="fg.muted">Narrowed to your camp preferences: {applied.join(' · ')}</Text> : null}
+      {camps.map((c) => (
+        <CLink key={c.id} asChild _hover={{ textDecoration: 'none' }} display="block" w="full">
+          <NextLink href={`/campgrounds/${encodeURIComponent(c.id)}`}>
+            <Card.Root variant="interactive" size="sm" w="full">
+              <Card.Body p={3}>
+                <HStack gap={2} wrap="wrap">
+                  <Text as="span" fontWeight="semibold" fontFamily="heading">{c.name}</Text>
+                  {c.agency ? <Badge colorPalette={AGENCY_BADGE[c.agency] ?? 'gray'}>{c.agency}</Badge> : null}
+                  {c.free ? <Badge colorPalette="pine" variant="surface">free</Badge> : null}
+                  {c.ada ? <Badge colorPalette="sand" variant="surface">ADA</Badge> : null}
+                </HStack>
+                {c.parkName ?? c.recAreaName ? <Text fontSize="xs" color="fg.muted" mt={0.5}>{c.parkName ?? c.recAreaName}</Text> : null}
+                {campMetaLine(c) ? <Text fontSize="sm" mt={1}>{campMetaLine(c)}</Text> : null}
+              </Card.Body>
+            </Card.Root>
+          </NextLink>
+        </CLink>
+      ))}
+      {total > camps.length ? <Text fontSize="xs" color="fg.muted">Showing {camps.length} of {total} — ask me to narrow further.</Text> : null}
+    </Stack>
+  );
+}
+
+/** Per-campground availability in chat (check_campsite_availability → availability_card). HEAVILY nullable:
+ *  renders the honest "couldn't reach recreation.gov — check there ↗" degrade rather than a misleading grid. */
+function AvailabilityCard({ data }: { data: Record<string, unknown> }) {
+  const name = (data.name as string) ?? 'this campground';
+  const degraded = data.degraded === true;
+  const bookingUrl = data.bookingUrl as string | null | undefined;
+  const nights = (data.nights ?? []) as { date: string; sitesOpen: number }[];
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading" mb={1}>{name} — availability</Text>
+        {degraded || !nights.length ? (
+          <Text fontSize="sm" color="fg.muted">
+            I couldn&apos;t pull live availability (it&apos;s a best-effort, unofficial feed).{' '}
+            {bookingUrl ? (
+              <CLink href={bookingUrl} color="brand.fg" target="_blank" rel="noopener noreferrer">Check on recreation.gov ↗</CLink>
+            ) : (
+              'Check on recreation.gov.'
+            )}
+          </Text>
+        ) : (
+          <>
+            <Stack gap={0.5}>
+              {nights.map((n) => (
+                <HStack key={n.date} gap={2}>
+                  <Text fontSize="sm" w="110px">{n.date}</Text>
+                  <Badge colorPalette={n.sitesOpen > 0 ? 'pine' : 'red'} variant={n.sitesOpen > 0 ? 'solid' : 'surface'}>
+                    {n.sitesOpen > 0 ? `${n.sitesOpen} open` : 'booked'}
+                  </Badge>
+                </HStack>
+              ))}
+            </Stack>
+            <Text fontSize="xs" color="fg.muted" mt={2}>
+              Best-effort — verify on{' '}
+              {bookingUrl ? <CLink href={bookingUrl} color="brand.fg" target="_blank" rel="noopener noreferrer">recreation.gov ↗</CLink> : 'recreation.gov'} before you rely on it. I never book.
+            </Text>
+          </>
+        )}
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+interface CampWatchView {
+  id: string;
+  label?: string | null;
+  startDate: string;
+  endDate: string;
+  siteType?: string | null;
+  campgroundIds?: string[];
+}
+
+/** Camp Watch list in chat (set/list/clear_camp_watch → camp_watch_card). Renders even when empty. */
+function CampWatchCard({ data }: { data: Record<string, unknown> }) {
+  const watches = (data.watches ?? []) as CampWatchView[];
+  const justCreated = data.justCreated as string | undefined;
+  if (!watches.length) return <Text fontSize="sm" color="fg.muted" my={2}>You have no Camp Watches set. I can watch a campground or park for cancellations — just ask.</Text>;
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading" mb={2}>Camp Watches ({watches.length}/{WATCH_CAP})</Text>
+        <Stack gap={1.5}>
+          {watches.map((w) => (
+            <HStack key={w.id} gap={2} wrap="wrap">
+              {w.id === justCreated ? <Badge colorPalette="pine">new</Badge> : null}
+              <Text fontSize="sm" fontWeight="medium">{w.label ?? `${(w.campgroundIds ?? []).length} campground(s)`}</Text>
+              <Text fontSize="xs" color="fg.muted">{w.startDate} → {w.endDate}{w.siteType && w.siteType !== 'any' ? ` · ${w.siteType}` : ''}</Text>
+            </HStack>
+          ))}
+        </Stack>
+        <Text fontSize="xs" color="fg.muted" mt={2}>I&apos;ll alert you when a matching site frees up. I watch only — booking happens on recreation.gov.</Text>
+      </Card.Body>
+    </Card.Root>
+  );
+}
+
+/** Booking-window intelligence in chat (campground_booking_window → booking_window_card). */
+function BookingWindowCard({ data }: { data: Record<string, unknown> }) {
+  const name = (data.name as string) ?? 'this campground';
+  const windowOpensOn = data.windowOpensOn as string | undefined;
+  const opensInPast = data.opensInPast === true;
+  const daysUntilOpen = data.daysUntilOpen as number | undefined;
+  const booksOutDays = data.booksOutDays as number | null | undefined;
+  const arrivalDate = data.arrivalDate as string | undefined;
+  const bookingUrl = data.bookingUrl as string | null | undefined;
+  return (
+    <Card.Root variant="subtle" size="sm" my={2}>
+      <Card.Body p={3}>
+        <Text fontWeight="semibold" fontFamily="heading" mb={1}>{name} — booking window</Text>
+        {booksOutDays != null ? <Text fontSize="sm">Typically books out ~{booksOutDays} days ahead.</Text> : null}
+        {windowOpensOn ? (
+          <Text fontSize="sm" mt={0.5}>
+            For arrival {arrivalDate ?? ''}, the reservation window {opensInPast ? 'is already open (opened' : 'opens'}{' '}
+            {windowOpensOn}{opensInPast ? ')' : daysUntilOpen != null ? ` — in ${daysUntilOpen} day${daysUntilOpen === 1 ? '' : 's'}` : ''}.
+          </Text>
+        ) : null}
+        <Text fontSize="xs" color="fg.muted" mt={2}>
+          Want me to set a Camp Watch reminder for the morning it opens?{' '}
+          {bookingUrl ? <CLink href={bookingUrl} color="brand.fg" target="_blank" rel="noopener noreferrer">Open on recreation.gov ↗</CLink> : null}
+        </Text>
       </Card.Body>
     </Card.Root>
   );

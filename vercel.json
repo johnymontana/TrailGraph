@@ -3,6 +3,7 @@
   "crons": [
     { "path": "/api/sync?tier=all", "schedule": "0 8 * * *" },
     { "path": "/api/memory/reconcile", "schedule": "30 8 * * *" },
-    { "path": "/api/digests", "schedule": "0 12 * * *" }
+    { "path": "/api/digests", "schedule": "0 12 * * *" },
+    { "path": "/api/camp-watch", "schedule": "*/15 * * * *" }
   ]
 }

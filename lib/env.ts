@@ -48,6 +48,28 @@ export const env = {
       return optional('NAMS_WORKSPACE_ID');
     },
   },
+  ridb: {
+    // RIDB (Recreation.gov data) — multi-agency campground/campsite import (Campgrounds feature). Auth
+    // via the `apikey` header; free instant signup. Keyed by RIDB FacilityID (== :Campground.ridbId).
+    get apiKey() {
+      return required('RIDB_API_KEY');
+    },
+    baseUrl: 'https://ridb.recreation.gov/api/v1',
+  },
+  camp: {
+    // Live recreation.gov availability (the UNOFFICIAL month endpoint). Ships OFF — when disabled every
+    // availability surface degrades to a recreation.gov deep-link. See the feature plan's ToS-risk note.
+    get availabilityEnabled() {
+      return process.env.CAMP_AVAILABILITY_ENABLED === '1';
+    },
+    // A clear, identifying UA so the (unofficial) endpoint can attribute + throttle us politely.
+    get userAgent() {
+      return optional(
+        'CAMP_AVAILABILITY_UA',
+        'TrailGraph/1.0 (+https://trailgraph.app; respectful-availability-check)',
+      );
+    },
+  },
   // NOTE: do NOT define EVE_BASE_URL. eve's `withEve` reads that exact env var to locate the eve dev
   // server; setting it (e.g. to the app's own origin) makes the proxy self-loop (EADDRNOTAVAIL).
   routing: {

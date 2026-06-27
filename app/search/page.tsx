@@ -4,6 +4,7 @@ import NextImage from 'next/image';
 import { LuSearch, LuSparkles } from 'react-icons/lu';
 import { headers } from 'next/headers';
 import { vibeSearch, semanticSearch, semanticArticles, semanticTrails, type SemanticHit, type ArticleHit, type TrailSummary } from '../../lib/queries';
+import { searchCampgrounds, type CampgroundSummary } from '../../lib/campgrounds';
 import { embedQuery } from '../../lib/embed-cache';
 import { rateLimit, rlIp, clientIpFrom } from '../../lib/rate-limit';
 import { ParkCard } from '../../components/ParkCard';
@@ -37,6 +38,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   type ParkHit = Awaited<ReturnType<typeof vibeSearch>>[number];
   let parks: ParkHit[] = [];
   let trails: TrailSummary[] = [];
+  let campgrounds: CampgroundSummary[] = [];
   let places: SemanticHit[] = [];
   let people: SemanticHit[] = [];
   let articles: ArticleHit[] = [];
@@ -50,6 +52,8 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     if (!ok) {
       throttled = true;
     } else {
+      // Campgrounds use a fulltext name match (no embedding index) — independent of the shared vector.
+      campgrounds = await searchCampgrounds({ q, limit }).then((r) => r.items).catch(() => [] as CampgroundSummary[]);
       const vec = await embedQuery(q).catch(() => null);
       if (vec) {
         [parks, trails, places, people, articles] = await Promise.all([
@@ -128,6 +132,18 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={5}>
                   {trails.map((t) => (
                     <TrailHitCard key={t.id} hit={t} />
+                  ))}
+                </SimpleGrid>
+              )}
+            </Section>
+
+            <Section title="Campgrounds" count={campgrounds.length}>
+              {campgrounds.length === 0 ? (
+                <Empty />
+              ) : (
+                <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gap={5}>
+                  {campgrounds.map((c) => (
+                    <CampgroundHitCard key={c.id} hit={c} />
                   ))}
                 </SimpleGrid>
               )}
@@ -214,6 +230,36 @@ function TrailHitCard({ hit }: { hit: TrailSummary }) {
               {hit.permitRequired ? <Badge colorPalette="orange">permit</Badge> : null}
             </HStack>
             {hit.parkName ? <Text fontSize="xs" color="fg.muted" lineClamp={1}>{hit.parkName}</Text> : null}
+            {stats ? <Text fontSize="sm">{stats}</Text> : null}
+          </Card.Body>
+        </Card.Root>
+      </NextLink>
+    </CLink>
+  );
+}
+
+const AGENCY_HIT_LABEL: Record<string, string> = { NPS: 'NPS', USFS: 'Forest Service', BLM: 'BLM', USACE: 'Army Corps', STATE: 'State', PRIVATE: 'Private' };
+
+/** Campground result card — links to the campground detail page (id carries colons → encoded). */
+function CampgroundHitCard({ hit }: { hit: CampgroundSummary }) {
+  const stats = [
+    hit.totalSites != null ? `${hit.totalSites} sites` : null,
+    hit.free ? 'Free' : hit.feeUSD != null ? `$${hit.feeUSD}/night` : null,
+    hit.hasHookups ? (hit.maxAmps ? `${hit.maxAmps}A hookups` : 'hookups') : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <CLink asChild _hover={{ textDecoration: 'none' }} display="block" w="full" h="full">
+      <NextLink href={`/campgrounds/${encodeURIComponent(hit.id)}`}>
+        <Card.Root variant="interactive" w="full" h="100%">
+          <Card.Body p={3} gap={1}>
+            <HStack wrap="wrap" gap={2}>
+              <Badge colorPalette="trail">{AGENCY_HIT_LABEL[hit.agency ?? ''] ?? 'camp'}</Badge>
+              <Text fontWeight="semibold" fontFamily="heading" lineClamp={1} flex="1">{hit.name}</Text>
+              {hit.dispersed ? <Badge colorPalette="sand">dispersed</Badge> : null}
+            </HStack>
+            {hit.parkName ?? hit.recAreaName ? <Text fontSize="xs" color="fg.muted" lineClamp={1}>{hit.parkName ?? hit.recAreaName}</Text> : null}
             {stats ? <Text fontSize="sm">{stats}</Text> : null}
           </Card.Body>
         </Card.Root>

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Box, Stack, Heading, Text, Input, Button, Flex, HStack, IconButton, Separator, Badge, Icon } from '@chakra-ui/react';
 import { Reorder } from 'motion/react';
-import { LuX, LuGripVertical, LuFootprints, LuTriangleAlert } from 'react-icons/lu';
+import { LuX, LuGripVertical, LuFootprints, LuTriangleAlert, LuTentTree } from 'react-icons/lu';
 import { MapTripCanvas } from './MapTripCanvas';
 import { ParkSearchInput } from './ParkSearchInput';
 import { toast } from '../../lib/toast';
@@ -36,6 +36,7 @@ interface Stop {
   lat?: number | null;
   lng?: number | null;
   hikes?: TripHike[];
+  lodging?: { id: string; name: string; feeUSD?: number | null; reservationUrl?: string | null } | null;
   driveTo?: { miles: number; minutes: number; source: string } | null;
 }
 
@@ -219,6 +220,18 @@ export function TripBuilder() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ op: 'excludeTrail', stopId, trailId }),
+    });
+    if (rateLimited(res)) return;
+    if (res.ok) applyMutation(await res.json());
+  }
+  // Detach lodging from a stop (Campgrounds feature) — `(:Stop)-[:STAYS_AT]->(:Campground)`. Adding lodging
+  // happens via the ranger or the campground detail page; the builder shows it and lets you drop it.
+  async function removeLodging(stopId: string, campgroundId: string) {
+    if (!trip) return;
+    const res = await fetch(`/api/trips/${trip.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op: 'excludeCampground', stopId, campgroundId }),
     });
     if (rateLimited(res)) return;
     if (res.ok) applyMutation(await res.json());
@@ -512,6 +525,24 @@ export function TripBuilder() {
                           </IconButton>
                         </HStack>
                       ))}
+                    </Stack>
+                  ) : null}
+                  {/* Lodging nested under this stop (Campgrounds feature) — add via the ranger or a campground page; remove here. */}
+                  {s.lodging ? (
+                    <Stack gap={0.5} pl={4} mt={1}>
+                      <Text fontSize="2xs" fontWeight="bold" color="fg.muted" textTransform="uppercase" letterSpacing="wide">
+                        Sleeping here
+                      </Text>
+                      <HStack gap={1.5}>
+                        <Icon color="trail.solid" boxSize={3}><LuTentTree /></Icon>
+                        <Text fontSize="xs" flex="1" lineClamp={1}>
+                          {s.lodging.name}
+                          {s.lodging.feeUSD != null ? <Text as="span" color="fg.muted"> · ${s.lodging.feeUSD}/night</Text> : null}
+                        </Text>
+                        <IconButton size="2xs" variant="ghost" colorPalette="red" aria-label={`Remove ${s.lodging.name}`} onClick={() => removeLodging(s.id, s.lodging!.id)}>
+                          <LuX />
+                        </IconButton>
+                      </HStack>
                     </Stack>
                   ) : null}
                 </Reorder.Item>

@@ -18,6 +18,8 @@ function mem(over: Partial<UserMemory> = {}): UserMemory {
     availability: { start: null, end: null },
     trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
     trailHistory: { saved: [], wishlisted: [], done: [] },
+    campPreferences: { rig: null, maxLengthFt: null, hookups: null, tentOk: false, ada: false, pets: false, quiet: false, budget: null },
+    campHistory: { saved: [] },
     ...over,
   };
 }
@@ -51,6 +53,24 @@ describe('renderMemoryBlock', () => {
     expect(out).toContain('- Considered parks: Great Basin');
     expect(out).toContain('- Saved trips: Utah Dark Skies');
     expect(out).toContain('do NOT call `recall_user_context` just to re-read it');
+  });
+
+  it('renders camp preferences + saved campgrounds (Campgrounds feature)', () => {
+    const out = renderMemoryBlock(
+      mem({
+        campPreferences: { rig: 'rv', maxLengthFt: 28, hookups: '30amp', tentOk: false, ada: false, pets: true, quiet: true, budget: 30 },
+        campHistory: { saved: [{ id: 'cg-canyon', name: 'Canyon Campground' }] },
+      }),
+    );
+    expect(out).toContain('- Camp preferences: 28-ft rv · 30amp · pets · quiet · ≤ $30');
+    expect(out).toContain('- Saved campgrounds: Canyon Campground');
+  });
+
+  it('camp-preferences line is byte-stable + omitted when empty', () => {
+    expect(renderMemoryBlock(mem())).not.toContain('Camp preferences');
+    const a = mem({ campPreferences: { rig: 'tent', maxLengthFt: null, hookups: null, tentOk: true, ada: true, pets: false, quiet: false, budget: null } });
+    expect(renderMemoryBlock(a)).toBe(renderMemoryBlock({ ...a }));
+    expect(renderMemoryBlock(a)).toContain('- Camp preferences: tent · tent ok · ADA');
   });
 
   it('is deterministic — input ordering does not change the output (cache stability)', () => {

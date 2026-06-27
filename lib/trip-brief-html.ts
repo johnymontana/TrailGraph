@@ -24,6 +24,11 @@ export function tripBriefHtml(brief: TripBrief): string {
         : '<p class="muted">No active closures or danger alerts.</p>';
       const vcs = s.visitorCenters.length ? `<p><span class="k">Visitor centers:</span> ${s.visitorCenters.map(esc).join(' · ')}</p>` : '';
       const cgs = s.campgrounds.length ? `<p><span class="k">Campgrounds:</span> ${s.campgrounds.map((c) => esc(c.name)).join(' · ')}</p>` : '';
+      // Lodging for this stop-night (Campgrounds feature) — the STAYS_AT pick; static sheet, so no live
+      // availability — print the booking pointer instead.
+      const lodging = s.lodging
+        ? `<p><span class="k">Sleeping:</span> ${esc(s.lodging.name)}${s.lodging.feeUSD != null ? ` · $${s.lodging.feeUSD}/night` : ''} <span class="muted">— verify/book on recreation.gov</span></p>`
+        : '';
       const drive = s.driveToNext ? `<p class="drive">↓ ${s.driveToNext.miles} mi · ${s.driveToNext.minutes} min to next stop</p>` : '';
       const dir = s.directionsUrl ? `<p><span class="k">Directions:</span> ${esc(s.directionsUrl)}</p>` : '';
       const fee = s.entranceFee != null ? `$${s.entranceFee} vehicle entrance` : 'fee n/a';
@@ -47,7 +52,7 @@ export function tripBriefHtml(brief: TripBrief): string {
       <section class="stop">
         <h2><span class="num">${num}</span> ${esc(s.name)}${s.designation ? ` <span class="muted">· ${esc(s.designation)}</span>` : ''}</h2>
         <p><span class="k">Coordinates:</span> ${coords(s.lat, s.lng)} &nbsp; <span class="k">·</span> ${esc(fee)}</p>
-        ${dir}${vcs}${cgs}
+        ${dir}${vcs}${cgs}${lodging}
         ${hikes}
         <h3>Gate &amp; closure notes</h3>
         ${alerts}

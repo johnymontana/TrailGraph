@@ -28,6 +28,21 @@ describe('isRenderableToolOutput', () => {
     expect(isRenderableToolOutput('alert_list', { parks: [] })).toBe(false);
   });
 
+  it('campground cards: list/single + the honest degrade/empty states render', () => {
+    expect(isRenderableToolOutput('campground_card', { campgrounds: [{}] })).toBe(true);
+    expect(isRenderableToolOutput('campground_card', { campground: {} })).toBe(true);
+    expect(isRenderableToolOutput('campground_card', { campgrounds: [] })).toBe(false);
+    // availability renders even when degraded (no nights) so the deep-link shows
+    expect(isRenderableToolOutput('availability_card', { name: 'Canyon', degraded: true, nights: [] })).toBe(true);
+    expect(isRenderableToolOutput('availability_card', {})).toBe(false);
+    // camp watch renders even empty (confirms state)
+    expect(isRenderableToolOutput('camp_watch_card', { watches: [] })).toBe(true);
+    expect(isRenderableToolOutput('camp_watch_card', {})).toBe(false);
+    expect(isRenderableToolOutput('booking_window_card', { windowOpensOn: '2026-03-15' })).toBe(true);
+    // errors always render
+    expect(isRenderableToolOutput('availability_card', { error: 'boom' })).toBe(true);
+  });
+
   it('itinerary_preview: needs a trip', () => {
     expect(isRenderableToolOutput('itinerary_preview', { trip: { id: 't' } })).toBe(true);
     expect(isRenderableToolOutput('itinerary_preview', {})).toBe(false);

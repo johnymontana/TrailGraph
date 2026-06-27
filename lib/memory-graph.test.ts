@@ -47,6 +47,8 @@ describe('getUserMemory (E3 — context subgraph read)', () => {
       availability: { start: null, end: null },
       trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
       trailHistory: { saved: [], wishlisted: [], done: [] },
+      campPreferences: { rig: null, maxLengthFt: null, hookups: null, tentOk: false, ada: false, pets: false, quiet: false, budget: null },
+      campHistory: { saved: [] },
     });
   });
 });

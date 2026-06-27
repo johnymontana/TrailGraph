@@ -59,6 +59,14 @@ import { deriveTrailElevation } from './derive-trail-elevation';
 import { deriveTrailLogistics } from './derive-trail-logistics';
 import { joinThingsToDoTrails } from './join-thingstodo-trails';
 import { enrichTrailsOSM } from './enrich-trails-osm';
+import { fetchFacilitiesPage, RidbRateLimitError } from '../datasources/ridb';
+import { applyReservations } from '../datasources/recreation';
+import { upsertRidbCampgrounds } from './sync-campgrounds-ridb';
+import { syncCampsitesRidb } from './sync-campsites-ridb';
+import { deriveCampNear } from './derive-camp-near';
+import { deriveBookingDifficulty } from './derive-booking-difficulty';
+import { enrichCampgroundsOSM } from './enrich-camp-osm';
+import { resolveCampgrounds } from './resolve-campgrounds';
 
 /**
  * NPS sync orchestrator (ADR-007).
@@ -212,6 +220,66 @@ async function pagedStep<T>(
     }
   } catch (err) {
     if (err instanceof NpsRateLimitError) {
+      await markPaused(resource, err.message); // cursor already persisted on the last successful page
+      return { resource, counts: { count, page, paused: 1 }, ms: Date.now() - start };
+    }
+    await markFailed(resource, (err as Error)?.message ?? 'unknown');
+    throw new RetryableError(`sync step '${resource}' failed: ${(err as Error)?.message}`);
+  }
+  const ms = Date.now() - start;
+  await writeGraph(
+    `MERGE (s:SyncState {resource: $resource}) SET s.lastCounts = $counts, s.lastMs = $ms, s.partialPage = 0`,
+    { resource, counts: JSON.stringify({ count }), ms },
+  );
+  return { resource, counts: { count }, ms };
+}
+
+/**
+ * Page-and-checkpoint a large EXTERNAL (non-NPS) resource — the host-agnostic sibling of `pagedStep`,
+ * used by the RIDB campground import. Identical `:SyncState` cursor + pause/resume machinery, but the
+ * cursor is an OFFSET and a `RidbRateLimitError` (not `NpsRateLimitError`) triggers the pause.
+ * `fetchPageFn(offset)` returns one page; `upsertBatch` upserts it immediately (idempotent MERGE → a
+ * replayed partial page is safe). Exported so the standalone `scripts/sync-campgrounds.ts` reuses it.
+ */
+export async function pagedExternalStep<T>(
+  resource: string,
+  pageSize: number,
+  fetchPageFn: (offset: number) => Promise<{ data: T[]; total: number }>,
+  upsertBatch: (batch: T[]) => Promise<number>,
+): Promise<StepResult> {
+  'use step';
+  if (process.env.SYNC_FORCE !== '1') {
+    const prior = await recentlyOk(resource, 'slow');
+    if (prior) return { resource, counts: { ...prior, skipped: 1 }, ms: 0 };
+  }
+  const start = Date.now();
+
+  const saved = await readGraph<{ page: number; count: number; status: string | null }>(
+    `MATCH (s:SyncState {resource: $resource})
+     RETURN coalesce(s.partialPage, 0) AS page, coalesce(s.partialCount, 0) AS count, s.lastStatus AS status`,
+    { resource },
+  ).catch(() => []);
+  let page = saved[0]?.status === 'paused' ? (saved[0]?.page ?? 0) : 0;
+  let count = saved[0]?.status === 'paused' ? (saved[0]?.count ?? 0) : 0;
+
+  try {
+    for (;;) {
+      const pageData = await fetchPageFn(page * pageSize);
+      if (pageData.data.length > 0) count += await upsertBatch(pageData.data);
+      page += 1;
+      const total = Number(pageData.total) || 0;
+      const done = pageData.data.length === 0 || page * pageSize >= total;
+      await writeGraph(
+        `MERGE (s:SyncState {resource: $resource})
+         SET s.tier = 'slow', s.partialPage = $page, s.partialCount = $count,
+             s.lastStatus = $status, s.lastRunAt = datetime()`,
+        { resource, page, count, status: done ? 'ok' : 'paused' },
+      );
+      if (done) break;
+      await new Promise((r) => setTimeout(r, 120)); // polite between pages
+    }
+  } catch (err) {
+    if (err instanceof RidbRateLimitError) {
       await markPaused(resource, err.message); // cursor already persisted on the last successful page
       return { resource, counts: { count, page, paused: 1 }, ms: Date.now() - start };
     }
@@ -386,6 +454,33 @@ export async function runSlowSync(): Promise<StepResult[]> {
   if (process.env.ENRICH_OSM_TRAILS === '1') {
     out.push(await step('enrich-trails-osm', 'slow', async () => enrichTrailsOSM()));
   }
+  // Multi-agency campgrounds (RIDB Facilities + Campsites → :Campground/:Campsite/:Agency/:RecArea).
+  // Opt-in (heavy: ~3,600 facilities + ~100k sites + a RIDB call per facility); checkpointed + per-facility
+  // content-hash gated so re-runs are cheap, with a nightly LastUpdatedDate delta. Runs after parks (always)
+  // and trails (for NEAR_TRAILHEAD). Federal-first; NPS campgrounds unify in place via ridbId (ADR Campgrounds).
+  if (process.env.SYNC_CAMPGROUNDS === '1') {
+    // Ensure NPS campgrounds carry ridbId BEFORE unification — applyReservations otherwise only runs in
+    // syncDataSources() (post-sync), so without this the first run would create separate ridb:* duplicates.
+    out.push(await step('camp-ridbids', 'slow', async () => ({ applied: await applyReservations() })));
+    out.push(await pagedExternalStep<import('../datasources/ridb').RidbFacility>('campgrounds-ridb', 50, fetchFacilitiesPage, upsertRidbCampgrounds));
+    out.push(await syncCampsitesRidb()); // self-managing per-facility checkpoint + content-hash + delta
+    // Phase 4 reach (gated): OSM-fill for state/private/dispersed coverage (ODbL), then cross-source
+    // entity-resolution (dedup OSM vs the federal canon). Both run BEFORE derive-camp-near so NEAR reflects
+    // the merges; resolve runs after enrich so it has OSM nodes to resolve.
+    if (process.env.ENRICH_OSM_CAMP === '1') {
+      out.push(await step('enrich-camp-osm', 'slow', async () => enrichCampgroundsOSM()));
+    }
+    if (process.env.RESOLVE_CAMPGROUNDS === '1') {
+      out.push(await step('resolve-campgrounds', 'slow', async () => resolveCampgrounds()));
+    }
+    out.push(await step('derive-camp-near', 'slow', async () => deriveCampNear()));
+    // Booking-difficulty (books-out / weekend-fill) from the RIDB historical reservation download.
+    // Gated + scaffolded: no-ops unless DERIVE_BOOKING_DIFFICULTY=1 + RIDB_HISTORICAL_PATH is set.
+    if (process.env.DERIVE_BOOKING_DIFFICULTY === '1') {
+      out.push(await step('derive-booking-difficulty', 'slow', async () => deriveBookingDifficulty()));
+    }
+  }
+
   // Co-considered lens (#4): cross-user CONSIDERED overlap, k-anonymity ≥5. Independent of the NPS corpus
   // (rides the slow sync because that's where derivations live; sparse until the user base grows).
   out.push(await step('derive-co-considered', 'slow', async () => deriveCoConsidered()));
