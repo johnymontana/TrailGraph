@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { mapStatus, enumerateNights, countOpenNights, type CampMonthAvailability } from './campAvailability';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { mapStatus, enumerateNights, countOpenNights, getCampgroundAvailability, type CampMonthAvailability } from './campAvailability';
 
 describe('mapStatus (rec.gov label → coarse status)', () => {
   it('maps the common labels', () => {
@@ -83,5 +83,56 @@ describe('countOpenNights', () => {
 
   it('treats all-null months as zero open', () => {
     expect(countOpenNights([null, null], nights)).toEqual({ nightsOpen: 0, sampleSiteCount: 0 });
+  });
+});
+
+// getCampgroundAvailability has module-level backoff state (cooldown after a 429), so the 429 test runs LAST.
+describe('getCampgroundAvailability (gated live fetch)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.CAMP_AVAILABILITY_ENABLED;
+  });
+
+  it('returns null without fetching when the flag is OFF (kill-switch)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await getCampgroundAvailability('232449', '2030-07-15')).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('parses per-site availability into days + perSite + byType when enabled', async () => {
+    process.env.CAMP_AVAILABILITY_ENABLED = '1';
+    const body = {
+      campsites: {
+        s1: { campsite_type: 'TENT', availabilities: { '2030-07-03T00:00:00Z': 'Available', '2030-07-04T00:00:00Z': 'Reserved' } },
+        s2: { campsite_type: 'RV', availabilities: { '2030-07-03T00:00:00Z': 'Available' } },
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => body })));
+    const r = (await getCampgroundAvailability('232449', '2030-07-20'))!;
+    expect(r.ridbId).toBe('232449');
+    expect(r.monthStart).toBe('2030-07-01'); // normalized to the 1st
+    expect(r.perSite.s1['2030-07-03']).toBe('open');
+    expect(r.perSite.s1['2030-07-04']).toBe('reserved');
+    const day3 = r.days.find((d) => d.date === '2030-07-03')!;
+    expect(day3.sitesOpen).toBe(2); // s1 + s2 open on the 3rd
+    expect(day3.byType).toMatchObject({ tent: 1, rv: 1 });
+    expect(r.siteType.s2).toBe('rv');
+  });
+
+  it('returns null on a non-ok response (degrades to a deep link upstream)', async () => {
+    process.env.CAMP_AVAILABILITY_ENABLED = '1';
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404 })));
+    expect(await getCampgroundAvailability('1', '2030-07-01')).toBeNull();
+  });
+
+  it('returns null on a 429 and arms the backoff cooldown (runs last)', async () => {
+    process.env.CAMP_AVAILABILITY_ENABLED = '1';
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 429 }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await getCampgroundAvailability('1', '2030-07-01')).toBeNull();
+    // The cooldown is now armed → the next call short-circuits to null WITHOUT a second fetch.
+    expect(await getCampgroundAvailability('1', '2030-07-01')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -12,7 +12,12 @@ import { renderMemoryBlock } from '../../lib/memory-block';
 import { createTrip, deleteTrip, addStop, addLodgingToStop, removeCampgroundFromStop, getTrip } from '../../lib/trips';
 import { upsertOsmCampgrounds } from '../../lib/sync/enrich-camp-osm';
 import { resolveCampgrounds } from '../../lib/sync/resolve-campgrounds';
+import { deriveBookingDifficulty } from '../../lib/sync/derive-booking-difficulty';
+import { appendDigestItem, listDigests } from '../../lib/digest';
 import { readGraph } from '../../lib/neo4j';
+import { writeFile, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { RidbFacility } from '../../lib/datasources/ridb';
 import type { OsmCampRecord } from '../../lib/datasources/osm-camp';
 
@@ -207,5 +212,121 @@ describeIntegration('Campground entity resolution (Neo4j)', () => {
 
     // The far site survives (no federal neighbour to merge into).
     expect((await readGraph(`MATCH (c:Campground {id:'osm:node/888'}) RETURN c`)).length).toBe(1);
+  });
+});
+
+/** Phase 1/4: the full searchCampgrounds facet matrix against the seeded fixtures + NEAR/NEAR_TRAILHEAD. */
+describeIntegration('searchCampgrounds — full facet matrix (Neo4j)', () => {
+  beforeAll(async () => {
+    await seedTestData();
+    await deriveCampNear();
+  });
+  afterAll(async () => {
+    await writeGraph(`MATCH (c:Campground {id:'ridb:232449'}) DETACH DELETE c`);
+    await closeDriver();
+  });
+
+  const ids = async (opts: Parameters<typeof searchCampgrounds>[0]) => (await searchCampgrounds(opts)).items.map((c) => c.id).sort();
+
+  it('amenity facets: dumpStation / showers / drinkingWater / cellReception → cg-canyon', async () => {
+    expect(await ids({ dumpStation: true })).toContain('cg-canyon');
+    expect(await ids({ showers: true })).toContain('cg-canyon');
+    expect(await ids({ drinkingWater: true })).toContain('cg-canyon');
+    expect(await ids({ cellReception: true })).toContain('cg-canyon');
+  });
+
+  it('free → only the dispersed forest site (feeUSD 0)', async () => {
+    expect(await ids({ free: true })).toEqual(['ridb:999001']);
+  });
+
+  it('maxPriceUSD ≤ 20 excludes the $35 NPS site + the null-fee one (only the free site qualifies)', async () => {
+    expect(await ids({ maxPriceUSD: 20 })).toEqual(['ridb:999001']);
+  });
+
+  it('reservable → cg-canyon (the seed sets reservable=true); fcfs → the dispersed site', async () => {
+    expect(await ids({ reservable: true })).toContain('cg-canyon');
+    expect(await ids({ fcfs: true })).toContain('ridb:999001');
+  });
+
+  it('bbox confines to the viewport', async () => {
+    const inBox = await ids({ bbox: { minLat: 44, minLng: -111.5, maxLat: 45.2, maxLng: -110 } });
+    expect(inBox).toContain('cg-canyon');
+    const tiny = await ids({ bbox: { minLat: 0, minLng: 0, maxLat: 1, maxLng: 1 } });
+    expect(tiny).toEqual([]);
+  });
+
+  it('nearTrailId returns campgrounds NEAR that trailhead', async () => {
+    const near = await readGraph<{ tid: string }>(`MATCH (:Campground {id:'cg-canyon'})-[:NEAR_TRAILHEAD]->(t:Trail) RETURN t.id AS tid LIMIT 1`);
+    expect(near.length).toBeGreaterThan(0);
+    expect(await ids({ nearTrailId: near[0].tid })).toContain('cg-canyon');
+  });
+
+  it('AND-composes multiple predicates (USFS + dispersed + free → the forest site)', async () => {
+    expect(await ids({ agency: 'USFS', dispersed: true, free: true })).toEqual(['ridb:999001']);
+    // contradictory combo → empty
+    expect(await ids({ agency: 'NPS', dispersed: true })).toEqual([]);
+  });
+
+  it('paginates with an accurate total', async () => {
+    const page = await searchCampgrounds({ limit: 1, offset: 0 });
+    expect(page.items).toHaveLength(1);
+    expect(page.total).toBeGreaterThanOrEqual(3);
+  });
+});
+
+/** Phase 2: booking-difficulty derive from a (temp) RIDB historical CSV → :Campground stats by ridbId. */
+describeIntegration('deriveBookingDifficulty (Neo4j)', () => {
+  let csvPath: string;
+  beforeAll(async () => {
+    await seedTestData(); // cg-canyon has ridbId 232449
+    const dir = await mkdtemp(join(tmpdir(), 'ridb-hist-'));
+    csvPath = join(dir, 'reservations.csv');
+    await writeFile(
+      csvPath,
+      ['facilityid,orderdate,startdate,nights', '232449,2026-06-01,2026-06-11,2', '232449,2026-06-01,2026-06-12,2', '232449,2026-06-01,2026-06-13,2'].join('\n'),
+      'utf8',
+    );
+  });
+  afterAll(async () => {
+    delete process.env.RIDB_HISTORICAL_PATH;
+    await closeDriver();
+  });
+
+  it('no-ops when no file is configured', async () => {
+    delete process.env.RIDB_HISTORICAL_PATH;
+    expect(await deriveBookingDifficulty()).toMatchObject({ skipped: 1 });
+  });
+
+  it('writes median books-out + weekend-fill onto the matching campground', async () => {
+    process.env.RIDB_HISTORICAL_PATH = csvPath;
+    const r = await deriveBookingDifficulty();
+    expect(r.updated).toBeGreaterThanOrEqual(1);
+    const rows = await readGraph<{ booksOut: number; fill: number }>(
+      `MATCH (c:Campground {ridbId:'232449'}) RETURN c.booksOutDays AS booksOut, c.weekendFillRate AS fill`,
+    );
+    expect(rows[0].booksOut).toBe(11); // median of 10/11/12-day leads
+    expect(rows[0].fill).toBeGreaterThan(0); // 2 of 3 starts are Fri/Sat
+  });
+});
+
+/** Phase 2: the Camp Watch poller drops alerts into the same in-app digest inbox (appendDigestItem). */
+describeIntegration('appendDigestItem (camp-watch inbox)', () => {
+  const userId = `test-digest-${randomUUID()}`;
+  beforeAll(async () => {
+    await seedTestData();
+  });
+  afterAll(async () => {
+    await writeGraph(`MATCH (u:User {userId:$userId}) DETACH DELETE u`, { userId });
+    await closeDriver();
+  });
+
+  it('appends a campavail item and de-dupes an identical re-poll', async () => {
+    const item = { kind: 'campavail' as const, title: 'A site opened', detail: '2 newly-open at Canyon', tone: 'good' as const };
+    await appendDigestItem(userId, item);
+    await appendDigestItem(userId, item); // identical → deduped
+    const digests = await listDigests(userId);
+    const today = digests[0];
+    expect(today.items.filter((i) => i.kind === 'campavail')).toHaveLength(1);
+    expect(today.items[0].title).toBe('A site opened');
   });
 });

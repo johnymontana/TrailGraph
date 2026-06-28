@@ -32,7 +32,8 @@ export async function upsertRidbCampgrounds(batch: RidbFacility[]): Promise<numb
         reservable,
         // RIDB has no explicit facility-level FCFS flag; treat non-reservable facilities as first-come.
         fcfs: !reservable,
-        agencyKind: mapAgencyKind(org?.OrgName),
+        // OrgType is the authoritative state/federal signal (a state OrgName like "Utah" wouldn't name-match).
+        agencyKind: org?.OrgType === 'State' ? 'STATE' : mapAgencyKind(org?.OrgName),
         agencyId: org ? `agency:${org.OrgID}` : 'agency:unknown',
         agencyName: org?.OrgName ?? 'Unknown',
         recAreaId: rec ? `recarea:${rec.RecAreaID}` : null,
@@ -70,9 +71,11 @@ export async function upsertRidbCampgrounds(batch: RidbFacility[]): Promise<numb
      // Managing agency (always) + rec area (federal, outside a park unit).
      MERGE (ag:Agency {id: row.agencyId}) SET ag.name = row.agencyName, ag.kind = row.agencyKind
      MERGE (c)-[:MANAGED_BY]->(ag)
-     WITH c, row WHERE row.recAreaId IS NOT NULL
-     MERGE (ra:RecArea {id: row.recAreaId}) SET ra.name = row.recAreaName
-     MERGE (c)-[:IN_RECAREA]->(ra)
+     WITH c, row
+     // unit subquery — a missing recArea is a no-op (does NOT drop the campground from the count)
+     CALL { WITH c, row WITH c, row WHERE row.recAreaId IS NOT NULL
+            MERGE (ra:RecArea {id: row.recAreaId}) SET ra.name = row.recAreaName
+            MERGE (c)-[:IN_RECAREA]->(ra) }
      RETURN count(c) AS c`,
     { rows },
   );

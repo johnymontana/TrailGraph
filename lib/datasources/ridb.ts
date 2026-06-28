@@ -191,7 +191,9 @@ export function campsiteAttrs(attrs?: RidbAttribute[] | null): CampsiteAttrs {
   for (const a of attrs ?? []) byName.set(a.AttributeName.toLowerCase(), a.AttributeValue);
 
   const electric = byName.get('electricity hookup') ?? byName.get('electric hookup');
-  const driveway = byName.get('driveway type') ?? '';
+  // The live API uses 'Driveway Type'; the full RIDB export uses 'Driveway Entry' (value 'Pull-Through' /
+  // 'Back-In' / 'Parallel') — check both so the offline loader detects pull-through sites.
+  const driveway = byName.get('driveway entry') ?? byName.get('driveway type') ?? '';
   return {
     maxRvLengthFt: firstInt(byName.get('max vehicle length') ?? byName.get('max rv length')),
     // "30/50 amp" → 50; "Yes"/"30 amp" → that number; absent or "No" → null.

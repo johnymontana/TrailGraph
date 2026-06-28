@@ -121,8 +121,9 @@ function hashPayload(sites: RidbCampsite[]): string {
     .join('\n');
 }
 
-/** Bulk-UNWIND upsert of one facility's campsites + a scoped orphan-prune; sets the content hash. */
-async function upsertRidbCampsites(
+/** Bulk-UNWIND upsert of one facility's campsites + a scoped orphan-prune; sets the content hash. Exported
+ *  so the offline RIDB-export loader (scripts/load-ridb-export.ts) reuses the exact site upsert + prune. */
+export async function upsertRidbCampsites(
   facilityRidbId: string,
   sites: RidbCampsite[],
   setHash: string,

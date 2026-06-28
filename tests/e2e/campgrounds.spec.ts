@@ -69,3 +69,47 @@ test('comparison page asks for 2+ campgrounds when given too few', async ({ page
   await page.goto('/campgrounds/compare?ids=cg-canyon');
   await expect(page.getByText('Pick 2–4 campgrounds to compare')).toBeVisible();
 });
+
+test('comparison handles 3 campgrounds incl. a colon-laden RIDB id', async ({ page }) => {
+  await page.goto('/campgrounds/compare?ids=cg-canyon,cg-fishing-bridge,ridb:999001');
+  await expect(page.getByRole('heading', { name: 'Compare campgrounds' })).toBeVisible();
+  // The dispersed forest site (colon-laden id) is decoded + loaded into the comparison.
+  await expect(page.getByText('Gallatin Dispersed Area').first()).toBeVisible();
+});
+
+test('detail page decodes a colon-laden RIDB id (prod dynamic-param gotcha) + dispersed copy', async ({ page }) => {
+  // ridb:999001 → /campgrounds/ridb%3A999001 ; the route must decodeURIComponent before the graph lookup.
+  await page.goto(`/campgrounds/${encodeURIComponent('ridb:999001')}`);
+  await expect(page.getByRole('heading', { name: 'Gallatin Dispersed Area' })).toBeVisible();
+  await expect(page.getByText('USFS Recreation Sites GIS')).toBeVisible(); // provenance by source, not "NPS"
+  await expect(page.getByText(/dispersed camping: no reservation/i)).toBeVisible();
+});
+
+test('detail page shows amenities, the verify box, and the (gated) Set-a-Camp-Watch affordance', async ({ page }) => {
+  await page.goto('/campgrounds/cg-canyon');
+  await expect(page.getByText('Wheelchair Accessible')).toBeVisible(); // amenity badge
+  await expect(page.getByText('Verify before you book or tow')).toBeVisible(); // provenance/safety box
+  await expect(page.getByText('Set a Camp Watch (soon)')).toBeVisible(); // gated affordance, not a dead link
+});
+
+test('search surfaces a Campgrounds section (fulltext, independent of embeddings)', async ({ page }) => {
+  await page.goto('/search?q=canyon');
+  await expect(page.getByRole('heading', { name: 'Campgrounds' })).toBeVisible();
+  await expect(page.getByText('Canyon Campground').first()).toBeVisible();
+});
+
+test('finder filters by site type (tent → only the campground with a tent site)', async ({ page }) => {
+  await page.goto('/campgrounds?siteType=tent');
+  await expect(page.getByText('Canyon Campground')).toBeVisible();
+  await expect(page.getByText('Gallatin Dispersed Area')).toHaveCount(0);
+});
+
+test('finder ADA checkbox narrows to accessible campgrounds', async ({ page }) => {
+  await page.goto('/campgrounds?ada=1');
+  await expect(page.getByText('Canyon Campground')).toBeVisible(); // has an ADA site + wheelchairAccessible
+});
+
+test('finder shows an honest empty state for an impossible filter combo', async ({ page }) => {
+  await page.goto('/campgrounds?agency=NPS&booking=free');
+  await expect(page.getByText('No campgrounds matched')).toBeVisible();
+});
