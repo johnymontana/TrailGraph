@@ -63,6 +63,17 @@ describe('syncTrails per-park skip', () => {
     expect(r).toMatchObject({ parksSkipped: 1, parksWithTrails: 0, trails: 0 });
   });
 
+  it('still skips a non-null LOCAL-path trailsGeoUrl on a hash match (migrating local→Blob needs SYNC_FORCE)', async () => {
+    // A local-dev path is truthy, so the geometry-present skip holds — only a NULL url forces a re-upload.
+    // To migrate prod URLs polluted with local paths to Blob, use SYNC_FORCE=1 (per docs/DEPLOY-MAP-DATA.md).
+    h.readGraph.mockResolvedValue([{ parkCode: 'test', hash: MATCHING_HASH, geoUrl: '/trails/test.geojson' }]);
+
+    const r = await syncTrails();
+
+    expect(h.putParkTrails).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ parksSkipped: 1, parksWithTrails: 0 });
+  });
+
   it('re-uploads on a hash match when trailsGeoUrl is NULL (Blob wiped / manually cleared)', async () => {
     h.readGraph.mockResolvedValue([{ parkCode: 'test', hash: MATCHING_HASH, geoUrl: null }]);
 

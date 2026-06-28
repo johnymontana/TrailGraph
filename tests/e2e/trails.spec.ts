@@ -33,6 +33,10 @@ test('trail card links to a detail page with metadata + safety callout', async (
   // Route section renders whether or not Blob geometry is present (map when synced, a note when not) — assert
   // a geometry-independent metadata badge so the test doesn't depend on local trail geometry being absent.
   await expect(page.getByText('Point-to-point')).toBeVisible();
+  // ADR-069: length/elevation/difficulty are labeled DERIVED ESTIMATES (what derive-trail-elevation feeds),
+  // never a safety guarantee — the disclaimer must always render (geometry-independent).
+  await expect(page.getByText(/estimates derived from open data/i)).toBeVisible();
+  await expect(page.getByText(/not a safety guarantee/i)).toBeVisible();
 });
 
 test('trail detail shows the Phase-4 loop builder + Learn/Journeys cross-links (ADR-072)', async ({ page }) => {
