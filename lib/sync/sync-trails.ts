@@ -11,12 +11,17 @@ import { upsertTrails } from './upserts';
 /**
  * sync-trails (ADR-066/067). Per park: fetch NPS GIS centerlines, aggregate into named `:Trail` nodes,
  * persist simplified geometry to Blob, upsert metadata. A per-park content-hash (`:Park.trailsSyncHash`)
- * skips unchanged parks on re-run so a national re-sync is cheap. One park's failure is isolated (caught +
- * counted), not fatal. Gated by `SYNC_TRAILS=1` in `runSlowSync`; difficulty/elevation are a later step.
+ * skips unchanged parks on re-run so a national re-sync is cheap — BUT only if the geometry pointer
+ * (`:Park.trailsGeoUrl`) is still present: a null URL (Blob wiped, store migrated, or manually cleared)
+ * forces a re-upload even when the hash matches, so the skip can never mask missing Blob geometry. One
+ * park's failure is isolated (caught + counted), not fatal. Gated by `SYNC_TRAILS=1` in `runSlowSync`;
+ * difficulty/elevation are a later step.
  */
 export async function syncTrails(): Promise<Record<string, number>> {
-  const parks = await readGraph<{ parkCode: string; hash: string | null }>(
-    `MATCH (p:Park) RETURN p.parkCode AS parkCode, p.trailsSyncHash AS hash ORDER BY p.parkCode`,
+  const parks = await readGraph<{ parkCode: string; hash: string | null; geoUrl: string | null }>(
+    `MATCH (p:Park)
+     RETURN p.parkCode AS parkCode, p.trailsSyncHash AS hash, p.trailsGeoUrl AS geoUrl
+     ORDER BY p.parkCode`,
   );
 
   let trails = 0;
@@ -24,7 +29,7 @@ export async function syncTrails(): Promise<Record<string, number>> {
   let parksSkipped = 0;
   let parksErrored = 0;
 
-  for (const { parkCode, hash } of parks) {
+  for (const { parkCode, hash, geoUrl: existingGeoUrl } of parks) {
     try {
       const features = await fetchParkTrails(parkCode);
       if (features.length === 0) continue;
@@ -36,7 +41,9 @@ export async function syncTrails(): Promise<Record<string, number>> {
       if (aggregated.length === 0) continue;
 
       const setHash = contentHash(aggregated.map((t) => t.contentHash).join(','));
-      if (process.env.SYNC_FORCE !== '1' && setHash === hash) {
+      // Skip only when nothing changed AND the geometry is still in Blob — a missing `trailsGeoUrl`
+      // re-uploads even on a hash match (the skip must never report "done" with no Blob object).
+      if (process.env.SYNC_FORCE !== '1' && setHash === hash && existingGeoUrl) {
         parksSkipped += 1;
         continue;
       }

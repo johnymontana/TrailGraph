@@ -18,7 +18,9 @@ import { embedTrails } from '../lib/sync/embed-nodes';
  *
  *   NEO4J_URI=… NEO4J_USERNAME=… NEO4J_PASSWORD=… BLOB_READ_WRITE_TOKEN=… pnpm trails:sync
  *
- * Re-runs are cheap (per-park content-hash skip); `SYNC_FORCE=1` re-writes everything.
+ * Re-runs are cheap (per-park content-hash skip) — but a park whose `:Park.trailsGeoUrl` is null (Blob
+ * wiped / store migrated / manually cleared) is ALWAYS re-uploaded, even on a hash match, so the skip can
+ * never report "done" while geometry is missing from Blob. `SYNC_FORCE=1` re-writes everything.
  */
 async function main() {
   console.log(
@@ -36,7 +38,15 @@ async function main() {
 
   if (process.env.SYNC_TRAIL_ELEVATION === '1') {
     console.log('[trails] derive-trail-elevation (DEM/API profile → Blob)…');
-    console.log('   ', JSON.stringify(await deriveTrailElevation()));
+    const elev = await deriveTrailElevation();
+    console.log('   ', JSON.stringify(elev));
+    if (elev.rateLimited) {
+      console.log(
+        '   ⚠ elevation API rate-limited (HTTP 429) — stopped early to avoid burning the run on dead calls. ' +
+          'Re-run later to resume; already-graded trails are skipped (use a self-hosted API or ' +
+          'TRAIL_ELEV_MAX_SAMPLES to stay under a daily quota).',
+      );
+    }
   } else {
     console.log('[trails] elevation skipped — set SYNC_TRAIL_ELEVATION=1 + ELEVATION_API_URL to fill profiles');
   }
