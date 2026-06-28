@@ -52,6 +52,7 @@ describe('tripBriefHtml (ADR-057)', () => {
         campgrounds: [{ name: 'North Campground', reservationUrl: null }],
         driveToNext: { miles: 72, minutes: 95 },
         hikes: [{ name: 'Navajo Loop', lengthMiles: 1.3, estTimeHrs: 1, difficulty: 'moderate', permitRequired: false }],
+        lodging: { name: 'North Campground', feeUSD: 30, reservationUrl: 'https://recreation.gov/x' },
       },
     ],
   };

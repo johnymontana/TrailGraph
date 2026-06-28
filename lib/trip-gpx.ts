@@ -30,6 +30,23 @@ export function tripToGpx(trip: Trip, opts: { time: string; hikeTracks?: GpxTrac
     };
   });
 
+  // Lodging waypoints (Campgrounds feature): where you sleep each stop-night, at the campground's own
+  // coordinate (the STAYS_AT-nested campground, distinct from the park stop). No live availability in a
+  // static artifact — print the booking pointer instead.
+  const lodgingWaypoints: GpxWaypoint[] = stops
+    .filter((s) => s.lodging && s.lodging.lat != null && s.lodging.lng != null)
+    .map((s) => {
+      const l = s.lodging!;
+      const fee = l.feeUSD != null ? ` · $${l.feeUSD}/night` : '';
+      return {
+        lat: l.lat as number,
+        lon: l.lng as number,
+        name: `🏕️ ${l.name}`,
+        type: 'campground',
+        desc: `Sleeping here${fee}. Verify/book on recreation.gov.`,
+      };
+    });
+
   const tracks: GpxTrackSeg[] = [
     { name: `${trip.name ?? 'TrailGraph Trip'} route`, points: stops.map((s) => ({ lat: s.lat as number, lon: s.lng as number })) },
     ...(opts.hikeTracks ?? []),
@@ -41,7 +58,7 @@ export function tripToGpx(trip: Trip, opts: { time: string; hikeTracks?: GpxTrac
       time: opts.time,
       desc: 'TrailGraph itinerary. Track is a straight stop-to-stop connector, not turn-by-turn routing. Verify access/closures at nps.gov.',
     },
-    waypoints,
+    [...waypoints, ...lodgingWaypoints],
     tracks,
   );
 }

@@ -64,6 +64,7 @@ export const TripActionSchema = z.object({
     'addStop', 'removeStop', 'reorder', 'alerts', 'cost', 'conditions',
     'suggestDays', 'optimize', 'rename', 'fork', 'diff',
     'includeTrail', 'excludeTrail',
+    'includeCampground', 'excludeCampground', // Campgrounds feature: (:Stop)-[:STAYS_AT]->(:Campground)
   ]),
   stop: NewStopSchema.optional(),
   stopId: id.optional(),
@@ -71,6 +72,9 @@ export const TripActionSchema = z.object({
   name: z.string().max(200).optional(),
   otherTripId: id.optional(),
   trailId: z.string().max(200).optional(), // ADR-071: (:Stop)-[:INCLUDES_TRAIL]->(:Trail)
+  campgroundId: z.string().max(200).optional(), // (:Stop)-[:STAYS_AT]->(:Campground)
+  nights: z.number().int().min(1).max(60).optional(),
+  date: z.string().max(20).optional(), // YYYY-MM-DD the lodging covers
 });
 
 // ── Memory ───────────────────────────────────────────────────────────────────

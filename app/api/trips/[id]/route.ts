@@ -11,6 +11,8 @@ import {
   tripConditions,
   addTrailToStop,
   removeTrailFromStop,
+  addLodgingToStop,
+  removeCampgroundFromStop,
 } from '../../../../lib/trips';
 import { suggestDays } from '../../../../lib/itinerary';
 import { nearestNeighborOrder } from '../../../../lib/route-order';
@@ -112,6 +114,17 @@ export async function POST(req: Request, { params }: Ctx) {
     case 'excludeTrail': {
       if (!body.stopId || !body.trailId) return Response.json({ error: 'stopId and trailId required' }, { status: 400 });
       await removeTrailFromStop(userId, id, body.stopId, body.trailId);
+      return Response.json({ trip: await getTrip(userId, id) });
+    }
+    case 'includeCampground': {
+      if (!body.stopId || !body.campgroundId) return Response.json({ error: 'stopId and campgroundId required' }, { status: 400 });
+      const ok = await addLodgingToStop(userId, id, body.stopId, body.campgroundId, { date: body.date, nights: body.nights });
+      if (!ok) return Response.json({ error: 'not found' }, { status: 404 });
+      return Response.json({ trip: await getTrip(userId, id) });
+    }
+    case 'excludeCampground': {
+      if (!body.stopId || !body.campgroundId) return Response.json({ error: 'stopId and campgroundId required' }, { status: 400 });
+      await removeCampgroundFromStop(userId, id, body.stopId, body.campgroundId);
       return Response.json({ trip: await getTrip(userId, id) });
     }
     case 'alerts':

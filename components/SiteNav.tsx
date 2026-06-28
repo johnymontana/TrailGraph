@@ -29,6 +29,7 @@ const LINKS = [
   { href: '/map', label: 'Map' },
   { href: '/graph', label: 'Graph' },
   { href: '/trails', label: 'Trails' },
+  { href: '/campgrounds', label: 'Campgrounds' },
   { href: '/learn', label: 'Learn' },
   { href: '/plan', label: 'Plan' },
 ];

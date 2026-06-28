@@ -198,6 +198,8 @@ export interface BriefStop {
   driveToNext: { miles: number; minutes: number } | null;
   // Hikes attached to this stop (ADR-071) — the "what to do here" the field brief needs at the trailhead.
   hikes: { name: string; lengthMiles: number | null; estTimeHrs: number | null; difficulty: string | null; permitRequired: boolean }[];
+  // Lodging for this stop-night (Campgrounds feature) — the STAYS_AT pick (no live availability in a static sheet).
+  lodging: { name: string; feeUSD: number | null; reservationUrl: string | null } | null;
 }
 
 export interface TripBrief {
@@ -239,6 +241,7 @@ export async function tripBrief(userId: string, tripId: string): Promise<TripBri
         difficulty: h.difficulty,
         permitRequired: h.permitRequired,
       })),
+      lodging: s.lodging ? { name: s.lodging.name, feeUSD: s.lodging.feeUSD, reservationUrl: s.lodging.reservationUrl } : null,
     });
   }
   return { tripId: trip.id, name: trip.name, startDate: trip.startDate, endDate: trip.endDate, stops: out };

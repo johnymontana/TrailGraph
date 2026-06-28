@@ -54,3 +54,5 @@ pnpm-debug.log*
 
 # data files
 public/trails/
+# RIDB full export (~800MB local operator data for `pnpm campgrounds:load`; never commit)
+/data/

@@ -16,6 +16,9 @@ export interface UserMemory {
   // Trail memory (ADR-071): preferences anchor + saved/wishlisted/done trails.
   trailPreferences: { maxMiles: number | null; maxGainFt: number | null; difficulty: string | null; avoidExposure: boolean; dogsRequired: boolean };
   trailHistory: { saved: { id: string; name: string }[]; wishlisted: { id: string; name: string }[]; done: { id: string; name: string }[] };
+  // Camp memory (Campgrounds feature, Phase 3): preferences anchor + saved campgrounds.
+  campPreferences: { rig: string | null; maxLengthFt: number | null; hookups: string | null; tentOk: boolean; ada: boolean; pets: boolean; quiet: boolean; budget: number | null };
+  campHistory: { saved: { id: string; name: string }[] };
 }
 
 /**
@@ -72,7 +75,7 @@ export async function collectedStampParksGeo(userId: string): Promise<MapPin[]> 
 
 export async function getUserMemory(userId: string): Promise<UserMemory> {
   const rows = await readGraph<
-    Omit<UserMemory, 'travel' | 'availability' | 'trailPreferences' | 'trailHistory'> & {
+    Omit<UserMemory, 'travel' | 'availability' | 'trailPreferences' | 'trailHistory' | 'campPreferences' | 'campHistory'> & {
       wheelchair: boolean | null;
       rvMaxLengthFt: number | null;
       requiredAmenities: string[];
@@ -84,6 +87,15 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
       tpAvoidExposure: boolean;
       tpDogsRequired: boolean;
       trailHistory: { id: string; name: string; kind: string }[];
+      cpRig: string | null;
+      cpMaxLengthFt: number | null;
+      cpHookups: string | null;
+      cpTentOk: boolean;
+      cpAda: boolean;
+      cpPets: boolean;
+      cpQuiet: boolean;
+      cpBudget: number | null;
+      campHistory: { id: string; name: string }[];
     }
   >(
     `
@@ -112,12 +124,21 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
     OPTIONAL MATCH (u)-[sv:SAVED|WISHLISTED|DID]->(tr:Trail)
     WITH u, preferences, considered, planned, con, requiredAmenities, passes, stamps, tp,
          [x IN collect(DISTINCT CASE WHEN tr IS NULL THEN null ELSE {id: tr.id, name: tr.name, kind: type(sv)} END) WHERE x IS NOT NULL] AS trailHistory
+    OPTIONAL MATCH (u)-[:PREFERS_CAMP]->(cpr:CampPrefs)
+    WITH u, preferences, considered, planned, con, requiredAmenities, passes, stamps, tp, trailHistory, cpr
+    OPTIONAL MATCH (u)-[:SAVED]->(sc:Campground)
+    WITH u, preferences, considered, planned, con, requiredAmenities, passes, stamps, tp, trailHistory, cpr,
+         [x IN collect(DISTINCT CASE WHEN sc IS NULL THEN null ELSE {id: sc.id, name: sc.name} END) WHERE x IS NOT NULL] AS campHistory
     OPTIONAL MATCH (u)-[av:AVAILABLE]->(:Season)
     RETURN preferences, considered, planned,
            con.wheelchair AS wheelchair, con.rvMaxLengthFt AS rvMaxLengthFt, requiredAmenities, passes, stamps,
            tp.maxMiles AS tpMaxMiles, tp.maxGainFt AS tpMaxGainFt, tp.difficulty AS tpDifficulty,
            coalesce(tp.avoidExposure, false) AS tpAvoidExposure, coalesce(tp.dogsRequired, false) AS tpDogsRequired,
            trailHistory,
+           cpr.rig AS cpRig, cpr.maxLengthFt AS cpMaxLengthFt, cpr.hookups AS cpHookups,
+           coalesce(cpr.tentOk, false) AS cpTentOk, coalesce(cpr.ada, false) AS cpAda,
+           coalesce(cpr.pets, false) AS cpPets, coalesce(cpr.quiet, false) AS cpQuiet, cpr.budget AS cpBudget,
+           campHistory,
            av.start AS availStart, av.end AS availEnd
     `,
     { userId },
@@ -147,6 +168,17 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
       wishlisted: (r?.trailHistory ?? []).filter((t) => t.kind === 'WISHLISTED').map((t) => ({ id: t.id, name: t.name })),
       done: (r?.trailHistory ?? []).filter((t) => t.kind === 'DID').map((t) => ({ id: t.id, name: t.name })),
     },
+    campPreferences: {
+      rig: r?.cpRig ?? null,
+      maxLengthFt: r?.cpMaxLengthFt ?? null,
+      hookups: r?.cpHookups ?? null,
+      tentOk: r?.cpTentOk ?? false,
+      ada: r?.cpAda ?? false,
+      pets: r?.cpPets ?? false,
+      quiet: r?.cpQuiet ?? false,
+      budget: r?.cpBudget ?? null,
+    },
+    campHistory: { saved: r?.campHistory ?? [] },
   };
 }
 

@@ -108,6 +108,14 @@ export async function getTrip(userId: string, tripId: string) {
       OPTIONAL MATCH (s)-[:INCLUDES_TRAIL]->(tr:Trail)
       RETURN collect(DISTINCT tr{.id, .name, .lengthMiles, .estTimeHrs, .difficulty, permitRequired: coalesce(tr.permitRequired, false)}) AS hikes
     }
+    // Lodging nested under a stop (Campgrounds feature) — (:Stop)-[:STAYS_AT]->(:Campground), one per stop.
+    // A separate subquery so it does not multiply the row, exactly like the hikes block above.
+    CALL {
+      WITH s
+      OPTIONAL MATCH (s)-[r:STAYS_AT]->(lcg:Campground)
+      RETURN head(collect(lcg{.id, .name, agency: lcg.agency, feeUSD: lcg.feeUSD, reservationUrl: lcg.reservationUrl,
+                              lat: lcg.location.latitude, lng: lcg.location.longitude, nights: r.nights, date: r.date})) AS lodging
+    }
     RETURN t.id AS id, t.name AS name, t.startDate AS startDate, t.endDate AS endDate,
       collect(CASE WHEN s IS NULL THEN null ELSE {
         id: s.id, order: s.order, day: s.day, nights: s.nights, name: s.name,
@@ -116,7 +124,7 @@ export async function getTrip(userId: string, tripId: string) {
         lng: coalesce(s.location.longitude, p.location.longitude, c.location.longitude, poi.location.longitude, pl.location.longitude),
         parkCode: p.parkCode, parkName: p.fullName,
         campgroundName: c.name, poiTitle: poi.title, placeTitle: pl.title,
-        hikes: hikes,
+        hikes: hikes, lodging: lodging,
         driveTo: CASE WHEN d IS NULL THEN null ELSE {miles: d.miles, minutes: d.minutes, source: d.source} END
       } END) AS stops
     `,
@@ -142,6 +150,19 @@ export interface TripHike {
   permitRequired: boolean;
 }
 
+/** Lodging nested under a stop (Campgrounds feature): the trip-side of `(:Stop)-[:STAYS_AT]->(:Campground)`. */
+export interface TripLodging {
+  id: string;
+  name: string;
+  agency: string | null;
+  feeUSD: number | null;
+  reservationUrl: string | null;
+  lat: number | null;
+  lng: number | null;
+  nights: number | null;
+  date: string | null;
+}
+
 interface StopRow {
   id: string;
   order: number;
@@ -157,6 +178,7 @@ interface StopRow {
   poiTitle: string | null;
   placeTitle: string | null;
   hikes: TripHike[];
+  lodging: TripLodging | null;
   driveTo: { miles: number; minutes: number; source: string } | null;
 }
 
@@ -190,6 +212,44 @@ export async function removeTrailFromStop(
     `MATCH (t:Trip {id:$tripId, userId:$userId})-[:HAS_STOP]->(s:Stop {id:$stopId})-[r:INCLUDES_TRAIL]->(:Trail {id:$trailId})
      DELETE r`,
     { userId, tripId, stopId, trailId },
+  );
+}
+
+/**
+ * Attach lodging to a stop (Campgrounds feature): `(:Stop)-[:STAYS_AT {date,nights}]->(:Campground)` — where
+ * you sleep for that park-day, nested UNDER the stop (like `INCLUDES_TRAIL` nests a hike), NOT a peer stop.
+ * A stop sleeps in ONE place, so any prior STAYS_AT is cleared first. Returns false on an unknown stop/campground.
+ */
+export async function addLodgingToStop(
+  userId: string,
+  tripId: string,
+  stopId: string,
+  campgroundId: string,
+  opts: { date?: string | null; nights?: number | null } = {},
+): Promise<boolean> {
+  const rows = await writeGraph<{ ok: boolean }>(
+    `MATCH (t:Trip {id:$tripId, userId:$userId})-[:HAS_STOP]->(s:Stop {id:$stopId})
+     MATCH (c:Campground {id:$campgroundId})
+     OPTIONAL MATCH (s)-[old:STAYS_AT]->(:Campground)
+     DELETE old
+     WITH s, c
+     MERGE (s)-[r:STAYS_AT]->(c) SET r.date = $date, r.nights = $nights
+     RETURN true AS ok`,
+    { userId, tripId, stopId, campgroundId, date: opts.date ?? null, nights: opts.nights ?? null },
+  );
+  return rows.length > 0;
+}
+
+export async function removeCampgroundFromStop(
+  userId: string,
+  tripId: string,
+  stopId: string,
+  campgroundId: string,
+): Promise<void> {
+  await writeGraph(
+    `MATCH (t:Trip {id:$tripId, userId:$userId})-[:HAS_STOP]->(s:Stop {id:$stopId})-[r:STAYS_AT]->(:Campground {id:$campgroundId})
+     DELETE r`,
+    { userId, tripId, stopId, campgroundId },
   );
 }
 

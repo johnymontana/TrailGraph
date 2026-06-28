@@ -299,6 +299,42 @@ export async function seedTestData(): Promise<void> {
     MERGE (ba)-[:HIGHLIGHTS]->(geol)
     MERGE (sk)-[:HIGHLIGHTS]->(geol)
   `);
+
+  // ── Campgrounds feature (multi-agency, ADR Campgrounds) — :Agency / :Campsite / RIDB federation /
+  // a USFS dispersed example NEAR a park, so searchCampgrounds / campgroundDetail / the RIDB unification
+  // path all have fixtures. The cg-canyon reservationUrl already ends /232449, so set its ridbId to match;
+  // an integration test can assert syncCampgroundsRidb enriches it IN PLACE (id stays cg-canyon).
+  await writeGraph(`
+    MATCH (yell:Park {parkCode:'yell'})
+    MATCH (cg:Campground {id:'cg-canyon'})
+      SET cg.ridbId='232449', cg.source='nps+ridb', cg.agency='NPS', cg.reservable=true, cg.fcfs=false,
+          cg.feeUSD=35, cg.dispersed=false, cg.dataConfidence='high', cg.petsAllowed=true,
+          cg.sourceIds='{"ridbId":"232449","osmId":null}'
+    // Managing agencies
+    MERGE (nps:Agency {id:'agency:128'}) SET nps.name='National Park Service', nps.kind='NPS'
+    MERGE (usfs:Agency {id:'agency:131'}) SET usfs.name='Forest Service', usfs.kind='USFS'
+    MERGE (cg)-[:MANAGED_BY]->(nps)
+    // Site-level inventory under Canyon Campground (rv / tent / ada)
+    MERGE (s1:Campsite {id:'ridb:cs:canyon-a012'})
+      SET s1.campgroundId='cg-canyon', s1.loop='A', s1.number='A012', s1.type='rv', s1.maxRvLengthFt=40,
+          s1.electricAmps=30, s1.hasWater=true, s1.hasSewer=false, s1.pullThrough=true, s1.ada=false,
+          s1.reservable=true, s1.geometry=point({latitude:44.731, longitude:-110.491})
+    MERGE (s2:Campsite {id:'ridb:cs:canyon-b004'})
+      SET s2.campgroundId='cg-canyon', s2.loop='B', s2.number='B004', s2.type='tent', s2.maxRvLengthFt=null,
+          s2.electricAmps=null, s2.hasWater=false, s2.hasSewer=false, s2.pullThrough=false, s2.ada=true,
+          s2.reservable=true, s2.geometry=point({latitude:44.732, longitude:-110.492})
+    MERGE (cg)-[:HAS_SITE]->(s1)
+    MERGE (cg)-[:HAS_SITE]->(s2)
+    // USFS dispersed example outside any park unit, NEAR Yellowstone (the cross-boundary unlock)
+    MERGE (disp:Campground {id:'ridb:999001'})
+      SET disp.name='Gallatin Dispersed Area', disp.source='usfs', disp.agency='USFS', disp.reservable=false,
+          disp.fcfs=true, disp.dispersed=true, disp.feeUSD=0, disp.dataConfidence='medium',
+          disp.location=point({latitude:45.0, longitude:-111.0}), disp.sourceIds='{"ridbId":null,"osmId":null}'
+    MERGE (ra:RecArea {id:'recarea:1106'}) SET ra.name='Gallatin National Forest'
+    MERGE (disp)-[:IN_RECAREA]->(ra)
+    MERGE (disp)-[:MANAGED_BY]->(usfs)
+    MERGE (disp)-[n:NEAR]->(yell) SET n.miles=42.0
+  `);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -107,7 +107,7 @@ describe('contextToNvl (/me context graph + two-graph overlay merge keys, ADR-04
     stamps: [{ id: 's1', label: 'Canyon stamp' }],
     availability: { start: '2026-02-10', end: '2026-02-20' },
     trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
-    trailHistory: { saved: [], wishlisted: [], done: [] },
+    trailHistory: { saved: [], wishlisted: [], done: [] }, campPreferences: { rig: null, maxLengthFt: null, hookups: null, tentOk: false, ada: false, pets: false, quiet: false, budget: null }, campHistory: { saved: [] },
   };
 
   it('anchors a "You" node and links every bridge with its literal relationship caption', () => {
@@ -156,7 +156,7 @@ describe('contextToNvl (/me context graph + two-graph overlay merge keys, ADR-04
   });
 
   it('renders just the You node for empty memory (nothing to overlay)', () => {
-    const empty = { preferences: [], considered: [], planned: [], travel: { wheelchair: false, rvMaxLengthFt: null, requiredAmenities: [] }, passes: [], stamps: [], availability: { start: null, end: null }, trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false }, trailHistory: { saved: [], wishlisted: [], done: [] } };
+    const empty = { preferences: [], considered: [], planned: [], travel: { wheelchair: false, rvMaxLengthFt: null, requiredAmenities: [] }, passes: [], stamps: [], availability: { start: null, end: null }, trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false }, trailHistory: { saved: [], wishlisted: [], done: [] }, campPreferences: { rig: null, maxLengthFt: null, hookups: null, tentOk: false, ada: false, pets: false, quiet: false, budget: null }, campHistory: { saved: [] } };
     const { nodes, rels } = contextToNvl(empty);
     expect(nodes).toHaveLength(1);
     expect(rels).toHaveLength(0);
@@ -177,7 +177,7 @@ describe('contextToNvl edge de-duplication (review finding)', () => {
       stamps: [],
       availability: { start: null, end: null },
       trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
-      trailHistory: { saved: [], wishlisted: [], done: [] },
+      trailHistory: { saved: [], wishlisted: [], done: [] }, campPreferences: { rig: null, maxLengthFt: null, hookups: null, tentOk: false, ada: false, pets: false, quiet: false, budget: null }, campHistory: { saved: [] },
     };
     const { nodes, rels } = contextToNvl(mem);
     // one Stargazing node, one Restrooms node (deduped), and exactly one edge each.
@@ -270,7 +270,7 @@ describe('bridgesToRels (#8 — you-in-the-graph)', () => {
       stamps: [{ id: 's1', label: 'Yellowstone' }],
       availability: { start: null, end: null },
       trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
-      trailHistory: { saved: [], wishlisted: [], done: [] },
+      trailHistory: { saved: [], wishlisted: [], done: [] }, campPreferences: { rig: null, maxLengthFt: null, hookups: null, tentOk: false, ada: false, pets: false, quiet: false, budget: null }, campHistory: { saved: [] },
     };
     const ctx = contextToNvl(mem);
     const ctxIds = new Set(ctx.nodes.map((n) => n.id));
@@ -332,7 +332,7 @@ describe('provenanceSubgraphIds (#9 — why this park is in your world)', () => 
       stamps: [],
       availability: { start: null, end: null },
       trailPreferences: { maxMiles: null, maxGainFt: null, difficulty: null, avoidExposure: false, dogsRequired: false },
-      trailHistory: { saved: [], wishlisted: [], done: [] },
+      trailHistory: { saved: [], wishlisted: [], done: [] }, campPreferences: { rig: null, maxLengthFt: null, hookups: null, tentOk: false, ada: false, pets: false, quiet: false, budget: null }, campHistory: { saved: [] },
     };
     const ctx = contextToNvl(mem);
     const ctxNodeIds = new Set(ctx.nodes.map((n) => n.id));

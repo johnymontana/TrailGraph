@@ -509,6 +509,31 @@ async function poisInBBox(label: 'Campground' | 'VisitorCenter' | 'ThingToDo', b
 }
 
 export const campgroundsInBBox = (box: BBox, limit?: number) => poisInBBox('Campground', box, limit);
+
+/** Campground markers WITH the facet booleans the camp-lens recolors by (Campgrounds feature, Phase 4). */
+export interface CampgroundMarker extends PoiMarker {
+  free: boolean;
+  dispersed: boolean;
+  hasHookups: boolean;
+  ada: boolean;
+  fcfs: boolean;
+  agency: string | null;
+}
+export async function campgroundMarkersInBBox(box: BBox, limit = POI_BBOX_LIMIT): Promise<CampgroundMarker[]> {
+  return readGraph<CampgroundMarker>(
+    `MATCH (n:Campground) WHERE n.location IS NOT NULL
+       AND point.withinBBox(n.location, point({latitude:$minLat, longitude:$minLng}), point({latitude:$maxLat, longitude:$maxLng}))
+     OPTIONAL MATCH (n)-[:IN_PARK]->(p:Park)
+     RETURN n.id AS id, n.name AS name, n.location.latitude AS lat, n.location.longitude AS lng, p.parkCode AS parkCode,
+            (coalesce(n.feeUSD, -1) = 0) AS free, coalesce(n.dispersed, false) AS dispersed,
+            coalesce(n.hasHookups, false) AS hasHookups,
+            (coalesce(n.wheelchairAccessible, false) OR EXISTS { (n)-[:HAS_SITE]->(s:Campsite) WHERE s.ada = true }) AS ada,
+            coalesce(n.fcfs, (n.sitesFirstCome > 0), false) AS fcfs, n.agency AS agency
+     LIMIT toInteger($limit)`,
+    { minLat: box.minLat, minLng: box.minLng, maxLat: box.maxLat, maxLng: box.maxLng, limit },
+  );
+}
+
 export const visitorCentersInBBox = (box: BBox, limit?: number) => poisInBBox('VisitorCenter', box, limit);
 export const thingsToDoInBBox = (box: BBox, limit?: number) => poisInBBox('ThingToDo', box, limit);
 

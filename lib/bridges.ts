@@ -330,6 +330,132 @@ export async function unsaveTrail(userId: string, trailId: string, kind: TrailSa
   );
 }
 
+// ── Camp memory (Campgrounds feature, Phase 3): preferences + amenity needs + saved campgrounds ────────
+export interface CampPreferences {
+  rig: string | null; // 'tent' | 'rv' | 'trailer' | 'van' | 'cabin'
+  maxLengthFt: number | null;
+  hookups: string | null; // 'none' | '30amp' | '50amp' | 'full'
+  tentOk: boolean;
+  ada: boolean;
+  pets: boolean;
+  quiet: boolean;
+  budget: number | null; // max $/night
+}
+
+/**
+ * Camp preferences — a single per-user `(:User)-[:PREFERS_CAMP]->(:CampPrefs {userId})` anchor (mirrors
+ * `setTrailPreferences`; the `:CampPrefs` UNIQUE constraint is migration 027). Partial: a null field keeps
+ * the saved value. The ranger sets these once (scope-confirmed); find_campgrounds honors them.
+ */
+export async function setCampPreferences(
+  userId: string,
+  p: {
+    rig?: string | null;
+    maxLengthFt?: number | null;
+    hookups?: string | null;
+    tentOk?: boolean | null;
+    ada?: boolean | null;
+    pets?: boolean | null;
+    quiet?: boolean | null;
+    budget?: number | null;
+  },
+): Promise<void> {
+  await writeGraph(
+    `MERGE (u:User {userId:$userId})
+     MERGE (u)-[:PREFERS_CAMP]->(cp:CampPrefs {userId:$userId})
+     SET cp.rig = CASE WHEN $rig IS NULL THEN cp.rig ELSE $rig END,
+         cp.maxLengthFt = CASE WHEN $maxLengthFt IS NULL THEN cp.maxLengthFt ELSE toInteger($maxLengthFt) END,
+         cp.hookups = CASE WHEN $hookups IS NULL THEN cp.hookups ELSE $hookups END,
+         cp.tentOk = CASE WHEN $tentOk IS NULL THEN cp.tentOk ELSE $tentOk END,
+         cp.ada = CASE WHEN $ada IS NULL THEN cp.ada ELSE $ada END,
+         cp.pets = CASE WHEN $pets IS NULL THEN cp.pets ELSE $pets END,
+         cp.quiet = CASE WHEN $quiet IS NULL THEN cp.quiet ELSE $quiet END,
+         cp.budget = CASE WHEN $budget IS NULL THEN cp.budget ELSE toFloat($budget) END,
+         cp.at = datetime()`,
+    {
+      userId,
+      rig: p.rig ?? null,
+      maxLengthFt: p.maxLengthFt ?? null,
+      hookups: p.hookups ?? null,
+      tentOk: p.tentOk ?? null,
+      ada: p.ada ?? null,
+      pets: p.pets ?? null,
+      quiet: p.quiet ?? null,
+      budget: p.budget ?? null,
+    },
+  );
+}
+
+export async function getCampPreferences(userId: string): Promise<CampPreferences> {
+  const rows = await readGraph<CampPreferences>(
+    `MATCH (u:User {userId:$userId})
+     OPTIONAL MATCH (u)-[:PREFERS_CAMP]->(cp:CampPrefs)
+     RETURN cp.rig AS rig, cp.maxLengthFt AS maxLengthFt, cp.hookups AS hookups,
+            coalesce(cp.tentOk, false) AS tentOk, coalesce(cp.ada, false) AS ada,
+            coalesce(cp.pets, false) AS pets, coalesce(cp.quiet, false) AS quiet, cp.budget AS budget`,
+    { userId },
+  );
+  const r = rows[0];
+  return {
+    rig: r?.rig ?? null,
+    maxLengthFt: r?.maxLengthFt ?? null,
+    hookups: r?.hookups ?? null,
+    tentOk: r?.tentOk ?? false,
+    ada: r?.ada ?? false,
+    pets: r?.pets ?? false,
+    quiet: r?.quiet ?? false,
+    budget: r?.budget ?? null,
+  };
+}
+
+export async function clearCampPreferences(userId: string): Promise<void> {
+  await writeGraph(`MATCH (:User {userId:$userId})-[:PREFERS_CAMP]->(cp:CampPrefs) DETACH DELETE cp`, { userId });
+}
+
+/** Canonical camp-amenity ids the user can require (reuses the F5 REQUIRES → :Amenity bridge so search honors them). */
+export const CAMP_AMENITY_NAMES: Record<string, string> = {
+  'amen:hookup-30amp': '30-amp Hookup',
+  'amen:hookup-50amp': '50-amp Hookup',
+  'amen:full-hookup': 'Full Hookup',
+  'amen:dump-station': 'Dump Station',
+  'amen:shower': 'Shower',
+  'amen:potable-water': 'Potable Water',
+};
+export const CAMP_AMENITY_IDS = Object.keys(CAMP_AMENITY_NAMES);
+
+/** Record camp-amenity needs as `(:User)-[:REQUIRES]->(:Amenity {camp})` (mirror of setAccessibilityNeeds). */
+export async function setCampAmenityNeeds(userId: string, featureIds: string[]): Promise<string[]> {
+  const valid = [...new Set(featureIds)].filter((id) => id in CAMP_AMENITY_NAMES);
+  if (!valid.length) return [];
+  await writeGraph(
+    `MERGE (u:User {userId: $userId})
+     WITH u UNWIND $ids AS aid
+     MERGE (am:Amenity {id: aid}) ON CREATE SET am.name = $names[aid], am.camp = true
+     MERGE (u)-[:REQUIRES]->(am)`,
+    { userId, ids: valid, names: CAMP_AMENITY_NAMES },
+  );
+  return valid;
+}
+
+/** Save a campground: `(:User)-[:SAVED]->(:Campground)` (mirror of saveTrail). False on unknown id. */
+export async function saveCampground(userId: string, campgroundId: string): Promise<boolean> {
+  const rows = await writeGraph<{ ok: boolean }>(
+    `MATCH (c:Campground {id:$campgroundId})
+     MERGE (u:User {userId:$userId})
+     MERGE (u)-[r:SAVED]->(c) SET r.at = datetime()
+     RETURN true AS ok`,
+    { userId, campgroundId },
+  );
+  return rows.length > 0;
+}
+
+export async function unsaveCampground(userId: string, campgroundId: string): Promise<void> {
+  await writeGraph(
+    `MATCH (:User {userId:$userId})-[r:SAVED]->(:Campground {id:$campgroundId}) DELETE r`,
+    { userId, campgroundId },
+  );
+}
+
 /** Clear accessibility/travel constraints (the TRAVELS_WITH constraint + all REQUIRES edges). */
 export async function clearTravelConstraints(userId: string): Promise<void> {
   await writeGraph(

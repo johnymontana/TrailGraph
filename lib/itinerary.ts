@@ -87,3 +87,62 @@ export function tripDayLoads(stops: DayLoadStop[], maxHours = 8): DayLoad[] {
       };
     });
 }
+
+// ── Lodging suggestion (Campgrounds feature): pick where to sleep for a stop ──────────────────────────
+
+export interface LodgingCandidate {
+  id: string;
+  name: string;
+  driveMinFromLastHike: number; // drive time from the day's last activity
+  availOpen: number | null; // sites open for the dates (null = unknown, NOT rejected)
+  bookingDifficulty: number | null; // 0–100 (null = unknown)
+}
+
+export interface LodgingSuggestion {
+  pick: string | null; // candidate id, or null when none is acceptable
+  pickName: string | null;
+  reason: string;
+  overDrive: boolean; // the chosen pick exceeds the drive cap
+  bookedOut: boolean; // every candidate is known-booked-out
+  alternatives: string[]; // other candidate ids, ranked
+}
+
+/**
+ * Suggest where to sleep for a stop: rank candidates by drive time from the day's last hike, treating a
+ * known-booked-out candidate (`availOpen === 0`) as an alternative and a high booking-difficulty as a tie-
+ * breaker. **`availOpen === null` is "unknown, allowed" — never auto-rejected** (availability is best-effort).
+ * Pure + deterministic.
+ */
+export function suggestLodging(
+  candidates: LodgingCandidate[],
+  opts: { maxDriveMin?: number } = {},
+): LodgingSuggestion {
+  const maxDrive = opts.maxDriveMin ?? 90;
+  if (!candidates.length) {
+    return { pick: null, pickName: null, reason: 'No campgrounds found near this stop.', overDrive: false, bookedOut: false, alternatives: [] };
+  }
+  const bookable = candidates.filter((c) => c.availOpen == null || c.availOpen > 0); // unknown allowed
+  const bookedOut = bookable.length === 0;
+  const pool = bookedOut ? candidates : bookable;
+
+  const rank = (c: LodgingCandidate) =>
+    c.driveMinFromLastHike + (c.bookingDifficulty ?? 0) * 0.5 + (c.availOpen === 0 ? 1e6 : 0);
+  const sorted = [...pool].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  const pick = sorted[0];
+  const overDrive = pick.driveMinFromLastHike > maxDrive;
+
+  const reason = bookedOut
+    ? `Everything nearby is booked for these dates — closest fallback is ${pick.name} (${pick.driveMinFromLastHike} min away). Try first-come arrival early, or set a Camp Watch.`
+    : `${pick.name} — ${pick.driveMinFromLastHike} min from the day's last hike${
+        pick.availOpen != null ? `, ${pick.availOpen} site${pick.availOpen === 1 ? '' : 's'} open` : ''
+      }${overDrive ? ` (over your ${maxDrive}-min drive cap — consider a closer night)` : ''}.`;
+
+  return {
+    pick: pick.id,
+    pickName: pick.name,
+    reason,
+    overDrive,
+    bookedOut,
+    alternatives: sorted.slice(1, 4).map((c) => c.id),
+  };
+}

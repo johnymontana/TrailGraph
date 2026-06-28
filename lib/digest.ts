@@ -13,7 +13,7 @@ import { getAstro, darkestNight, getConditions, type AstroEvents, type RoadEvent
  * never an official safety source (defers to NPS, per the agent's hard rules).
  */
 
-export type DigestItemKind = 'closure' | 'alert' | 'darksky' | 'feefree' | 'event' | 'news';
+export type DigestItemKind = 'closure' | 'alert' | 'darksky' | 'feefree' | 'event' | 'news' | 'campavail';
 
 export interface DigestItem {
   kind: DigestItemKind;
@@ -315,4 +315,27 @@ function safeParse(s: string | null): DigestItem[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Append a single item to today's in-app digest (used by the Camp Watch poller to drop a "site opened"
+ * alert into the same inbox the daily digest writes to). Read-modify-write so it works without APOC, and
+ * de-duped on (kind, title, detail) so re-polling the same fresh opening doesn't pile up duplicates.
+ */
+export async function appendDigestItem(userId: string, item: DigestItem): Promise<void> {
+  const date = new Date().toISOString().slice(0, 10);
+  const existing = await readGraph<{ items: string | null }>(
+    `MATCH (:User {userId:$userId})-[:HAS_DIGEST]->(d:Digest {forDate:$date}) RETURN d.items AS items`,
+    { userId, date },
+  );
+  const items = safeParse(existing[0]?.items ?? null);
+  if (items.some((i) => i.kind === item.kind && i.title === item.title && i.detail === item.detail)) return;
+  items.push(item);
+  await writeGraph(
+    `MERGE (u:User {userId:$userId})
+     MERGE (u)-[:HAS_DIGEST]->(d:Digest {userId:$userId, forDate:$date})
+       ON CREATE SET d.id = $id, d.createdAt = datetime(), d.read = false
+     SET d.items = $items, d.itemCount = $count, d.read = false`,
+    { userId, date, id: randomUUID(), items: JSON.stringify(items), count: items.length },
+  );
 }

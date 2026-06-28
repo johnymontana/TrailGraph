@@ -1,5 +1,47 @@
 import { describe, it, expect } from 'vitest';
-import { suggestDays } from './itinerary';
+import { suggestDays, suggestLodging, type LodgingCandidate } from './itinerary';
+
+describe('suggestLodging (Campgrounds feature)', () => {
+  const cands = (over: Partial<LodgingCandidate>[]): LodgingCandidate[] =>
+    over.map((o, i) => ({ id: o.id ?? `c${i}`, name: o.name ?? `Camp ${i}`, driveMinFromLastHike: o.driveMinFromLastHike ?? 30, availOpen: o.availOpen ?? null, bookingDifficulty: o.bookingDifficulty ?? null }));
+
+  it('picks the closest bookable candidate', () => {
+    const r = suggestLodging(cands([
+      { id: 'far', driveMinFromLastHike: 80, availOpen: 5 },
+      { id: 'near', driveMinFromLastHike: 20, availOpen: 2 },
+    ]));
+    expect(r.pick).toBe('near');
+    expect(r.bookedOut).toBe(false);
+    expect(r.alternatives).toContain('far');
+  });
+
+  it('treats unknown availability as allowed (never auto-rejected)', () => {
+    const r = suggestLodging(cands([{ id: 'unknown', driveMinFromLastHike: 15, availOpen: null }]));
+    expect(r.pick).toBe('unknown');
+    expect(r.bookedOut).toBe(false);
+  });
+
+  it('flags all-booked-out + still offers the closest as a fallback', () => {
+    const r = suggestLodging(cands([
+      { id: 'a', driveMinFromLastHike: 40, availOpen: 0 },
+      { id: 'b', driveMinFromLastHike: 25, availOpen: 0 },
+    ]));
+    expect(r.bookedOut).toBe(true);
+    expect(r.pick).toBe('b'); // closest fallback
+    expect(r.reason).toMatch(/booked/i);
+  });
+
+  it('flags an over-drive pick', () => {
+    const r = suggestLodging(cands([{ id: 'x', driveMinFromLastHike: 200, availOpen: 1 }]), { maxDriveMin: 90 });
+    expect(r.overDrive).toBe(true);
+  });
+
+  it('handles no candidates', () => {
+    const r = suggestLodging([]);
+    expect(r.pick).toBeNull();
+    expect(r.reason).toMatch(/No campgrounds/);
+  });
+});
 
 describe('suggestDays', () => {
   it('keeps light stops on the same day', () => {

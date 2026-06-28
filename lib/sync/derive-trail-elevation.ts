@@ -28,33 +28,71 @@ import { gradeTrail } from './trail-difficulty';
  * Gated by `SYNC_TRAIL_ELEVATION=1`.
  */
 
+/**
+ * Raised when the batch elevation API answers HTTP 429 (quota / rate exhausted). The derive step catches
+ * this to STOP the crawl cleanly — re-running later resumes (already-graded trails are skipped) — instead
+ * of spending the rest of the run on dead calls or grading a trail on a truncated, half-sampled profile.
+ */
+export class ElevationRateLimitError extends Error {
+  constructor(message = 'elevation API rate-limited (HTTP 429)') {
+    super(message);
+    this.name = 'ElevationRateLimitError';
+  }
+}
+
+/**
+ * Inter-call throttle in ms (`TRAIL_ELEV_THROTTLE_MS`). Default 1100 (~the public ~1 req/s limit); set `0`
+ * for full speed against a self-hosted opentopodata with no rate limit. An explicit `0` is honored; an
+ * empty/garbage/negative value falls back to the default.
+ */
+export function parseThrottleMs(raw: string | undefined): number {
+  if (raw == null || raw === '') return 1100;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 1100;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Batch elevation-API sampler (opentopodata-compatible: `?locations=lat,lng|…`, parses `results[].elevation`).
+ * Batches 100 points/call (the public per-call cap) and throttles `throttleMs` between calls. A 429 THROWS
+ * `ElevationRateLimitError` (caller stops + resumes later); any other failure degrades that batch to nulls
+ * (treated as no-data, like an out-of-coverage pixel). Exported for unit testing.
+ */
+export function createApiSampler(apiUrl: string, throttleMs: number): ElevationSampler {
+  return async (points) => {
+    const out: (number | null)[] = [];
+    const BATCH = 100;
+    for (let i = 0; i < points.length; i += BATCH) {
+      const slice = points.slice(i, i + BATCH);
+      let res: Response;
+      try {
+        const url = new URL(apiUrl);
+        url.searchParams.set('locations', slice.map((p) => `${p.lat},${p.lng}`).join('|'));
+        res = await fetch(url.toString());
+      } catch {
+        out.push(...slice.map(() => null)); // network error → no data for this batch
+        if (throttleMs > 0) await sleep(throttleMs);
+        continue;
+      }
+      // Quota/rate exhausted: abort the whole crawl rather than waste the rest of the run on dead calls.
+      if (res.status === 429) throw new ElevationRateLimitError();
+      if (!res.ok) {
+        out.push(...slice.map(() => null));
+      } else {
+        const json = (await res.json()) as { results?: { elevation: number | null }[] };
+        const results = json.results ?? [];
+        out.push(...slice.map((_, k) => results[k]?.elevation ?? null));
+      }
+      if (throttleMs > 0) await sleep(throttleMs);
+    }
+    return out;
+  };
+}
+
 function makeSampler(): ElevationSampler | null {
   const apiUrl = env.trails.elevationApiUrl;
-  if (apiUrl) {
-    return async (points) => {
-      const out: (number | null)[] = [];
-      const BATCH = 100;
-      for (let i = 0; i < points.length; i += BATCH) {
-        const slice = points.slice(i, i + BATCH);
-        try {
-          const url = new URL(apiUrl);
-          url.searchParams.set('locations', slice.map((p) => `${p.lat},${p.lng}`).join('|'));
-          const res = await fetch(url.toString());
-          if (!res.ok) {
-            out.push(...slice.map(() => null));
-          } else {
-            const json = (await res.json()) as { results?: { elevation: number | null }[] };
-            const results = json.results ?? [];
-            out.push(...slice.map((_, k) => results[k]?.elevation ?? null));
-          }
-        } catch {
-          out.push(...slice.map(() => null));
-        }
-        await new Promise((r) => setTimeout(r, 1100)); // public elevation APIs throttle ~1 req/s
-      }
-      return out;
-    };
-  }
+  if (apiUrl) return createApiSampler(apiUrl, parseThrottleMs(process.env.TRAIL_ELEV_THROTTLE_MS));
   // DEM terrain-RGB tile sampling (DEM-primary, ADR-068) is scaffolded — it needs a server-side raster
   // decoder. Until then, set ELEVATION_API_URL to enable elevation derivation; the pure profile core +
   // decodeElevationM in lib/datasources/elevation.ts are ready for the tile sampler to plug into.
@@ -77,6 +115,7 @@ export async function deriveTrailElevation(): Promise<Record<string, number>> {
   let graded = 0;
   let requested = 0;
   let budgetHit = 0;
+  let rateLimited = false;
 
   for (const { parkCode, url } of parks) {
     if (requested >= maxSamples) {
@@ -104,27 +143,37 @@ export async function deriveTrailElevation(): Promise<Record<string, number>> {
       let offsetMi = 0;
       const merged: ElevationPoint[] = [];
 
-      for (const line of f.geometry.coordinates) {
-        if (line.length < 2) continue;
-        const samplePts = resamplePolyline(line, spacing);
-        requested += samplePts.length;
-        const elevsM = await sampler(samplePts.map((s) => ({ lng: s.lng, lat: s.lat })));
-        const seg: ElevationPoint[] = [];
-        for (let i = 0; i < samplePts.length; i++) {
-          const m = elevsM[i];
-          if (m == null) continue;
-          seg.push({ distMi: samplePts[i].distMi, elevFt: metersToFeet(m) });
+      try {
+        for (const line of f.geometry.coordinates) {
+          if (line.length < 2) continue;
+          const samplePts = resamplePolyline(line, spacing);
+          requested += samplePts.length;
+          const elevsM = await sampler(samplePts.map((s) => ({ lng: s.lng, lat: s.lat })));
+          const seg: ElevationPoint[] = [];
+          for (let i = 0; i < samplePts.length; i++) {
+            const m = elevsM[i];
+            if (m == null) continue;
+            seg.push({ distMi: samplePts[i].distMi, elevFt: metersToFeet(m) });
+          }
+          const lineLenMi = samplePts.length ? samplePts[samplePts.length - 1].distMi : 0;
+          if (seg.length >= 2) {
+            const p = computeProfile(seg); // per-segment gain/loss — never across the inter-segment gap
+            gainFt += p.gainFt;
+            lossFt += p.lossFt;
+            minFt = Math.min(minFt, p.minFt);
+            maxFt = Math.max(maxFt, p.maxFt);
+            for (const pt of seg) merged.push({ distMi: round2(pt.distMi + offsetMi), elevFt: pt.elevFt });
+          }
+          offsetMi += lineLenMi;
         }
-        const lineLenMi = samplePts.length ? samplePts[samplePts.length - 1].distMi : 0;
-        if (seg.length >= 2) {
-          const p = computeProfile(seg); // per-segment gain/loss — never across the inter-segment gap
-          gainFt += p.gainFt;
-          lossFt += p.lossFt;
-          minFt = Math.min(minFt, p.minFt);
-          maxFt = Math.max(maxFt, p.maxFt);
-          for (const pt of seg) merged.push({ distMi: round2(pt.distMi + offsetMi), elevFt: pt.elevFt });
+      } catch (e) {
+        // Quota/rate hit mid-trail: do NOT grade this trail on a partial profile (it'd be marked complete
+        // and never retried). Stop the crawl here; the next run resumes from this trail.
+        if (e instanceof ElevationRateLimitError) {
+          rateLimited = true;
+          break;
         }
-        offsetMi += lineLenMi;
+        throw e;
       }
 
       if (merged.length < 2) continue;
@@ -172,8 +221,11 @@ export async function deriveTrailElevation(): Promise<Record<string, number>> {
       }
     }
 
+    // Persist this park's already-graded features even if we're about to stop (their Blob profiles + graph
+    // scalars are complete); the trail that hit the 429 was left ungraded, so it's retried next run.
     if (changed) await putParkTrails(parkCode, fc as FeatureCollection);
+    if (rateLimited) break;
   }
 
-  return { graded, requested, budgetHit };
+  return { graded, requested, budgetHit, rateLimited: rateLimited ? 1 : 0 };
 }

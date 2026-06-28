@@ -5,7 +5,7 @@ import {
   parksInBBox,
   allParksGeo,
   vibeSearch,
-  campgroundsInBBox,
+  campgroundMarkersInBBox,
   visitorCentersInBBox,
   thingsToDoInBBox,
   alertParksInBBox,
@@ -76,7 +76,8 @@ export async function GET(req: Request) {
         // Layer toggles (B3); default = parks.
         switch (url.searchParams.get('layer')) {
           case 'campgrounds':
-            return Response.json({ items: await campgroundsInBBox(box) });
+            // Faceted markers (free/dispersed/hookups/ada/fcfs) so the camp-lens can recolor them (Phase 4).
+            return Response.json({ items: await campgroundMarkersInBBox(box) });
           case 'visitorcenters':
             return Response.json({ items: await visitorCentersInBBox(box) });
           case 'thingstodo':

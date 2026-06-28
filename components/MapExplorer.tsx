@@ -26,6 +26,7 @@ import {
 } from '../lib/mapLegend';
 import { markerImageId, attachMarkerImages, MARKER_SVGS } from '../lib/mapMarkers';
 import { MAP_LENSES, lensColorExpr, lensLegend, type LensKey } from '../lib/mapLenses';
+import { CAMP_LENSES, campLensColorExpr, campLensLegend, type CampLensKey } from '../lib/campLenses';
 import { conditionMatchStops, conditionDefaultColor, conditionLegend } from '../lib/conditions-map';
 import { BasemapSwitcher } from './map/BasemapSwitcher';
 import { useColorMode } from './ui/color-mode';
@@ -118,6 +119,11 @@ export function MapExplorer({
   const lensRef = useRef<LensKey>(initialView?.lens ?? 'none');
   const [lens, setLens] = useState<LensKey>(initialView?.lens ?? 'none');
   const applyLensRef = useRef<((map: MlMap) => void) | null>(null);
+  // Campground lens (Campgrounds feature, Phase 4): recolors the poi-campgrounds layer by a camp facet
+  // (free/dispersed/hookups/ada/fcfs). Same ref-survives-remount discipline as the parks lens above.
+  const campLensRef = useRef<CampLensKey>('none');
+  const [campLens, setCampLens] = useState<CampLensKey>('none');
+  const applyCampLensRef = useRef<((map: MlMap) => void) | null>(null);
   // The full parks FeatureCollection, fetched once and reused across style swaps (no per-pan refetch).
   const parksFcRef = useRef<FeatureCollection | null>(null);
   // The viewport each POI layer was last fetched for → skip refetch when panning within loaded bounds.
@@ -558,7 +564,9 @@ export function MapExplorer({
     begin();
     try {
       const res = await fetch(`/api/graph?${bboxParams(map, { layer: key })}`, { signal: abortRef.current?.signal });
-      const { items } = (await res.json()) as { items: { id?: string; parkCode?: string; name: string; lat: number; lng: number }[] };
+      const { items } = (await res.json()) as {
+        items: { id?: string; parkCode?: string; name: string; lat: number; lng: number; free?: boolean; dispersed?: boolean; hasHookups?: boolean; ada?: boolean; fcfs?: boolean }[];
+      };
       const fc: FeatureCollection = {
         type: 'FeatureCollection',
         features: (items ?? [])
@@ -566,7 +574,13 @@ export function MapExplorer({
           .map((i) => ({
             type: 'Feature' as const,
             geometry: { type: 'Point' as const, coordinates: [i.lng, i.lat] },
-            properties: { id: i.id ?? i.parkCode ?? '', name: i.name, parkCode: i.parkCode ?? '', icon: markerImageId(poiIcon(key)) },
+            properties: {
+              id: i.id ?? i.parkCode ?? '', name: i.name, parkCode: i.parkCode ?? '', icon: markerImageId(poiIcon(key)),
+              // Camp facets for the camp-lens (Phase 4) — only the campgrounds layer carries them.
+              ...(key === 'campgrounds'
+                ? { free: !!i.free, dispersed: !!i.dispersed, hasHookups: !!i.hasHookups, ada: !!i.ada, fcfs: !!i.fcfs }
+                : {}),
+            },
           })),
       };
       (map.getSource(`poi-${key}`) as GeoJSONSource | undefined)?.setData(fc);
@@ -683,6 +697,14 @@ export function MapExplorer({
     if (map) applyLensRef.current?.(map);
   }
 
+  // Switch the campground lens (Phase 4): recolor poi-campgrounds + persist for re-installs/remounts.
+  function changeCampLens(next: CampLensKey) {
+    campLensRef.current = next;
+    setCampLens(next);
+    const map = mapRef.current;
+    if (map) applyCampLensRef.current?.(map);
+  }
+
   useEffect(() => {
     if (!ref.current) return;
     registerMapProtocols();
@@ -727,6 +749,15 @@ export function MapExplorer({
       map.setPaintProperty('park-point', 'circle-color', expr);
     }
     applyLensRef.current = applyLens;
+
+    // Camp-lens (Phase 4): recolor the unclustered poi-campgrounds layer by a camp facet, or fall back to
+    // the agency-brown default for 'none'. Re-applied on every (re)install like applyLens.
+    function applyCampLens(map: MlMap) {
+      if (!map.getLayer('poi-campgrounds')) return;
+      const expr = campLensColorExpr(campLensRef.current, colorMode) as unknown as ExpressionSpecification | null;
+      map.setPaintProperty('poi-campgrounds', 'circle-color', expr ?? poiColor('campgrounds', colorMode));
+    }
+    applyCampLensRef.current = applyCampLens;
 
     // One POI layer "group" (#11): clustered like parks (so dense areas collapse instead of a dot field),
     // in the layer's distinct color (#2). Three layers per key — the unclustered points keep the bare
@@ -857,6 +888,7 @@ export function MapExplorer({
       loadConnections(map);
       // Apply the active recolor (conditions > lens > designation) so a basemap swap / remount keeps it.
       applyLens(map);
+      applyCampLens(map); // camp-lens survives the same way (Phase 4)
       // Re-apply "your map" mode visibility + data after a (re)install (#6).
       applyMode(map);
     }
@@ -1118,6 +1150,33 @@ export function MapExplorer({
               <NativeSelect.Indicator />
             </NativeSelect.Root>
           </Field.Root>
+          {/* Campground lens (Phase 4): recolor the campgrounds layer by a camp facet — shown only when that
+              layer is on. "Free & dispersed on the map," the feature plan's reach goal. */}
+          {enabled.campgrounds ? (
+            <Field.Root mt={2}>
+              <Field.Label fontSize="xs" fontWeight="semibold" mb={1.5} textTransform="uppercase" letterSpacing="0.05em" color="fg.subtle">
+                Color campgrounds by
+              </Field.Label>
+              <NativeSelect.Root size="sm">
+                <NativeSelect.Field value={campLens} onChange={(e) => changeCampLens(e.currentTarget.value as CampLensKey)}>
+                  {CAMP_LENSES.map((l) => (
+                    <option key={l.key} value={l.key}>{l.label}</option>
+                  ))}
+                </NativeSelect.Field>
+                <NativeSelect.Indicator />
+              </NativeSelect.Root>
+              {campLensLegend(campLens, colorMode).length ? (
+                <HStack gap={2} mt={1.5} wrap="wrap">
+                  {campLensLegend(campLens, colorMode).map((e) => (
+                    <HStack key={e.key} gap={1}>
+                      <Box as="span" display="inline-block" w="8px" h="8px" borderRadius="full" bg={e.color} />
+                      <Text fontSize="2xs" color="fg.muted">{e.label}</Text>
+                    </HStack>
+                  ))}
+                </HStack>
+              ) : null}
+            </Field.Root>
+          ) : null}
         </Box>
 
         {/* Condition-aware mode (#4): recolor parks by "good to visit?" for tonight / this weekend. */}

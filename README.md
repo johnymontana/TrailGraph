@@ -194,8 +194,10 @@ ADR-059). Self-guided audio + multimedia is opt-in behind `SYNC_MULTIMEDIA=1` (l
 **Real trails** are a separate ingest (ADR-066–073): `pnpm trails:sync` — or the slow sync with
 `SYNC_TRAILS=1` — pulls NPS Public Trails GIS into `:Trail` nodes, simplifies the geometry to **Vercel Blob**
 (`BLOB_READ_WRITE_TOKEN`; local `public/trails/` in dev), joins curated NPS hikes, and derives the
-loop-builder `CONNECTS` network. Add `SYNC_TRAIL_ELEVATION=1` (+ `ELEVATION_API_URL`) for elevation profiles,
-`EMBED_TRAILS=1` for trail vibe-search, and `ENRICH_OSM_TRAILS=1` for OSM-fill of NPS-empty parks. On Vercel
+loop-builder `CONNECTS` network. Add `SYNC_TRAIL_ELEVATION=1` (+ `ELEVATION_API_URL`, opentopodata-compatible)
+for elevation profiles — it throttles to the public ~1 req/s (`TRAIL_ELEV_THROTTLE_MS=0` for a self-hosted host)
+and on the daily-quota `429` stops + resumes next run — `EMBED_TRAILS=1` for trail vibe-search, and
+`ENRICH_OSM_TRAILS=1` for OSM-fill of NPS-empty parks. On Vercel
 the Blob token is **required** for trails (the local-file fallback is dev-only) — see
 [`docs/DEPLOY-MAP-DATA.md`](docs/DEPLOY-MAP-DATA.md).
 
