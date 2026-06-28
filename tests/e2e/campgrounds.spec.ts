@@ -36,7 +36,9 @@ test('availability chip degrades to a recreation.gov deep link when the flag is 
 
 test('campground card links to a site-level detail page with inventory + provenance', async ({ page }) => {
   await page.goto('/campgrounds');
-  await page.getByText('Canyon Campground').click();
+  // Target the card's actual anchor by href (robust vs. clicking a text node mid-hydration — native anchor
+  // navigation works even before React attaches).
+  await page.locator('a[href="/campgrounds/cg-canyon"]').first().click();
   await expect(page).toHaveURL(/\/campgrounds\/cg-canyon/);
   await expect(page.getByRole('heading', { name: 'Canyon Campground' })).toBeVisible();
   // Site-level inventory (the differentiator) — the two seeded campsites.

@@ -127,9 +127,11 @@ test('park-detail name is an h1 (§2.6)', async ({ page }) => {
 
 test('map page renders layer controls and a list-view equivalent (a11y)', async ({ page }) => {
   await page.goto('/map');
-  // DOM controls (don't depend on WebGL): layer toggles + list-view link.
+  // DOM controls (don't depend on WebGL): layer toggles + list-view link. "Campgrounds" now also appears as a
+  // nav link AND the "Color campgrounds by" camp-lens label, so target the layer toggle by its checkbox role
+  // (unique + unambiguous) — it's on by default.
   await expect(page.getByText('Layers')).toBeVisible();
-  await expect(page.getByText('Campgrounds')).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Campgrounds' })).toBeChecked();
   await expect(page.getByRole('link', { name: /List view/ })).toBeVisible();
 });
 
