@@ -30,6 +30,24 @@ const config = defineConfig({
     'body:has([data-fullscreen]) footer': {
       display: 'none',
     },
+    // MapLibre popups ship a fixed white background with NO text color, so popup text inherits the
+    // `fg` token above — near-white in dark mode → white-on-white. Restyle content + tip (the tip is
+    // drawn with CSS borders, one side per anchor) with semantic tokens so popups follow color mode.
+    '.maplibregl-popup-content': {
+      bg: 'bg.panel',
+      color: 'fg',
+      borderRadius: 'md',
+      boxShadow: 'md',
+    },
+    '.maplibregl-popup-close-button': {
+      color: 'fg.muted',
+    },
+    '.maplibregl-popup-anchor-top .maplibregl-popup-tip, .maplibregl-popup-anchor-top-left .maplibregl-popup-tip, .maplibregl-popup-anchor-top-right .maplibregl-popup-tip':
+      { borderBottomColor: 'bg.panel' },
+    '.maplibregl-popup-anchor-bottom .maplibregl-popup-tip, .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip, .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip':
+      { borderTopColor: 'bg.panel' },
+    '.maplibregl-popup-anchor-left .maplibregl-popup-tip': { borderRightColor: 'bg.panel' },
+    '.maplibregl-popup-anchor-right .maplibregl-popup-tip': { borderLeftColor: 'bg.panel' },
   },
   theme: {
     tokens,

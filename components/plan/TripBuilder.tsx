@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Box, Stack, Heading, Text, Input, Button, Flex, HStack, IconButton, Separator, Badge, Icon } from '@chakra-ui/react';
 import { Reorder } from 'motion/react';
-import { LuX, LuGripVertical, LuFootprints, LuTriangleAlert, LuTentTree } from 'react-icons/lu';
+import { LuX, LuGripVertical, LuFootprints, LuTriangleAlert, LuTentTree, LuHouse, LuRepeat } from 'react-icons/lu';
 import { MapTripCanvas } from './MapTripCanvas';
 import { ParkSearchInput } from './ParkSearchInput';
 import { toast } from '../../lib/toast';
@@ -48,6 +48,11 @@ interface Trip {
   name: string;
   startDate?: string | null;
   endDate?: string | null;
+  // Trip origin (defaults from the user's home; editable per trip) + its computed drive legs.
+  origin?: { lat: number; lng: number; label: string | null } | null;
+  returnToOrigin?: boolean;
+  originLeg?: { miles: number; minutes: number; source: string } | null;
+  returnLeg?: { miles: number; minutes: number; source: string } | null;
   stops: (Stop | null)[];
 }
 
@@ -75,6 +80,8 @@ export function TripBuilder() {
   const [err, setErr] = useState<string | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
+  const [editingOrigin, setEditingOrigin] = useState(false);
+  const [originDraft, setOriginDraft] = useState('');
 
   async function loadTrips() {
     const res = await fetch('/api/trips');
@@ -369,6 +376,26 @@ export function TripBuilder() {
     }
     toast.success('Trip forked', 'Editing the copy — your original is untouched.');
   }
+  // Trip origin (defaults from home): set from free text (geocoded server-side), toggle the round trip,
+  // or clear back to "starts at the first stop".
+  async function setOrigin(body: { place?: string; clearOrigin?: boolean; returnToOrigin?: boolean }) {
+    if (!trip) return;
+    const res = await fetch(`/api/trips/${trip.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op: 'setOrigin', ...body }),
+    });
+    if (rateLimited(res)) return;
+    if (res.status === 404 && body.place) {
+      toast.info(`Couldn't find "${body.place}" — try a nearby city or town.`);
+      return;
+    }
+    if (res.ok) {
+      applyMutation(await res.json());
+      setEditingOrigin(false);
+      setOriginDraft('');
+    }
+  }
   async function suggestDayPlan() {
     if (!trip) return;
     const res = await fetch(`/api/trips/${trip.id}`, {
@@ -391,6 +418,13 @@ export function TripBuilder() {
   );
   const addedParkCodes = useMemo(
     () => ((trip?.stops ?? []).filter(Boolean) as Stop[]).map((s) => s.parkCode).filter((code): code is string => !!code),
+    [trip],
+  );
+  const canvasOrigin = useMemo(
+    () =>
+      trip?.origin
+        ? { lat: trip.origin.lat, lng: trip.origin.lng, label: trip.origin.label, roundTrip: trip.returnToOrigin ?? false }
+        : null,
     [trip],
   );
   // Schedule-aware "over-packed day" warning (ADR-071): aggregate each day's hike hours + drive hours and
@@ -460,18 +494,77 @@ export function TripBuilder() {
               </Button>
             </HStack>
           )}
+          {/* Trip origin (user-feedback iteration): defaults from the saved home location; editable per
+              trip (fly-in trips), with a round-trip toggle that adds the drive home to the route. */}
+          <HStack gap={2} flexWrap="wrap">
+            <Icon color="trail.solid" boxSize={3.5}><LuHouse /></Icon>
+            {editingOrigin ? (
+              <>
+                <Input
+                  size="xs"
+                  maxW="220px"
+                  autoFocus
+                  placeholder="Start from — e.g. Bozeman, MT"
+                  value={originDraft}
+                  onChange={(e) => setOriginDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && originDraft.trim() && setOrigin({ place: originDraft.trim() })}
+                />
+                <Button size="xs" colorPalette="pine" disabled={!originDraft.trim()} onClick={() => setOrigin({ place: originDraft.trim() })}>
+                  Set
+                </Button>
+                <Button size="xs" variant="ghost" onClick={() => setEditingOrigin(false)}>Cancel</Button>
+              </>
+            ) : trip.origin ? (
+              <>
+                <Text fontSize="xs">
+                  Starts from <Text as="span" fontWeight="600">{trip.origin.label ?? 'your start point'}</Text>
+                </Text>
+                <Button
+                  size="2xs"
+                  variant={trip.returnToOrigin ? 'solid' : 'outline'}
+                  colorPalette="pine"
+                  title="Route back to the start at the end of the trip"
+                  onClick={() => setOrigin({ returnToOrigin: !trip.returnToOrigin })}
+                >
+                  <Icon boxSize={3}><LuRepeat /></Icon>
+                  Round trip{trip.returnToOrigin ? ': on' : ': off'}
+                </Button>
+                <Button size="2xs" variant="ghost" onClick={() => { setOriginDraft(trip.origin?.label ?? ''); setEditingOrigin(true); }}>
+                  Change
+                </Button>
+                <Button size="2xs" variant="ghost" colorPalette="red" onClick={() => setOrigin({ clearOrigin: true })}>
+                  Clear
+                </Button>
+              </>
+            ) : (
+              <>
+                <Text fontSize="xs" color="fg.muted">No start point — route begins at the first stop.</Text>
+                <Button size="2xs" variant="outline" onClick={() => setEditingOrigin(true)}>
+                  Set a start point
+                </Button>
+              </>
+            )}
+          </HStack>
           <ParkSearchInput onSelect={addPark} />
           {/* Build-on-map canvas (#9): click a park to add it; the route + running total assemble live. */}
           <Box h="380px" w="full" borderRadius="md" overflow="hidden">
             <MapTripCanvas
               tripId={trip.id}
               stops={canvasStops}
+              origin={canvasOrigin}
               addedParkCodes={addedParkCodes}
               metrics={metrics}
               onMutated={(d) => applyMutation({ trip: d.trip as unknown as Trip | null, metrics: d.metrics })}
             />
           </Box>
 
+          {/* First leg: home/origin → stop 1 (the origin is not a draggable stop, so it renders above the list). */}
+          {trip.origin && trip.originLeg && localStops.length > 0 ? (
+            <Text fontSize="xs" color="fg.muted">
+              ⌂ {trip.origin.label ?? 'Start'} ↓ {Math.round(trip.originLeg.miles)} mi · {Math.round(trip.originLeg.minutes)} min
+              {trip.originLeg.source === 'great_circle' ? ' (approx)' : ''}
+            </Text>
+          ) : null}
           {/* Drag a stop to reorder (#9); the route + drive times recompute on drop. Day headers ride inside
               each item so they stay direct children of the Reorder.Group. */}
           <Reorder.Group axis="y" values={localStops} onReorder={setLocalStops} as="div" style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 0, margin: 0 }}>
@@ -549,6 +642,13 @@ export function TripBuilder() {
               );
             })}
           </Reorder.Group>
+          {/* Return leg: last stop → home (round trip). */}
+          {trip.origin && trip.returnToOrigin && trip.returnLeg && localStops.length > 0 ? (
+            <Text fontSize="xs" color="fg.muted">
+              ↓ {Math.round(trip.returnLeg.miles)} mi · {Math.round(trip.returnLeg.minutes)} min back to ⌂ {trip.origin.label ?? 'start'}
+              {trip.returnLeg.source === 'great_circle' ? ' (approx)' : ''}
+            </Text>
+          ) : null}
           {overPackedDays.length ? (
             <Box borderWidth="1px" borderColor="orange.emphasized" bg="orange.subtle" borderRadius="l2" p={3}>
               <HStack gap={2} align="start">

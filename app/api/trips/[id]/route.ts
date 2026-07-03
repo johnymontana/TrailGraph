@@ -14,6 +14,8 @@ import {
   addLodgingToStop,
   removeCampgroundFromStop,
 } from '../../../../lib/trips';
+import { setTripOrigin } from '../../../../lib/trips';
+import { routing } from '../../../../lib/routing';
 import { suggestDays } from '../../../../lib/itinerary';
 import { nearestNeighborOrder } from '../../../../lib/route-order';
 import { forkTrip, tripDiff, tripMetrics } from '../../../../lib/trip-lab';
@@ -88,6 +90,24 @@ export async function POST(req: Request, { params }: Ctx) {
       if (!name) return Response.json({ error: 'name required' }, { status: 400 });
       await renameTrip(userId, id, name);
       return Response.json({ trip: await getTrip(userId, id) });
+    }
+    case 'setOrigin': {
+      // Three forms: free-text place (geocoded server-side, ORS key stays private), explicit coords
+      // (browser geolocation), or clearOrigin; returnToOrigin can ride along with any of them.
+      let origin: { latitude: number; longitude: number; label?: string } | null | undefined;
+      if (body.clearOrigin) origin = null;
+      else if (body.origin) origin = body.origin;
+      else if (body.place?.trim()) {
+        const hit = await routing.geocode(body.place.trim());
+        if (!hit) return Response.json({ error: `Couldn't find "${body.place.trim()}"` }, { status: 404 });
+        origin = hit;
+      }
+      if (origin === undefined && body.returnToOrigin === undefined) {
+        return Response.json({ error: 'place, origin, clearOrigin, or returnToOrigin required' }, { status: 400 });
+      }
+      const ok = await setTripOrigin(userId, id, { origin, returnToOrigin: body.returnToOrigin });
+      if (!ok) return Response.json({ error: 'not found' }, { status: 404 });
+      return Response.json({ trip: await getTrip(userId, id), metrics: await liveMetrics(userId, id) });
     }
     case 'addStop': {
       if (!body.stop) return Response.json({ error: 'stop required' }, { status: 400 });

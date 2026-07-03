@@ -20,6 +20,7 @@ function mem(over: Partial<UserMemory> = {}): UserMemory {
     trailHistory: { saved: [], wishlisted: [], done: [] },
     campPreferences: { rig: null, maxLengthFt: null, hookups: null, tentOk: false, ada: false, pets: false, quiet: false, budget: null },
     campHistory: { saved: [] },
+    home: { label: null, latitude: null, longitude: null },
     ...over,
   };
 }
@@ -27,6 +28,13 @@ function mem(over: Partial<UserMemory> = {}): UserMemory {
 describe('renderMemoryBlock', () => {
   it('returns empty string for a user with no saved memory (inject nothing)', () => {
     expect(renderMemoryBlock(mem())).toBe('');
+  });
+
+  it('renders the home location line (trip-origin default)', () => {
+    const out = renderMemoryBlock(mem({ home: { label: 'Bozeman, MT, USA', latitude: 45.68, longitude: -111.04 } }));
+    expect(out).toContain('- Home: Bozeman, MT, USA (default trip start point)');
+    // Coordinates are for ranking/routing, never the prompt.
+    expect(out).not.toContain('45.68');
   });
 
   it('renders each populated field once, with the load-bearing header + recall guidance', () => {

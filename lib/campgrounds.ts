@@ -213,6 +213,9 @@ export interface CampsiteRow {
   pullThrough: boolean;
   ada: boolean;
   reservable: boolean;
+  maxPeople: number | null; // occupancy — null when unreported, NEVER coalesced to 0
+  campfireAllowed: boolean | null; // null = not reported (distinct from an explicit no)
+  shade: boolean;
 }
 
 export interface CampgroundDetail extends CampgroundSummary {
@@ -235,10 +238,10 @@ export async function campgroundDetail(id: string): Promise<CampgroundDetail | n
   const rows = await readGraph<CampgroundDetail & { sourceIdsRaw: string | null }>(
     `MATCH (c:Campground {id: $id})
      CALL { WITH c OPTIONAL MATCH (c)-[:HAS_SITE]->(s:Campsite)
-            RETURN collect(DISTINCT s{.id, .loop, .number, .type, .maxRvLengthFt, .electricAmps,
-                   hasWater: coalesce(s.hasWater, false), hasSewer: coalesce(s.hasSewer, false),
+            RETURN collect(DISTINCT s{.id, .loop, .number, .type, .maxRvLengthFt, .electricAmps, .maxPeople,
+                   .campfireAllowed, hasWater: coalesce(s.hasWater, false), hasSewer: coalesce(s.hasSewer, false),
                    pullThrough: coalesce(s.pullThrough, false), ada: coalesce(s.ada, false),
-                   reservable: coalesce(s.reservable, false)})[..600] AS sites }
+                   reservable: coalesce(s.reservable, false), shade: coalesce(s.shade, false)})[..600] AS sites }
      CALL { WITH c OPTIONAL MATCH (c)-[:HAS_AMENITY]->(a:Amenity)
             RETURN collect(DISTINCT a{.id, .name}) AS amenities }
      CALL { WITH c OPTIONAL MATCH (c)-[:MANAGED_BY]->(ag:Agency)
@@ -283,7 +286,8 @@ export async function campsitesForCampground(id: string): Promise<CampsiteRow[]>
             s.maxRvLengthFt AS maxRvLengthFt, s.electricAmps AS electricAmps,
             coalesce(s.hasWater, false) AS hasWater, coalesce(s.hasSewer, false) AS hasSewer,
             coalesce(s.pullThrough, false) AS pullThrough, coalesce(s.ada, false) AS ada,
-            coalesce(s.reservable, false) AS reservable
+            coalesce(s.reservable, false) AS reservable,
+            s.maxPeople AS maxPeople, s.campfireAllowed AS campfireAllowed, coalesce(s.shade, false) AS shade
      ORDER BY s.loop, s.number`,
     { id },
   );

@@ -13,6 +13,7 @@ import {
   LuTentTree,
 } from 'react-icons/lu';
 import type { CampgroundSummary } from '../../lib/campgrounds';
+import { bookingSignal, BOOKING_BADGE_LABEL, BOOKING_PALETTE } from '../../lib/camp-booking';
 
 /** Managing-agency → accent-bar color (mirrors TrailCard's DIFF_COLOR). */
 const AGENCY_COLOR: Record<string, string> = {
@@ -104,6 +105,7 @@ export function CampgroundCard({
   const where = cg.parkName ?? cg.recAreaName ?? null;
   const confidence = cg.dataConfidence ?? (cg.source === 'nps+ridb' ? 'high' : 'medium');
   const sourceLabel = SOURCE_LABEL[cg.source] ?? 'NPS';
+  const booking = bookingSignal(cg); // reservation vs first-come, in plain English
 
   return (
     <CLink asChild display="block" w="full" h="full" _hover={{ textDecoration: 'none' }}>
@@ -128,13 +130,12 @@ export function CampgroundCard({
 
             <HStack gap={3} fontSize="sm" flexWrap="wrap">
               {cg.totalSites != null ? <Text>{cg.totalSites} sites</Text> : null}
-              {cg.sitesReservable != null || cg.sitesFirstCome != null ? (
-                <Text color="fg.muted">
-                  {cg.sitesReservable != null ? `R${cg.sitesReservable}` : ''}
-                  {cg.sitesReservable != null && cg.sitesFirstCome != null ? ' · ' : ''}
-                  {cg.sitesFirstCome != null ? `FCFS${cg.sitesFirstCome}` : ''}
-                </Text>
+              {booking.kind !== 'unknown' ? (
+                <Badge colorPalette={BOOKING_PALETTE[booking.kind]} variant="subtle" title={booking.detail ?? booking.label}>
+                  {BOOKING_BADGE_LABEL[booking.kind]}
+                </Badge>
               ) : null}
+              {booking.detail ? <Text color="fg.muted" fontSize="xs">{booking.detail}</Text> : null}
               {cg.distanceMiles != null ? (
                 <HStack gap={1}><Icon boxSize={3.5} color="fg.subtle"><LuMapPin /></Icon><Text>{cg.distanceMiles} mi</Text></HStack>
               ) : null}

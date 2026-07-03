@@ -57,7 +57,8 @@ export async function forkTrip(userId: string, tripId: string, name?: string): P
     MERGE (u:User {userId:$userId})
     CREATE (f:Trip {id:$newId, userId:$userId})
       SET f.name = $name, f.startDate = orig.startDate, f.endDate = orig.endDate,
-          f.startPoint = orig.startPoint, f.endPoint = orig.endPoint,
+          f.startPoint = orig.startPoint, f.startLabel = orig.startLabel,
+          f.returnToOrigin = orig.returnToOrigin, f.endPoint = orig.endPoint,
           f.parentId = orig.id, f.version = coalesce(orig.version, 1) + 1, f.createdAt = datetime()
     MERGE (u)-[:PLANNED]->(f)
     `,
@@ -127,8 +128,11 @@ export async function tripMetrics(
     { userId, tripId },
   );
   const stops = (trip.stops ?? []).filter(Boolean) as NonNullable<typeof trip.stops>;
-  const driveMiles = round1(stops.reduce((s, st) => s + (st.driveTo?.miles ?? 0), 0));
-  const driveMinutes = Math.round(stops.reduce((s, st) => s + (st.driveTo?.minutes ?? 0), 0));
+  // Stop-to-stop DRIVE_TO plus the origin legs (home → first stop / last stop → home on a round trip).
+  const legMiles = (trip.originLeg?.miles ?? 0) + (trip.returnLeg?.miles ?? 0);
+  const legMinutes = (trip.originLeg?.minutes ?? 0) + (trip.returnLeg?.minutes ?? 0);
+  const driveMiles = round1(stops.reduce((s, st) => s + (st.driveTo?.miles ?? 0), 0) + legMiles);
+  const driveMinutes = Math.round(stops.reduce((s, st) => s + (st.driveTo?.minutes ?? 0), 0) + legMinutes);
 
   const start = trip.startDate ? trip.startDate.slice(0, 10) : undefined;
   const parkStops = stops.filter((s) => s.kind === 'park' && s.lat != null && s.lng != null);

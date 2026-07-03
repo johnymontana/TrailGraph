@@ -47,8 +47,19 @@ export function tripToGpx(trip: Trip, opts: { time: string; hikeTracks?: GpxTrac
       };
     });
 
+  // Trip origin (defaults from home): a start waypoint plus origin→first / last→origin route legs so the
+  // exported route matches the planned drive, not just the stop chain.
+  const origin = trip.origin && stops.length > 0 ? trip.origin : null;
+  const originWaypoint: GpxWaypoint[] = origin
+    ? [{ lat: origin.lat, lon: origin.lng, name: `⌂ ${origin.label ?? 'Trip start'}`, type: 'origin', desc: trip.returnToOrigin ? 'Round trip — the route returns here.' : undefined }]
+    : [];
+  const routePoints = [
+    ...(origin ? [{ lat: origin.lat, lon: origin.lng }] : []),
+    ...stops.map((s) => ({ lat: s.lat as number, lon: s.lng as number })),
+    ...(origin && trip.returnToOrigin ? [{ lat: origin.lat, lon: origin.lng }] : []),
+  ];
   const tracks: GpxTrackSeg[] = [
-    { name: `${trip.name ?? 'TrailGraph Trip'} route`, points: stops.map((s) => ({ lat: s.lat as number, lon: s.lng as number })) },
+    { name: `${trip.name ?? 'TrailGraph Trip'} route`, points: routePoints },
     ...(opts.hikeTracks ?? []),
   ];
 
@@ -58,7 +69,7 @@ export function tripToGpx(trip: Trip, opts: { time: string; hikeTracks?: GpxTrac
       time: opts.time,
       desc: 'TrailGraph itinerary. Track is a straight stop-to-stop connector, not turn-by-turn routing. Verify access/closures at nps.gov.',
     },
-    [...waypoints, ...lodgingWaypoints],
+    [...originWaypoint, ...waypoints, ...lodgingWaypoints],
     tracks,
   );
 }

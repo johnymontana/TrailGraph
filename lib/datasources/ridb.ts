@@ -183,6 +183,9 @@ export interface CampsiteAttrs {
   hasWater: boolean;
   hasSewer: boolean;
   pullThrough: boolean;
+  maxPeople: number | null;
+  campfireAllowed: boolean | null; // null = not reported (distinct from an explicit 'No')
+  shade: boolean;
 }
 
 /** Derive structured site equipment from RIDB campsite ATTRIBUTES (name→value pairs). */
@@ -194,6 +197,7 @@ export function campsiteAttrs(attrs?: RidbAttribute[] | null): CampsiteAttrs {
   // The live API uses 'Driveway Type'; the full RIDB export uses 'Driveway Entry' (value 'Pull-Through' /
   // 'Back-In' / 'Parallel') — check both so the offline loader detects pull-through sites.
   const driveway = byName.get('driveway entry') ?? byName.get('driveway type') ?? '';
+  const campfire = byName.get('campfire allowed');
   return {
     maxRvLengthFt: firstInt(byName.get('max vehicle length') ?? byName.get('max rv length')),
     // "30/50 amp" → 50; "Yes"/"30 amp" → that number; absent or "No" → null.
@@ -202,6 +206,9 @@ export function campsiteAttrs(attrs?: RidbAttribute[] | null): CampsiteAttrs {
     hasWater: truthyAttr(byName.get('water hookup')),
     hasSewer: truthyAttr(byName.get('sewer hookup')),
     pullThrough: /pull[\s-]?through/i.test(driveway),
+    maxPeople: firstInt(byName.get('max num of people')),
+    campfireAllowed: campfire == null ? null : truthyAttr(campfire),
+    shade: truthyAttr(byName.get('shade')),
   };
 }
 

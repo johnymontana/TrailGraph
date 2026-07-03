@@ -49,6 +49,7 @@ describe('getUserMemory (E3 — context subgraph read)', () => {
       trailHistory: { saved: [], wishlisted: [], done: [] },
       campPreferences: { rig: null, maxLengthFt: null, hookups: null, tentOk: false, ada: false, pets: false, quiet: false, budget: null },
       campHistory: { saved: [] },
+      home: { label: null, latitude: null, longitude: null },
     });
   });
 });

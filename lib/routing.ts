@@ -43,9 +43,18 @@ export function approxDriveMinutes(miles: number, avgMph = 45): number {
   return (miles / avgMph) * 60;
 }
 
+export interface GeocodeResult extends LatLng {
+  /** Human place label, e.g. "Bozeman, MT, USA". */
+  label: string;
+}
+
 export interface RoutingGateway {
   /** Real road distance/time between consecutive stops, in order. */
   driveSegments(stops: LatLng[]): Promise<DriveSegment[]>;
+  /** Free-text place → coordinates (home-location entry). Null when nothing matches / ORS is down. */
+  geocode(text: string): Promise<GeocodeResult | null>;
+  /** Coordinates → place label (labels the browser-geolocation capture). Null on failure. */
+  reverseGeocode(point: LatLng): Promise<string | null>;
 }
 
 class OrsRoutingGateway implements RoutingGateway {
@@ -99,6 +108,45 @@ class OrsRoutingGateway implements RoutingGateway {
       }
     }
     return segments;
+  }
+
+  // ORS bundles a Pelias geocoder on the same key (GET, api_key as query param — unlike the POST matrix
+  // above, which authorizes via header). US-biased: TrailGraph is a U.S. parks app.
+  async geocode(text: string): Promise<GeocodeResult | null> {
+    try {
+      const url = new URL(`${env.routing.baseUrl}/geocode/search`);
+      url.searchParams.set('api_key', env.routing.apiKey);
+      url.searchParams.set('text', text);
+      url.searchParams.set('boundary.country', 'US');
+      url.searchParams.set('size', '1');
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = (await res.json()) as {
+        features?: { geometry: { coordinates: [number, number] }; properties: { label?: string } }[];
+      };
+      const f = data.features?.[0];
+      if (!f) return null;
+      const [longitude, latitude] = f.geometry.coordinates;
+      return { latitude, longitude, label: f.properties.label ?? text };
+    } catch {
+      return null;
+    }
+  }
+
+  async reverseGeocode(point: LatLng): Promise<string | null> {
+    try {
+      const url = new URL(`${env.routing.baseUrl}/geocode/reverse`);
+      url.searchParams.set('api_key', env.routing.apiKey);
+      url.searchParams.set('point.lat', String(point.latitude));
+      url.searchParams.set('point.lon', String(point.longitude));
+      url.searchParams.set('size', '1');
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = (await res.json()) as { features?: { properties: { label?: string } }[] };
+      return data.features?.[0]?.properties.label ?? null;
+    } catch {
+      return null;
+    }
   }
 }
 

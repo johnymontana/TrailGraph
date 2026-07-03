@@ -3,6 +3,8 @@ import NextLink from 'next/link';
 import { LuBrain } from 'react-icons/lu';
 import { getServerUserId } from '../../lib/session';
 import { getUserMemory, userContextGraph } from '../../lib/memory-graph';
+import { getHomeLocation } from '../../lib/bridges';
+import { HomeLocationCard } from '../../components/memory/HomeLocationCard';
 import { getLearningMemory } from '../../lib/learn-queries';
 import { allBadges } from '../../lib/learn-badges';
 import { MemoryList } from '../../components/memory/MemoryList';
@@ -33,11 +35,12 @@ export default async function MePage() {
       </Box>
     );
   }
-  const [memory, context, learning, badges] = await Promise.all([
+  const [memory, context, learning, badges, home] = await Promise.all([
     getUserMemory(userId),
     userContextGraph(userId).catch(() => null),
     getLearningMemory(userId),
     allBadges(),
+    getHomeLocation(userId).catch(() => null),
   ]);
   return (
     <Box>
@@ -49,6 +52,7 @@ export default async function MePage() {
       />
       <Container maxW="3xl" px={{ base: 4, md: 8 }} py={{ base: 8, md: 10 }}>
         {context ? <ContextGraph nodes={context.nodes} rels={context.rels} /> : null}
+        <HomeLocationCard initial={home} />
         <MemoryList initial={memory} />
         <LearningSummary learning={learning} badges={badges} />
         <DigestInbox />

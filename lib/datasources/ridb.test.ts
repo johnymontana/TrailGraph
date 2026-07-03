@@ -56,7 +56,7 @@ describe('campsiteAttrs', () => {
   const attrs = (pairs: [string, string][]): RidbAttribute[] =>
     pairs.map(([AttributeName, AttributeValue]) => ({ AttributeName, AttributeValue }));
 
-  it('parses length, amps, water/sewer, pull-through', () => {
+  it('parses length, amps, water/sewer, pull-through, occupancy, campfire, shade', () => {
     const a = campsiteAttrs(
       attrs([
         ['Max Vehicle Length', '40'],
@@ -64,6 +64,9 @@ describe('campsiteAttrs', () => {
         ['Water Hookup', 'Yes'],
         ['Sewer Hookup', 'No'],
         ['Driveway Type', 'Pull-Through'],
+        ['Max Num of People', '8'],
+        ['Campfire Allowed', 'Yes'],
+        ['Shade', 'Yes'],
       ]),
     );
     expect(a).toEqual({
@@ -72,7 +75,15 @@ describe('campsiteAttrs', () => {
       hasWater: true,
       hasSewer: false,
       pullThrough: true,
+      maxPeople: 8,
+      campfireAllowed: true,
+      shade: true,
     });
+  });
+
+  it('distinguishes an explicit "Campfire Allowed: No" from an unreported campfire attr', () => {
+    expect(campsiteAttrs(attrs([['Campfire Allowed', 'No']])).campfireAllowed).toBe(false);
+    expect(campsiteAttrs(attrs([])).campfireAllowed).toBeNull();
   });
 
   it('detects pull-through from the full-export "Driveway Entry" key (not just API "Driveway Type")', () => {
@@ -92,6 +103,9 @@ describe('campsiteAttrs', () => {
       hasWater: false,
       hasSewer: false,
       pullThrough: false,
+      maxPeople: null,
+      campfireAllowed: null,
+      shade: false,
     });
   });
 });

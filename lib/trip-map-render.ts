@@ -18,6 +18,14 @@ export interface TripMapStop {
   order: number;
 }
 
+/** The trip's origin (home by default) for the overlay: start pin + first/return route legs. */
+export interface TripMapOrigin {
+  lat: number;
+  lng: number;
+  label: string | null;
+  roundTrip: boolean;
+}
+
 export function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 }
@@ -32,11 +40,19 @@ export function renderTripOverlay(
   // The read-only preview reframes on every change; the build-on-map canvas passes false after the initial
   // render so adding a park (already on-screen, just clicked) doesn't yank the camera mid-browse (#9).
   fitCamera = true,
+  // Trip origin (user-feedback iteration): prepends the home→first-stop leg (and appends the return leg on
+  // a round trip) to the polyline, plus a distinct ⌂ start marker. Null/undefined → the old stop-only route.
+  origin?: TripMapOrigin | null,
 ) {
   const located = stops.filter(
     (s): s is TripMapStop & { lat: number; lng: number } => s.lat != null && s.lng != null,
   );
-  const coords: Coord[] = located.map((s) => [s.lng, s.lat]);
+  const stopCoords: Coord[] = located.map((s) => [s.lng, s.lat]);
+  const originCoord: Coord | null = origin ? [origin.lng, origin.lat] : null;
+  const coords: Coord[] =
+    originCoord && located.length >= 1
+      ? [originCoord, ...stopCoords, ...(origin!.roundTrip ? [originCoord] : [])]
+      : stopCoords;
   // GeoJSON spec: LineString requires ≥2 positions. Use an empty FeatureCollection when there are fewer.
   const safeData = (cs: Coord[]) =>
     cs.length >= 2
@@ -75,6 +91,22 @@ export function renderTripOverlay(
   // TripMap's markers too). Staggered drop-in unless reduced motion.
   markersRef.current.forEach((m) => m.remove());
   markersRef.current = [];
+  if (originCoord) {
+    // Distinct ⌂ start pin (trail orange, not numbered — the numbers stay 1:1 with stops).
+    const el = document.createElement('div');
+    el.className = 'trip-stop-marker trip-origin-marker';
+    el.textContent = '⌂';
+    Object.assign(el.style, {
+      background: c.trail, color: '#fff', borderRadius: '6px', width: '22px', height: '22px',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: '600',
+      border: '2px solid #fff',
+    });
+    const marker = new maplibregl.Marker({ element: el })
+      .setLngLat(originCoord)
+      .setPopup(new maplibregl.Popup().setText(origin!.label ?? 'Trip start'))
+      .addTo(map);
+    markersRef.current.push(marker);
+  }
   located.forEach((s, i) => {
     const el = document.createElement('div');
     el.className = 'trip-stop-marker';

@@ -98,7 +98,10 @@ export async function syncCampsitesRidb(): Promise<StepResult> {
   return { resource: RESOURCE, counts: { facilities: facilities.length, sites, skipped: skippedFacilities }, ms };
 }
 
-/** Deterministic content-hash input for one facility's campsites (order-independent). */
+/** Deterministic content-hash input for one facility's campsites (order-independent). The new
+ *  occupancy/campfire/shade fields are hashed too so changed RIDB data re-syncs — but a facility whose
+ *  RIDB content is UNCHANGED keeps its old hash and is skipped, so already-synced sites won't backfill
+ *  the new props until their content changes or a `SYNC_FORCE=1` run. */
 function hashPayload(sites: RidbCampsite[]): string {
   return sites
     .map((s) => {
@@ -113,6 +116,9 @@ function hashPayload(sites: RidbCampsite[]): string {
         at.hasWater ? 1 : 0,
         at.hasSewer ? 1 : 0,
         at.pullThrough ? 1 : 0,
+        at.maxPeople ?? '',
+        at.campfireAllowed == null ? '' : at.campfireAllowed ? 1 : 0,
+        at.shade ? 1 : 0,
         s.CampsiteAccessible ? 1 : 0,
         s.CampsiteReservable ? 1 : 0,
       ].join('|');
@@ -140,6 +146,9 @@ export async function upsertRidbCampsites(
       hasWater: at.hasWater,
       hasSewer: at.hasSewer,
       pullThrough: at.pullThrough,
+      maxPeople: at.maxPeople,
+      campfireAllowed: at.campfireAllowed,
+      shade: at.shade,
       ada: s.CampsiteAccessible === true,
       reservable: s.CampsiteReservable === true,
     };
@@ -155,6 +164,7 @@ export async function upsertRidbCampsites(
        SET s.campgroundId = c.id, s.loop = row.loop, s.number = row.number, s.type = row.type,
            s.maxRvLengthFt = row.maxRvLengthFt, s.electricAmps = row.electricAmps,
            s.hasWater = row.hasWater, s.hasSewer = row.hasSewer, s.pullThrough = row.pullThrough,
+           s.maxPeople = row.maxPeople, s.campfireAllowed = row.campfireAllowed, s.shade = row.shade,
            s.ada = row.ada, s.reservable = row.reservable,
            s.geometry = coalesce(s.geometry, loc), s.lastSyncedAt = datetime()
      MERGE (c)-[:HAS_SITE]->(s)

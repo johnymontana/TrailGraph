@@ -9,7 +9,11 @@ vi.mock('./neo4j', () => ({
   writeGraph: (...a: unknown[]) => writeGraph(...a),
 }));
 vi.mock('./routing', () => ({ routing: {} }));
-vi.mock('./bridges', () => ({ considerPark: vi.fn() }));
+const getHomeLocation = vi.fn().mockResolvedValue(null);
+vi.mock('./bridges', () => ({
+  considerPark: vi.fn(),
+  getHomeLocation: (...a: unknown[]) => getHomeLocation(...a),
+}));
 vi.mock('./conditions', () => ({ buildParkConditions: vi.fn() }));
 
 import { tripCost, tripConditions, createTrip } from './trips';
@@ -72,12 +76,42 @@ describe('tripCost (P2 fees / break-even cost model)', () => {
 });
 
 describe('createTrip (R5 §2.1 — decode model HTML entities at the write boundary)', () => {
+  beforeEach(() => getHomeLocation.mockReset().mockResolvedValue(null));
+
   it('stores a real ampersand, not the double-encoded entity', async () => {
     await createTrip('u1', { name: 'Four Corners Ancestral Puebloan &amp; Dark Skies' });
     // The name write is the writeGraph call whose params carry a `name`.
     const nameCall = writeGraph.mock.calls.find((c) => (c[1] as { name?: string })?.name !== undefined);
     expect(nameCall).toBeDefined();
     expect((nameCall![1] as { name: string }).name).toBe('Four Corners Ancestral Puebloan & Dark Skies');
+  });
+
+  it('defaults the origin from the saved home location, round trip on', async () => {
+    getHomeLocation.mockResolvedValue({ latitude: 45.68, longitude: -111.04, label: 'Bozeman, MT, USA', source: 'geocode' });
+    await createTrip('u1', { name: 'Big Loop' });
+    const call = writeGraph.mock.calls.find((c) => (c[1] as { name?: string })?.name !== undefined);
+    const params = call![1] as { startPoint: unknown; startLabel: string; returnToOrigin: boolean };
+    expect(params.startPoint).toEqual({ latitude: 45.68, longitude: -111.04 });
+    expect(params.startLabel).toBe('Bozeman, MT, USA');
+    expect(params.returnToOrigin).toBe(true);
+  });
+
+  it('leaves the origin unset (no round trip) when there is no home', async () => {
+    await createTrip('u1', { name: 'No Home' });
+    const call = writeGraph.mock.calls.find((c) => (c[1] as { name?: string })?.name !== undefined);
+    const params = call![1] as { startPoint: unknown; returnToOrigin: boolean };
+    expect(params.startPoint).toBeNull();
+    expect(params.returnToOrigin).toBe(false);
+  });
+
+  it('prefers an explicit startPoint over the saved home', async () => {
+    getHomeLocation.mockResolvedValue({ latitude: 45.68, longitude: -111.04, label: 'Bozeman, MT, USA', source: 'geocode' });
+    await createTrip('u1', { name: 'Fly-in', startPoint: { latitude: 36.08, longitude: -115.15, label: 'Las Vegas, NV' }, returnToOrigin: false });
+    const call = writeGraph.mock.calls.find((c) => (c[1] as { name?: string })?.name !== undefined);
+    const params = call![1] as { startPoint: { latitude: number }; startLabel: string; returnToOrigin: boolean };
+    expect(params.startPoint.latitude).toBe(36.08);
+    expect(params.startLabel).toBe('Las Vegas, NV');
+    expect(params.returnToOrigin).toBe(false);
   });
 });
 

@@ -65,6 +65,7 @@ export const TripActionSchema = z.object({
     'suggestDays', 'optimize', 'rename', 'fork', 'diff',
     'includeTrail', 'excludeTrail',
     'includeCampground', 'excludeCampground', // Campgrounds feature: (:Stop)-[:STAYS_AT]->(:Campground)
+    'setOrigin', // trip origin (defaults from home): place text OR coords OR clear, + returnToOrigin toggle
   ]),
   stop: NewStopSchema.optional(),
   stopId: id.optional(),
@@ -75,6 +76,11 @@ export const TripActionSchema = z.object({
   campgroundId: z.string().max(200).optional(), // (:Stop)-[:STAYS_AT]->(:Campground)
   nights: z.number().int().min(1).max(60).optional(),
   date: z.string().max(20).optional(), // YYYY-MM-DD the lodging covers
+  // setOrigin: free-text place (geocoded server-side) OR explicit coords OR clearOrigin; toggle rides along.
+  place: z.string().max(200).optional(),
+  origin: latLng.optional(),
+  clearOrigin: z.boolean().optional(),
+  returnToOrigin: z.boolean().optional(),
 });
 
 // ── Memory ───────────────────────────────────────────────────────────────────
