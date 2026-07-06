@@ -137,6 +137,15 @@ describe('contextToNvl (/me context graph + two-graph overlay merge keys, ADR-04
     expect(isContextParkId('ctx:Activity:Stargazing')).toBe(false);
   });
 
+  it('renders the home anchor as a LIVES_AT context node (ADR-074)', () => {
+    const { nodes, rels } = contextToNvl({ ...memory, home: { label: 'Bozeman, MT, USA', latitude: 45.68, longitude: -111.04 } });
+    expect(nodes.find((n) => n.id === 'ctx:Home:home')?.caption).toBe('Bozeman, MT, USA');
+    expect(rels.some((r) => r.caption === 'LIVES_AT')).toBe(true);
+    // No home → no node.
+    const bare = contextToNvl(memory);
+    expect(bare.nodes.find((n) => n.id === 'ctx:Home:home')).toBeUndefined();
+  });
+
   it('renders trail-preference and saved/wishlisted/did trail bridges (ADR-071)', () => {
     const withTrails = {
       ...memory,

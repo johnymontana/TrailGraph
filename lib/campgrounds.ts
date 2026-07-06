@@ -243,7 +243,7 @@ export async function campgroundDetail(id: string): Promise<CampgroundDetail | n
                    pullThrough: coalesce(s.pullThrough, false), ada: coalesce(s.ada, false),
                    reservable: coalesce(s.reservable, false), shade: coalesce(s.shade, false)})[..600] AS sites }
      CALL { WITH c OPTIONAL MATCH (c)-[:HAS_AMENITY]->(a:Amenity)
-            RETURN collect(DISTINCT a{.id, .name}) AS amenities }
+            RETURN [x IN collect(DISTINCT a{.id, .name}) WHERE x.name IS NOT NULL] AS amenities }
      CALL { WITH c OPTIONAL MATCH (c)-[:MANAGED_BY]->(ag:Agency)
             RETURN head(collect(ag{.name, .kind})) AS agency }
      CALL { WITH c OPTIONAL MATCH (c)-[:IN_RECAREA]->(ra:RecArea)

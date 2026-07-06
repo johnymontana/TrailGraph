@@ -210,7 +210,7 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
           </EmptyState>
         ) : (
           <>
-            <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={5}>
+            <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={5} data-testid="explore-results">
               {results.map((p) => (
                 <Box key={p.parkCode}>
                   <ParkCard park={p} />

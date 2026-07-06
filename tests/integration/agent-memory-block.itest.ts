@@ -16,6 +16,10 @@ import { renderMemoryBlock } from '../../lib/memory-block';
  */
 describeIntegration('deterministic memory block round-trip (P1.4, Neo4j)', () => {
   const userId = `test-${randomUUID()}`;
+  // Unique, non-vocabulary topic name: a raw shared-vocab name (e.g. 'dark skies') would persist as an
+  // orphan :Topic and shadow the canonicalize.ts synonym table for every LATER test file (order-dependent
+  // flake in memory.itest's tombstone test). Cleaned up in afterAll.
+  const topicName = `test-topic-${userId}`;
   let tripId: string;
 
   beforeAll(async () => {
@@ -26,8 +30,8 @@ describeIntegration('deterministic memory block round-trip (P1.4, Neo4j)', () =>
     await recordPass(userId); // atb-annual
     // A PREFERS edge written directly so the read test doesn't depend on the canonical vocab being seeded.
     await writeGraph(
-      `MERGE (u:User {userId:$userId}) MERGE (t:Topic {name:'dark skies'}) MERGE (u)-[:PREFERS]->(t)`,
-      { userId },
+      `MERGE (u:User {userId:$userId}) MERGE (t:Topic {name:$topicName}) MERGE (u)-[:PREFERS]->(t)`,
+      { userId, topicName },
     );
     tripId = await createTrip(userId, { name: 'Utah Dark Skies' });
   });
@@ -36,6 +40,7 @@ describeIntegration('deterministic memory block round-trip (P1.4, Neo4j)', () =>
     if (tripId) await deleteTrip(userId, tripId);
     await writeGraph(`MATCH (:User {userId:$userId})-[:TRAVELS_WITH]->(c:Constraint) DETACH DELETE c`, { userId });
     await writeGraph(`MATCH (s:Season {userId:$userId}) DETACH DELETE s`, { userId }); // per-user availability anchor
+    await writeGraph(`MATCH (t:Topic {name:$topicName}) DETACH DELETE t`, { topicName }); // the artificial topic
     await writeGraph(`MATCH (u:User {userId:$userId}) DETACH DELETE u`, { userId });
     await closeDriver();
   });
@@ -43,7 +48,7 @@ describeIntegration('deterministic memory block round-trip (P1.4, Neo4j)', () =>
   it('getUserMemory feeds renderMemoryBlock with everything the user saved', async () => {
     const block = renderMemoryBlock(await getUserMemory(userId));
     expect(block).toContain('load-bearing');
-    expect(block).toContain('dark skies'); // PREFERS
+    expect(block).toContain(topicName); // PREFERS
     expect(block).toContain('needs wheelchair-accessible sites'); // TRAVELS_WITH
     expect(block).toContain('RV ≤ 30 ft');
     expect(block).toContain('America the Beautiful'); // HOLDS → EntrancePass

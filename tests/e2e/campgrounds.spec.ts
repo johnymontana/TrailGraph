@@ -87,6 +87,27 @@ test('detail page decodes a colon-laden RIDB id (prod dynamic-param gotcha) + di
   await expect(page.getByText(/dispersed camping: no reservation/i)).toBeVisible();
 });
 
+test('booking callout answers reservation-vs-first-come on the detail page (ADR-075)', async ({ page }) => {
+  // cg-canyon: reservable=true, fcfs=false, 273 reservable sites → the reservation callout + ONE book CTA.
+  await page.goto('/campgrounds/cg-canyon');
+  await expect(page.getByText('Reservation required')).toBeVisible();
+  await expect(page.getByText('273 reservable sites')).toBeVisible();
+  await expect(page.getByRole('link', { name: /Book on Recreation\.gov/i })).toHaveCount(1);
+
+  // ridb:999001 (USFS dispersed): fcfs=true → the first-come callout with the arrive-early guidance.
+  await page.goto(`/campgrounds/${encodeURIComponent('ridb:999001')}`);
+  await expect(page.getByText('First-come, first-served').first()).toBeVisible();
+  await expect(page.getByText('No reservations — arrive early to claim a site.')).toBeVisible();
+});
+
+test('finder cards carry the booking badge instead of cryptic counts (ADR-075)', async ({ page }) => {
+  await page.goto('/campgrounds');
+  // Badge wording from BOOKING_BADGE_LABEL; the old "R273 · FCFS0" shorthand is gone.
+  await expect(page.getByText('Reservation', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('First-come', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(/R\d+ · FCFS\d+/)).toHaveCount(0);
+});
+
 test('detail page shows amenities, the verify box, and the (gated) Set-a-Camp-Watch affordance', async ({ page }) => {
   await page.goto('/campgrounds/cg-canyon');
   await expect(page.getByText('Wheelchair Accessible')).toBeVisible(); // amenity badge

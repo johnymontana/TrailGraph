@@ -163,25 +163,23 @@ export default async function CampgroundDetailPage({ params }: { params: Promise
             {booking.kind === 'fcfs' ? (
               <Text fontSize="sm">No reservations — arrive early to claim a site.</Text>
             ) : null}
-            {(booking.kind === 'reservation' || booking.kind === 'mixed') && bookUrl ? (
-              <CLink href={bookUrl} target="_blank" rel="noopener noreferrer" fontSize="sm" fontWeight="medium" color="colorPalette.fg">
-                Book on recreation.gov <Icon boxSize={3.5}><LuExternalLink /></Icon>
-              </CLink>
-            ) : null}
-            {booking.kind === 'unknown' && bookUrl ? (
-              <CLink href={bookUrl} target="_blank" rel="noopener noreferrer" fontSize="sm" fontWeight="medium" color="colorPalette.fg">
-                Check on recreation.gov <Icon boxSize={3.5}><LuExternalLink /></Icon>
-              </CLink>
-            ) : null}
           </Stack>
         </HStack>
       </Box>
 
-      {/* CTAs */}
+      {/* CTAs — ONE booking action (the callout above stays informational), labeled to match the booking
+          kind: "Book" would contradict a first-come or unknown-booking campground. */}
       <HStack gap={3} flexWrap="wrap" mb={6}>
         {bookUrl ? (
           <Button asChild colorPalette="pine">
-            <a href={bookUrl} target="_blank" rel="noopener noreferrer">Book on Recreation.gov <Icon boxSize={4}><LuExternalLink /></Icon></a>
+            <a href={bookUrl} target="_blank" rel="noopener noreferrer">
+              {booking.kind === 'reservation' || booking.kind === 'mixed'
+                ? 'Book on Recreation.gov'
+                : booking.kind === 'fcfs'
+                  ? 'View on Recreation.gov'
+                  : 'Check on Recreation.gov'}{' '}
+              <Icon boxSize={4}><LuExternalLink /></Icon>
+            </a>
           </Button>
         ) : null}
         <Button variant="outline" disabled title="Cancellation alerts arrive with availability (coming soon)">Set a Camp Watch (soon)</Button>

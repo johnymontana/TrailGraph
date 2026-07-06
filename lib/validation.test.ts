@@ -72,6 +72,17 @@ describe('TripActionSchema', () => {
     expect(TripActionSchema.safeParse({ op: 'reorder', orderedStopIds: Array(201).fill('x') }).success).toBe(false);
     expect(TripActionSchema.safeParse({ op: 'addStop', stop: { kind: 'spaceship' } }).success).toBe(false);
   });
+
+  it('accepts every setOrigin form and bounds its payloads (ADR-074)', () => {
+    expect(TripActionSchema.safeParse({ op: 'setOrigin', place: 'Bozeman, MT' }).success).toBe(true);
+    expect(TripActionSchema.safeParse({ op: 'setOrigin', origin: { latitude: 45.6, longitude: -111, label: 'Bozeman' } }).success).toBe(true);
+    expect(TripActionSchema.safeParse({ op: 'setOrigin', clearOrigin: true }).success).toBe(true);
+    expect(TripActionSchema.safeParse({ op: 'setOrigin', returnToOrigin: false }).success).toBe(true);
+    // Bounds: place length, coordinate ranges.
+    expect(TripActionSchema.safeParse({ op: 'setOrigin', place: 'x'.repeat(201) }).success).toBe(false);
+    expect(TripActionSchema.safeParse({ op: 'setOrigin', origin: { latitude: 91, longitude: 0 } }).success).toBe(false);
+    expect(TripActionSchema.safeParse({ op: 'setOrigin', origin: { latitude: 0, longitude: 181 } }).success).toBe(false);
+  });
 });
 
 describe('MemoryActionSchema', () => {

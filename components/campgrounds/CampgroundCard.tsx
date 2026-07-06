@@ -101,7 +101,8 @@ export function CampgroundCard({
   availability?: CampAvailabilityChip;
 }) {
   const bar = AGENCY_COLOR[cg.agency ?? ''] ?? 'border.emphasized';
-  const agencyLabel = AGENCY_LABEL[cg.agency ?? ''] ?? cg.agency ?? 'Campground';
+  // No badge when the agency is unknown — a generic "Campground" chip is noise next to the card title.
+  const agencyLabel = AGENCY_LABEL[cg.agency ?? ''] ?? cg.agency ?? null;
   const where = cg.parkName ?? cg.recAreaName ?? null;
   const confidence = cg.dataConfidence ?? (cg.source === 'nps+ridb' ? 'high' : 'medium');
   const sourceLabel = SOURCE_LABEL[cg.source] ?? 'NPS';
@@ -115,10 +116,14 @@ export function CampgroundCard({
           <Card.Body p={4} gap={2.5}>
             <Stack gap={0.5} minW={0}>
               <HStack justify="space-between" align="start" gap={2}>
-                <Text fontFamily="heading" fontWeight="semibold" lineClamp={1}>
+                {/* Two lines before truncating — "Fishing Bridge RV Park" / "Gallatin Dispersed Area"
+                    were clamping to "Fishing Bridge…" with plenty of card height to spare. */}
+                <Text fontFamily="heading" fontWeight="semibold" lineClamp={2}>
                   {cg.name}
                 </Text>
-                <Badge variant="subtle" colorPalette="trail" flexShrink={0}>{agencyLabel}</Badge>
+                {agencyLabel ? (
+                  <Badge variant="subtle" colorPalette="trail" flexShrink={0}>{agencyLabel}</Badge>
+                ) : null}
               </HStack>
               {where ? (
                 <HStack gap={1} color="fg.muted" fontSize="xs" minW={0}>
