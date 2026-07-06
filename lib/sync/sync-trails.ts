@@ -7,6 +7,7 @@ import { fetchParkTrails } from '../datasources/nps-trails';
 import { putParkTrails } from '../blob-trails';
 import { aggregateTrails } from './trail-aggregate';
 import { upsertTrails } from './upserts';
+import { makeHeartbeat } from './heartbeat';
 
 /**
  * sync-trails (ADR-066/067). Per park: fetch NPS GIS centerlines, aggregate into named `:Trail` nodes,
@@ -28,8 +29,17 @@ export async function syncTrails(): Promise<Record<string, number>> {
   let parksWithTrails = 0;
   let parksSkipped = 0;
   let parksErrored = 0;
+  let parkIdx = 0;
+  const heartbeat = makeHeartbeat('sync-trails');
+  heartbeat(() => `starting: ${parks.length} parks to crawl (NPS GIS → :Trail + Blob)`, true);
 
   for (const { parkCode, hash, geoUrl: existingGeoUrl } of parks) {
+    parkIdx += 1;
+    heartbeat(
+      () =>
+        `park ${parkIdx}/${parks.length} (${parkCode}): ${trails} trails upserted, ` +
+        `${parksWithTrails} parks synced, ${parksSkipped} unchanged${parksErrored ? `, ${parksErrored} errored` : ''}`,
+    );
     try {
       const features = await fetchParkTrails(parkCode);
       if (features.length === 0) continue;

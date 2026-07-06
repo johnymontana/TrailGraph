@@ -11,6 +11,7 @@ import {
   type ElevationPoint,
 } from '../datasources/elevation';
 import { gradeTrail } from './trail-difficulty';
+import { makeHeartbeat } from './heartbeat';
 
 /**
  * derive-trail-elevation (ADR-068/069). Reads each park's trail geometry from Blob, resamples the polyline,
@@ -106,6 +107,7 @@ export async function deriveTrailElevation(): Promise<Record<string, number>> {
   if (!sampler) return { skipped: 1 };
   const spacing = Number(process.env.TRAIL_ELEV_SPACING_M) || 30;
   const maxSamples = Number(process.env.TRAIL_ELEV_MAX_SAMPLES) || Infinity;
+  const throttleMs = parseThrottleMs(process.env.TRAIL_ELEV_THROTTLE_MS);
 
   const parks = await readGraph<{ parkCode: string; url: string | null }>(
     `MATCH (p:Park) WHERE p.trailsGeoUrl IS NOT NULL
@@ -116,8 +118,19 @@ export async function deriveTrailElevation(): Promise<Record<string, number>> {
   let requested = 0;
   let budgetHit = 0;
   let rateLimited = false;
+  let noData = 0; // null samples (failed/no-coverage batches degrade to nulls — high counts mean the API is not answering)
+  let parkIdx = 0;
+  const heartbeat = makeHeartbeat('elevation');
+  const startedAt = Date.now();
+  heartbeat(
+    () =>
+      `starting: ${parks.length} parks to scan (spacing ${spacing}m, throttle ${throttleMs}ms, ` +
+      `budget ${Number.isFinite(maxSamples) ? `${maxSamples} samples` : 'unlimited'})`,
+    true,
+  );
 
   for (const { parkCode, url } of parks) {
+    parkIdx += 1;
     if (requested >= maxSamples) {
       budgetHit = 1;
       break;
@@ -149,6 +162,15 @@ export async function deriveTrailElevation(): Promise<Record<string, number>> {
           const samplePts = resamplePolyline(line, spacing);
           requested += samplePts.length;
           const elevsM = await sampler(samplePts.map((s) => ({ lng: s.lng, lat: s.lat })));
+          for (const m of elevsM) if (m == null) noData += 1;
+          heartbeat(() => {
+            const rate = Math.round(requested / Math.max((Date.now() - startedAt) / 60_000, 0.01));
+            return (
+              `park ${parkIdx}/${parks.length} (${parkCode}): ${graded} trails graded, ` +
+              `${requested} samples (~${rate}/min${Number.isFinite(maxSamples) ? `, ${Math.round((requested / maxSamples) * 100)}% of budget` : ''})` +
+              (noData ? `, ${noData} no-data` : '')
+            );
+          });
           const seg: ElevationPoint[] = [];
           for (let i = 0; i < samplePts.length; i++) {
             const m = elevsM[i];
@@ -171,6 +193,7 @@ export async function deriveTrailElevation(): Promise<Record<string, number>> {
         // and never retried). Stop the crawl here; the next run resumes from this trail.
         if (e instanceof ElevationRateLimitError) {
           rateLimited = true;
+          heartbeat(() => `HTTP 429 at park ${parkIdx}/${parks.length} (${parkCode}) — stopping crawl; re-run to resume`, true);
           break;
         }
         throw e;
@@ -223,9 +246,14 @@ export async function deriveTrailElevation(): Promise<Record<string, number>> {
 
     // Persist this park's already-graded features even if we're about to stop (their Blob profiles + graph
     // scalars are complete); the trail that hit the 429 was left ungraded, so it's retried next run.
-    if (changed) await putParkTrails(parkCode, fc as FeatureCollection);
+    if (changed) {
+      await putParkTrails(parkCode, fc as FeatureCollection);
+      heartbeat(() => `${parkCode} done (park ${parkIdx}/${parks.length}): ${graded} trails graded total`, true);
+    }
     if (rateLimited) break;
   }
 
+  if (budgetHit) heartbeat(() => `sample budget (${maxSamples}) reached at park ${parkIdx}/${parks.length} — re-run to resume`, true);
+  heartbeat(() => `finished: ${graded} trails graded, ${requested} samples, ${noData} no-data`, true);
   return { graded, requested, budgetHit, rateLimited: rateLimited ? 1 : 0 };
 }

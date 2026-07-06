@@ -21,8 +21,11 @@ async function embedLabeledNodes<R extends { key: string; hash: string | null }>
       return { key: r.key, text, hash: contentHash(text), prev: r.hash };
     })
     .filter((r) => r.text.trim().length > 0 && r.hash !== r.prev);
+  if (stale.length) console.log(`[embed] ${label}: ${stale.length} stale of ${rows.length} (${Math.ceil(stale.length / batchSize)} batches)`);
 
   let embedded = 0;
+  const startedAt = Date.now();
+  let lastLogAt = startedAt;
   for (let i = 0; i < stale.length; i += batchSize) {
     const batch = stale.slice(i, i + batchSize);
     const vectors = await embed(batch.map((b) => b.text));
@@ -36,7 +39,14 @@ async function embedLabeledNodes<R extends { key: string; hash: string | null }>
       { rows: batch.map((b, k) => ({ key: b.key, vector: vectors[k], hash: b.hash })) },
     );
     embedded += batch.length;
+    // Throttled progress for large backfills (~19k articles / ~9k trails run for many minutes silently).
+    if (Date.now() - lastLogAt >= 15_000) {
+      lastLogAt = Date.now();
+      const perMin = Math.round(embedded / ((Date.now() - startedAt) / 60_000));
+      console.log(`[embed] ${label}: ${embedded}/${stale.length} (~${perMin}/min)`);
+    }
   }
+  if (stale.length) console.log(`[embed] ${label}: done — ${embedded} embedded, ${rows.length - stale.length} unchanged`);
   return { embedded, skipped: rows.length - stale.length };
 }
 
