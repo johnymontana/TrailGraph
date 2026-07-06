@@ -74,10 +74,14 @@ export async function searchParks(opts: {
   firstCome?: boolean;
   groupSites?: boolean;
   region?: string;
+  // Distance-from-home sort (user-feedback iteration): pass the saved home point to order results by
+  // proximity (located parks first). Display distance is computed by the caller from the returned lat/lng.
+  home?: { latitude: number; longitude: number };
+  sort?: 'default' | 'home';
   limit?: number;
   offset?: number;
 }): Promise<{ items: ParkSummary[]; total: number }> {
-  const { q, stateCode, activity, topic, amenity, designation, darkSky, feeFree, evParking, hookups, firstCome, groupSites, region, limit = 24, offset = 0 } = opts;
+  const { q, stateCode, activity, topic, amenity, designation, darkSky, feeFree, evParking, hookups, firstCome, groupSites, region, home, sort, limit = 24, offset = 0 } = opts;
   const where: string[] = [];
   if (stateCode) where.push('(p)-[:LOCATED_IN]->(:State {code:$stateCode})');
   if (activity) where.push('(p)-[:OFFERS]->(:Activity {name:$activity})');
@@ -103,7 +107,13 @@ export async function searchParks(opts: {
   const source = ftq
     ? `CALL db.index.fulltext.queryNodes('park_fulltext', $q) YIELD node AS p, score ${whereClause}`
     : `MATCH (p:Park) ${whereClause} WITH p, 0.0 AS score`;
-  const order = ftq ? 'ORDER BY score DESC, name ASC' : 'ORDER BY name ASC';
+  const order =
+    sort === 'home' && home
+      ? // Located parks by distance from home; unlocated ones last (point.distance on a null location is null).
+        'ORDER BY CASE WHEN p.location IS NULL THEN 1 ELSE 0 END ASC, point.distance(p.location, point({latitude:$homeLat, longitude:$homeLng})) ASC'
+      : ftq
+        ? 'ORDER BY score DESC, name ASC'
+        : 'ORDER BY name ASC';
 
   const params = {
     q: ftq || null,
@@ -113,6 +123,8 @@ export async function searchParks(opts: {
     amenity: amenity ?? null,
     designation: designation ?? null,
     region: region ?? null,
+    homeLat: home?.latitude ?? null,
+    homeLng: home?.longitude ?? null,
     limit,
     offset,
   };

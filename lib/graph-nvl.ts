@@ -241,6 +241,11 @@ export function contextToNvl(memory: UserMemory): { nodes: NvlNode[]; rels: NvlR
     addNode(id, parts.join(' · ') || 'trail prefs');
     addEdge(id, 'PREFERS_TRAIL');
   }
+  if (memory.home.label) {
+    const id = `${CONTEXT_PREFIX}Home:home`;
+    addNode(id, memory.home.label);
+    addEdge(id, 'LIVES_AT');
+  }
   for (const [list, rel] of [
     [memory.trailHistory.saved, 'SAVED'],
     [memory.trailHistory.wishlisted, 'WISHLISTED'],

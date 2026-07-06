@@ -125,7 +125,8 @@ export function MemoryList({ initial }: { initial: UserMemory }) {
           ) : null}
         </HStack>
         <Text fontSize="xs" color="fg.muted" mb={3}>
-          Durable constraints that apply to <strong>every</strong> trip the ranger plans. A companion&apos;s
+          {/* {' '} is deliberate — the compiled JSX drops the plain space after </strong> here. */}
+          Durable constraints that apply to <strong>every</strong>{' '}trip the ranger plans. A companion&apos;s
           one-trip need isn&apos;t saved here — just tell the ranger it&apos;s only for that trip.
         </Text>
         <Stack gap={3}>

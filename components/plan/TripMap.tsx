@@ -7,16 +7,17 @@ import { LuPlay, LuSquare } from 'react-icons/lu';
 import { mapStyle, US_CENTER, registerMapProtocols, attachBasemapFallback, enableTerrain, disableTerrain, terrainConfigured } from '../../lib/mapStyle';
 import { useColorMode } from '../ui/color-mode';
 import { brandColors } from '../../lib/brandColors';
-import { renderTripOverlay, prefersReducedMotion, type TripMapStop } from '../../lib/trip-map-render';
+import { renderTripOverlay, prefersReducedMotion, type TripMapStop, type TripMapOrigin } from '../../lib/trip-map-render';
 import { runFlyThrough, type FlyLeg } from '../../lib/fly-through';
 
 /** Itinerary overlay (B4): numbered stop markers + a route line for the selected trip. */
 export type { TripMapStop };
 
-export function TripMap({ stops }: { stops: TripMapStop[] }) {
+export function TripMap({ stops, origin }: { stops: TripMapStop[]; origin?: TripMapOrigin | null }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
   const stopsRef = useRef(stops);
+  const originRef = useRef<TripMapOrigin | null>(origin ?? null);
   const markersRef = useRef<MlMarker[]>([]);
   const drawRef = useRef<{ stop: () => void } | null>(null);
   const flyAbortRef = useRef<AbortController | null>(null);
@@ -24,21 +25,27 @@ export function TripMap({ stops }: { stops: TripMapStop[] }) {
   const c = brandColors(colorMode);
   const [playing, setPlaying] = useState(false);
   stopsRef.current = stops;
+  originRef.current = origin ?? null;
 
   useEffect(() => {
-    if (!ref.current) return;
+    const container = ref.current;
+    if (!container) return;
     registerMapProtocols();
     let map: MlMap;
     try {
-      map = new maplibregl.Map({ container: ref.current, style: mapStyle(colorMode === 'dark' ? 'dark' : 'light'), center: US_CENTER, zoom: 3 });
+      map = new maplibregl.Map({ container, style: mapStyle(colorMode === 'dark' ? 'dark' : 'light'), center: US_CENTER, zoom: 3 });
       attachBasemapFallback(map);
     } catch (err) {
       console.warn('[TripMap] map unavailable (WebGL?):', (err as Error).message);
       return;
     }
     mapRef.current = map;
-    map.on('load', () => renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, true));
+    map.on('load', () => renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, true, true, originRef.current));
+    // Keep the GL canvas in sync with container size changes (maplibre only tracks window resize).
+    const ro = new ResizeObserver(() => mapRef.current?.resize());
+    ro.observe(container);
     return () => {
+      ro.disconnect();
       flyAbortRef.current?.abort();
       drawRef.current?.stop();
       markersRef.current.forEach((m) => m.remove());
@@ -50,11 +57,17 @@ export function TripMap({ stops }: { stops: TripMapStop[] }) {
   }, [colorMode]);
 
   // Re-render markers/line when stops change — and re-draw the route so the plan visibly assembles.
+  // If the style is momentarily not loaded (terrain/style reload), retry on idle instead of dropping the
+  // render (which left new stops invisible until the next map interaction).
   useEffect(() => {
     const map = mapRef.current;
-    if (map && map.isStyleLoaded()) renderTripOverlay(map, stops, c, markersRef, drawRef, true);
+    if (!map) return;
+    const render = () => renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, true, true, originRef.current);
+    if (map.isStyleLoaded()) render();
+    else map.once('idle', render);
+    return () => { map.off('idle', render); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stops]);
+  }, [stops, origin]);
 
   const located: FlyLeg[] = stops
     .filter((s) => s.lat != null && s.lng != null)
@@ -76,7 +89,7 @@ export function TripMap({ stops }: { stops: TripMapStop[] }) {
       if (mapRef.current === map) {
         if (hadTerrain) disableTerrain(map);
         map.easeTo({ pitch: 0, bearing: 0, duration: 600 }); // back to flat
-        renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, false);
+        renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, false, true, originRef.current);
       }
       if (flyAbortRef.current === ac) flyAbortRef.current = null;
       setPlaying(false);

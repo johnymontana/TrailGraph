@@ -9,7 +9,7 @@ import { useColorMode } from '../ui/color-mode';
 import { brandColors } from '../../lib/brandColors';
 import { designationKey, designationIcon, designationMatchStops, designationDefaultColor } from '../../lib/mapLegend';
 import { markerImageId, attachMarkerImages } from '../../lib/mapMarkers';
-import { renderTripOverlay, type TripMapStop } from '../../lib/trip-map-render';
+import { renderTripOverlay, type TripMapStop, type TripMapOrigin } from '../../lib/trip-map-render';
 import type { ParkPoint } from '../../lib/queries';
 import type { TripMetrics } from '../../lib/trip-lab';
 
@@ -31,12 +31,14 @@ export interface CanvasMutation {
 export function MapTripCanvas({
   tripId,
   stops,
+  origin,
   addedParkCodes,
   metrics,
   onMutated,
 }: {
   tripId: string;
   stops: TripMapStop[];
+  origin?: TripMapOrigin | null;
   addedParkCodes: string[];
   metrics?: TripMetrics | null;
   onMutated: (data: CanvasMutation) => void;
@@ -45,6 +47,7 @@ export function MapTripCanvas({
   const mapRef = useRef<MlMap | null>(null);
   const allParksRef = useRef<ParkPoint[] | null>(null);
   const stopsRef = useRef(stops);
+  const originRef = useRef<TripMapOrigin | null>(origin ?? null);
   const addedRef = useRef<Set<string>>(new Set(addedParkCodes));
   const markersRef = useRef<MlMarker[]>([]);
   const drawRef = useRef<{ stop: () => void } | null>(null);
@@ -58,6 +61,7 @@ export function MapTripCanvas({
   const [note, setNote] = useState<string | null>(null);
 
   stopsRef.current = stops;
+  originRef.current = origin ?? null;
   tripIdRef.current = tripId;
   onMutatedRef.current = onMutated;
   addedRef.current = new Set(addedParkCodes);
@@ -115,19 +119,25 @@ export function MapTripCanvas({
   }
 
   useEffect(() => {
-    if (!ref.current) return;
+    const container = ref.current;
+    if (!container) return;
     registerMapProtocols();
     const ac = new AbortController();
     abortRef.current = ac;
     let map: MlMap;
     try {
-      map = new maplibregl.Map({ container: ref.current, style: mapStyle(colorMode === 'dark' ? 'dark' : 'light'), bounds: US_BOUNDS, fitBoundsOptions: { padding: 24 } });
+      map = new maplibregl.Map({ container, style: mapStyle(colorMode === 'dark' ? 'dark' : 'light'), bounds: US_BOUNDS, fitBoundsOptions: { padding: 24 } });
       attachBasemapFallback(map);
     } catch (err) {
       console.warn('[MapTripCanvas] map unavailable (WebGL?):', (err as Error).message);
       return;
     }
     mapRef.current = map;
+    // The builder column scrolls: when added stops first overflow it, the scrollbar narrows this container
+    // but the GL canvas keeps its old pixel size (maplibre only tracks window resize) — the "map shrinks"
+    // bug. Observe the container and resize the canvas to match.
+    const ro = new ResizeObserver(() => mapRef.current?.resize());
+    ro.observe(container);
 
     map.on('load', async () => {
       attachMarkerImages(map); // designation glyphs rendered on demand (#2d)
@@ -154,7 +164,7 @@ export function MapTripCanvas({
         const title = document.createElement('strong');
         title.textContent = props.name ?? props.parkCode;
         const sub = document.createElement('div');
-        sub.style.cssText = 'color:#777;font-size:12px;margin:2px 0 6px';
+        sub.style.cssText = 'color:var(--chakra-colors-fg-muted);font-size:12px;margin:2px 0 6px';
         sub.textContent = props.designation ?? '';
         const btn = document.createElement('button');
         btn.textContent = 'Add to trip';
@@ -187,15 +197,17 @@ export function MapTripCanvas({
       }
       if (ac.signal.aborted) return; // the map may have been removed during the await — never touch it
       applyParks(map);
-      renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, true, true); // frame existing stops on open
+      renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, true, true, originRef.current); // frame existing stops on open
       framedTripRef.current = tripIdRef.current;
     });
 
     return () => {
+      ro.disconnect();
       drawRef.current?.stop();
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
       ac.abort();
+      mapRef.current = null;
       map.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,15 +216,23 @@ export function MapTripCanvas({
   // Re-paint the addable parks (added set changed) + redraw the route whenever the stops change.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    applyParks(map);
-    // Reframe only when the active TRIP changed (switched trips) — not when a park was added to the current
-    // one (you just clicked it, it's on-screen; yanking the camera mid-build is jarring). (#9, review MEDIUM-3)
-    const switched = framedTripRef.current !== tripId;
-    renderTripOverlay(map, stops, c, markersRef, drawRef, true, switched);
-    framedTripRef.current = tripId;
+    if (!map) return;
+    const render = () => {
+      applyParks(map);
+      // Reframe only when the active TRIP changed (switched trips) — not when a park was added to the current
+      // one (you just clicked it, it's on-screen; yanking the camera mid-build is jarring). (#9, review MEDIUM-3)
+      const switched = framedTripRef.current !== tripId;
+      renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, true, switched, originRef.current);
+      framedTripRef.current = tripIdRef.current;
+    };
+    // A stops update can land while the style is momentarily not loaded (mid style/terrain reload). The old
+    // bail-with-no-retry dropped that render until the next map interaction ("stops don't show till you move
+    // the map") — retry on the next idle instead.
+    if (map.isStyleLoaded()) render();
+    else map.once('idle', render);
+    return () => { map.off('idle', render); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stops, addedParkCodes]);
+  }, [stops, addedParkCodes, origin]);
 
   // The "Added X" / rate-limit note reads like a toast — let it auto-dismiss (and clear on unmount).
   useEffect(() => {

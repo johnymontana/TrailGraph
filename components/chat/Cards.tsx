@@ -13,6 +13,7 @@ import { seedToNvl, type SeedNode, type SeedLink } from '../../lib/graph-nvl';
 import { SourceInfo } from '../ui/SourceInfo';
 import { decodeEntities } from '../../lib/html-entities';
 import { WATCH_CAP } from '../../lib/watch-cap';
+import { bookingSignal, BOOKING_BADGE_LABEL, BOOKING_PALETTE } from '../../lib/camp-booking';
 
 /** Renders a tool's `{kind,data}` output as a structured card (ADR-013, D5). Graph-grounded only.
  * `onAnswer` is passed only for interactive cards (the `question_card`) and only on the latest turn — it
@@ -835,6 +836,10 @@ interface CampgroundCardView {
   parkName?: string | null;
   recAreaName?: string | null;
   totalSites?: number | null;
+  reservable?: boolean | null;
+  fcfs?: boolean | null;
+  sitesReservable?: number | null;
+  sitesFirstCome?: number | null;
   free?: boolean;
   feeUSD?: number | null;
   hasHookups?: boolean;
@@ -849,11 +854,23 @@ const AGENCY_BADGE: Record<string, string> = { NPS: 'pine', USFS: 'green', BLM: 
 function campMetaLine(c: CampgroundCardView): string {
   return [
     c.totalSites != null ? `${c.totalSites} sites` : null,
+    bookingSignal(c).detail ?? null, // e.g. "42 reservable · 18 first-come"
     c.free ? 'free' : c.feeUSD != null ? `$${c.feeUSD}/night` : null,
     c.hasHookups ? (c.maxAmps ? `${c.maxAmps}A hookups` : 'hookups') : null,
   ]
     .filter(Boolean)
     .join(' · ');
+}
+
+/** Reservation-vs-first-come badge (booking clarity, user feedback). Hidden when there is no signal. */
+function BookingBadge({ c }: { c: CampgroundCardView }) {
+  const b = bookingSignal(c);
+  if (b.kind === 'unknown') return null;
+  return (
+    <Badge colorPalette={BOOKING_PALETTE[b.kind]} variant="surface" title={b.detail ?? b.label}>
+      {BOOKING_BADGE_LABEL[b.kind]}
+    </Badge>
+  );
 }
 
 /** Campground finder results in chat (find_campgrounds → campground_card). Also handles the single-campground
@@ -871,6 +888,7 @@ function CampgroundResultsCard({ data }: { data: Record<string, unknown> }) {
               <NextLink href={`/campgrounds/${encodeURIComponent(single.id)}`}>{single.name}</NextLink>
             </CLink>
             {single.agency ? <Badge colorPalette={AGENCY_BADGE[single.agency] ?? 'gray'}>{single.agency}</Badge> : null}
+            <BookingBadge c={single} />
             {single.dispersed ? <Badge colorPalette="sand" variant="surface">dispersed</Badge> : null}
           </HStack>
           {single.parkName ?? single.recAreaName ? <Text fontSize="xs" color="fg.muted">{single.parkName ?? single.recAreaName}</Text> : null}
@@ -905,6 +923,7 @@ function CampgroundResultsCard({ data }: { data: Record<string, unknown> }) {
                 <HStack gap={2} wrap="wrap">
                   <Text as="span" fontWeight="semibold" fontFamily="heading">{c.name}</Text>
                   {c.agency ? <Badge colorPalette={AGENCY_BADGE[c.agency] ?? 'gray'}>{c.agency}</Badge> : null}
+                  <BookingBadge c={c} />
                   {c.free ? <Badge colorPalette="pine" variant="surface">free</Badge> : null}
                   {c.ada ? <Badge colorPalette="sand" variant="surface">ADA</Badge> : null}
                 </HStack>

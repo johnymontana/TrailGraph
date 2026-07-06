@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readGraph, writeGraph } from './neo4j';
 import { type LatLng } from './routing';
 import { cachedDriveSegments } from './drive-cache';
-import { considerPark } from './bridges';
+import { considerPark, getHomeLocation } from './bridges';
 import { buildParkConditions, type ConditionsCardData, type TripDashboard } from './conditions';
 import { decodeEntities } from './html-entities';
 
@@ -20,6 +20,8 @@ export interface NewTrip {
   endDate?: string;
   startPoint?: LatLng & { label?: string };
   endPoint?: LatLng & { label?: string };
+  /** Route back to the origin at the end (road-trip loop). Defaults true when the trip has an origin. */
+  returnToOrigin?: boolean;
 }
 
 export interface NewStop {
@@ -39,13 +41,24 @@ async function ensureUser(userId: string) {
 
 export async function createTrip(userId: string, t: NewTrip): Promise<string> {
   await ensureUser(userId);
+  // Per-trip origin, defaulting from the durable home anchor (LIVES_AT, migration 028): unless the caller
+  // set an explicit start, new trips begin at home — overridable per trip (fly-in trips) via setTripOrigin.
+  let start = t.startPoint ?? null;
+  if (!start) {
+    const home = await getHomeLocation(userId).catch(() => null);
+    if (home) start = { latitude: home.latitude, longitude: home.longitude, label: home.label };
+  }
   const id = randomUUID();
+  // startPoint/endPoint are stored as real spatial points (a bare map param is not a legal property value).
   await writeGraph(
     `
     MATCH (u:User {userId: $userId})
     CREATE (t:Trip {id: $id, userId: $userId})
       SET t.name = $name, t.startDate = $startDate, t.endDate = $endDate,
-          t.startPoint = $startPoint, t.endPoint = $endPoint, t.createdAt = datetime()
+          t.startPoint = CASE WHEN $startPoint IS NULL THEN null ELSE point($startPoint) END,
+          t.startLabel = $startLabel, t.returnToOrigin = $returnToOrigin,
+          t.endPoint = CASE WHEN $endPoint IS NULL THEN null ELSE point($endPoint) END,
+          t.createdAt = datetime()
     MERGE (u)-[:PLANNED]->(t)
     `,
     {
@@ -54,7 +67,10 @@ export async function createTrip(userId: string, t: NewTrip): Promise<string> {
       name: decodeEntities(t.name),
       startDate: t.startDate ?? null,
       endDate: t.endDate ?? null,
-      startPoint: t.startPoint ? point(t.startPoint) : null,
+      startPoint: start ? point(start) : null,
+      startLabel: start?.label ?? null,
+      // Round trip is the road-trip default — but only meaningful once there IS an origin.
+      returnToOrigin: start ? (t.returnToOrigin ?? true) : false,
       endPoint: t.endPoint ? point(t.endPoint) : null,
     },
   );
@@ -84,12 +100,28 @@ export async function listTrips(userId: string) {
   );
 }
 
+/** The trip's start point (defaulted from home, editable per trip) + its computed drive legs. */
+export interface TripOrigin {
+  lat: number;
+  lng: number;
+  label: string | null;
+}
+export interface OriginLeg {
+  miles: number;
+  minutes: number;
+  source: string;
+}
+
 export async function getTrip(userId: string, tripId: string) {
   const rows = await readGraph<{
     id: string;
     name: string;
     startDate: string | null;
     endDate: string | null;
+    origin: TripOrigin | null;
+    returnToOrigin: boolean;
+    originLeg: OriginLeg | null;
+    returnLeg: OriginLeg | null;
     stops: StopRow[];
   }>(
     `
@@ -117,6 +149,13 @@ export async function getTrip(userId: string, tripId: string) {
                               lat: lcg.location.latitude, lng: lcg.location.longitude, nights: r.nights, date: r.date})) AS lodging
     }
     RETURN t.id AS id, t.name AS name, t.startDate AS startDate, t.endDate AS endDate,
+      CASE WHEN t.startPoint IS NULL THEN null
+           ELSE {lat: t.startPoint.latitude, lng: t.startPoint.longitude, label: t.startLabel} END AS origin,
+      coalesce(t.returnToOrigin, false) AS returnToOrigin,
+      CASE WHEN t.originMiles IS NULL THEN null
+           ELSE {miles: t.originMiles, minutes: t.originMinutes, source: t.originSource} END AS originLeg,
+      CASE WHEN t.returnMiles IS NULL THEN null
+           ELSE {miles: t.returnMiles, minutes: t.returnMinutes, source: t.returnSource} END AS returnLeg,
       collect(CASE WHEN s IS NULL THEN null ELSE {
         id: s.id, order: s.order, day: s.day, nights: s.nights, name: s.name,
         kind: s.kind,
@@ -380,12 +419,42 @@ async function renumber(userId: string, tripId: string) {
   );
 }
 
-/** Recompute :DRIVE_TO edges between consecutive stops via the RoutingGateway (ADR-004). */
+/**
+ * Set / clear the trip's origin and round-trip flag (user-feedback iteration). `origin: null` clears it;
+ * `origin: undefined` leaves the point untouched (toggle-only update). Recomputes the origin legs.
+ */
+export async function setTripOrigin(
+  userId: string,
+  tripId: string,
+  opts: { origin?: (LatLng & { label?: string }) | null; returnToOrigin?: boolean },
+): Promise<boolean> {
+  const rows = await writeGraph<{ ok: boolean }>(
+    `MATCH (t:Trip {id:$tripId, userId:$userId})
+     SET t.startPoint = CASE WHEN $clear THEN null WHEN $startPoint IS NULL THEN t.startPoint ELSE point($startPoint) END,
+         t.startLabel = CASE WHEN $clear THEN null WHEN $startPoint IS NULL THEN t.startLabel ELSE $startLabel END,
+         t.returnToOrigin = CASE WHEN $returnToOrigin IS NULL THEN coalesce(t.returnToOrigin, false) ELSE $returnToOrigin END
+     RETURN true AS ok`,
+    {
+      userId,
+      tripId,
+      clear: opts.origin === null,
+      startPoint: opts.origin ? point(opts.origin) : null,
+      startLabel: opts.origin?.label ?? null,
+      returnToOrigin: opts.returnToOrigin ?? null,
+    },
+  );
+  if (!rows.length) return false;
+  await recomputeSegments(userId, tripId);
+  return true;
+}
+
+/** Recompute :DRIVE_TO edges between consecutive stops via the RoutingGateway (ADR-004), plus the
+ *  origin legs (origin → first stop, and last stop → origin on a round trip). The origin is not a
+ *  :Stop, so its legs live as props on :Trip rather than DRIVE_TO edges. */
 export async function recomputeSegments(userId: string, tripId: string): Promise<void> {
-  const stops = (await getTrip(userId, tripId))?.stops?.filter(Boolean) as
-    | { id: string; lat: number | null; lng: number | null }[]
-    | undefined;
-  if (!stops || stops.length < 2) return;
+  const trip = await getTrip(userId, tripId);
+  if (!trip) return;
+  const stops = (trip.stops ?? []).filter(Boolean) as { id: string; lat: number | null; lng: number | null }[];
 
   // clear existing segments
   await writeGraph(
@@ -394,20 +463,49 @@ export async function recomputeSegments(userId: string, tripId: string): Promise
   );
 
   const located = stops.filter((s) => s.lat != null && s.lng != null);
-  if (located.length < 2) return;
-  const segments = await cachedDriveSegments(
-    located.map((s) => ({ latitude: s.lat as number, longitude: s.lng as number })),
-  );
-  for (const seg of segments) {
-    const from = located[seg.fromIndex];
-    const to = located[seg.toIndex];
-    await writeGraph(
-      `MATCH (a:Stop {id:$from}), (b:Stop {id:$to})
-       MERGE (a)-[d:DRIVE_TO]->(b)
-       SET d.miles = $miles, d.minutes = $minutes, d.source = $source, d.computedAt = datetime()`,
-      { from: from.id, to: to.id, miles: seg.miles, minutes: seg.minutes, source: seg.source },
+  if (located.length >= 2) {
+    const segments = await cachedDriveSegments(
+      located.map((s) => ({ latitude: s.lat as number, longitude: s.lng as number })),
     );
+    for (const seg of segments) {
+      const from = located[seg.fromIndex];
+      const to = located[seg.toIndex];
+      await writeGraph(
+        `MATCH (a:Stop {id:$from}), (b:Stop {id:$to})
+         MERGE (a)-[d:DRIVE_TO]->(b)
+         SET d.miles = $miles, d.minutes = $minutes, d.source = $source, d.computedAt = datetime()`,
+        { from: from.id, to: to.id, miles: seg.miles, minutes: seg.minutes, source: seg.source },
+      );
+    }
   }
+
+  // Origin legs — computed even for a single-stop trip (drive out from home still matters).
+  let originLeg: { miles: number; minutes: number; source: string } | null = null;
+  let returnLeg: { miles: number; minutes: number; source: string } | null = null;
+  if (trip.origin && located.length >= 1) {
+    const originPt: LatLng = { latitude: trip.origin.lat, longitude: trip.origin.lng };
+    const first = located[0];
+    const last = located[located.length - 1];
+    originLeg = (await cachedDriveSegments([originPt, { latitude: first.lat as number, longitude: first.lng as number }]))[0] ?? null;
+    if (trip.returnToOrigin) {
+      returnLeg = (await cachedDriveSegments([{ latitude: last.lat as number, longitude: last.lng as number }, originPt]))[0] ?? null;
+    }
+  }
+  await writeGraph(
+    `MATCH (t:Trip {id:$tripId, userId:$userId})
+     SET t.originMiles = $om, t.originMinutes = $omin, t.originSource = $osrc,
+         t.returnMiles = $rm, t.returnMinutes = $rmin, t.returnSource = $rsrc`,
+    {
+      userId,
+      tripId,
+      om: originLeg?.miles ?? null,
+      omin: originLeg?.minutes ?? null,
+      osrc: originLeg?.source ?? null,
+      rm: returnLeg?.miles ?? null,
+      rmin: returnLeg?.minutes ?? null,
+      rsrc: returnLeg?.source ?? null,
+    },
+  );
 }
 
 /**

@@ -13,10 +13,11 @@ import {
 } from '@chakra-ui/react';
 import NextImage from 'next/image';
 import NextLink from 'next/link';
-import { LuCalendar, LuClock, LuFootprints, LuMoon, LuStar, LuTicket, LuUsers } from 'react-icons/lu';
+import { LuCalendar, LuClock, LuFootprints, LuHouse, LuMoon, LuStar, LuTicket, LuUsers } from 'react-icons/lu';
 import { StatCard } from '../../../components/ui/stat-card';
 import { parkDetail, similarParks, nearbyParks, oftenPlannedTogether, parkGraph, peopleForPark, toursForPark, stampsForPark, eventsForPark, placesForPark, articlesForPark, parkingForPark, accessibilityScorecard, newsForPark, mediaForPark, checkOpen, lessonPlansForPark, type AccessibilityScorecard, type ParkMedia, type LessonPlanSummary } from '../../../lib/queries';
-import { getAvailability } from '../../../lib/bridges';
+import { getAvailability, getHomeLocation } from '../../../lib/bridges';
+import { greatCircleMiles } from '../../../lib/routing';
 import { darkSkyRating, monthNames, difficultyDot, getWeather, getConditions, getAstro, sqmFromBortle, type Difficulty } from '../../../lib/datasources';
 import { explainForParks } from '../../../lib/explain';
 import { getServerUserId } from '../../../lib/session';
@@ -177,6 +178,12 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
   const statesLabel = (park.states as { name: string }[]).map((s) => s.name).filter(Boolean).join(', ');
   const hours = park.operatingHours as { name: string; description: string }[];
   const openSeasons = (park.openSeasons as string[]) ?? [];
+  // Distance from the saved home (LIVES_AT anchor) — great-circle, clearly approximate, never a drive time.
+  const home = userId ? await getHomeLocation(userId).catch(() => null) : null;
+  const homeMiles =
+    home && park.lat != null && park.lng != null
+      ? Math.round(greatCircleMiles({ latitude: home.latitude, longitude: home.longitude }, { latitude: park.lat as number, longitude: park.lng as number }))
+      : null;
 
   return (
     <Box maxW="5xl" mx="auto" px={{ base: 4, md: 8 }} py={6}>
@@ -192,6 +199,9 @@ export default async function ParkPage({ params }: { params: Promise<{ parkCode:
 
       {/* "At a glance" stat row (R4 §3). */}
       <SimpleGrid minChildWidth="150px" gap={3} mb={6}>
+        {homeMiles != null ? (
+          <StatCard label="From home" value={`~${homeMiles} mi`} hint={home?.label ?? undefined} icon={LuHouse} />
+        ) : null}
         {dark ? (
           <StatCard
             label="Dark sky"

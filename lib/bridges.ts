@@ -456,6 +456,44 @@ export async function unsaveCampground(userId: string, campgroundId: string): Pr
   );
 }
 
+export interface HomeLocation {
+  latitude: number;
+  longitude: number;
+  label: string;
+  source: 'geocode' | 'geolocation';
+}
+
+/**
+ * Home location — a single per-user `(:User)-[:LIVES_AT]->(:Home {userId})` anchor (migration 028,
+ * mirrors the :TrailPrefs/:CampPrefs pattern). Durable personal data: the ranger confirms before saving
+ * (set_home_location scope rule), and /me can edit or clear it. Feeds the trip-origin default,
+ * the memory block, distance-from-home ranking, and the /map home pin.
+ */
+export async function setHomeLocation(userId: string, home: HomeLocation): Promise<void> {
+  await writeGraph(
+    `MERGE (u:User {userId:$userId})
+     MERGE (u)-[:LIVES_AT]->(h:Home {userId:$userId})
+     SET h.location = point({latitude: $latitude, longitude: $longitude}),
+         h.label = $label, h.source = $source, h.at = datetime()`,
+    { userId, latitude: home.latitude, longitude: home.longitude, label: home.label, source: home.source },
+  );
+}
+
+export async function getHomeLocation(userId: string): Promise<HomeLocation | null> {
+  const rows = await readGraph<HomeLocation>(
+    `MATCH (:User {userId:$userId})-[:LIVES_AT]->(h:Home)
+     RETURN h.location.latitude AS latitude, h.location.longitude AS longitude,
+            h.label AS label, h.source AS source`,
+    { userId },
+  );
+  const r = rows[0];
+  return r && r.latitude != null ? r : null;
+}
+
+export async function clearHomeLocation(userId: string): Promise<void> {
+  await writeGraph(`MATCH (:User {userId:$userId})-[:LIVES_AT]->(h:Home) DETACH DELETE h`, { userId });
+}
+
 /** Clear accessibility/travel constraints (the TRAVELS_WITH constraint + all REQUIRES edges). */
 export async function clearTravelConstraints(userId: string): Promise<void> {
   await writeGraph(

@@ -19,6 +19,8 @@ export interface UserMemory {
   // Camp memory (Campgrounds feature, Phase 3): preferences anchor + saved campgrounds.
   campPreferences: { rig: string | null; maxLengthFt: number | null; hookups: string | null; tentOk: boolean; ada: boolean; pets: boolean; quiet: boolean; budget: number | null };
   campHistory: { saved: { id: string; name: string }[] };
+  // Home location (migration 028): where the user lives — trip-origin default + distance-from-home.
+  home: { label: string | null; latitude: number | null; longitude: number | null };
 }
 
 /**
@@ -96,6 +98,9 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
       cpQuiet: boolean;
       cpBudget: number | null;
       campHistory: { id: string; name: string }[];
+      homeLabel: string | null;
+      homeLat: number | null;
+      homeLng: number | null;
     }
   >(
     `
@@ -129,6 +134,8 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
     OPTIONAL MATCH (u)-[:SAVED]->(sc:Campground)
     WITH u, preferences, considered, planned, con, requiredAmenities, passes, stamps, tp, trailHistory, cpr,
          [x IN collect(DISTINCT CASE WHEN sc IS NULL THEN null ELSE {id: sc.id, name: sc.name} END) WHERE x IS NOT NULL] AS campHistory
+    OPTIONAL MATCH (u)-[:LIVES_AT]->(hm:Home)
+    WITH u, preferences, considered, planned, con, requiredAmenities, passes, stamps, tp, trailHistory, cpr, campHistory, hm
     OPTIONAL MATCH (u)-[av:AVAILABLE]->(:Season)
     RETURN preferences, considered, planned,
            con.wheelchair AS wheelchair, con.rvMaxLengthFt AS rvMaxLengthFt, requiredAmenities, passes, stamps,
@@ -139,6 +146,7 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
            coalesce(cpr.tentOk, false) AS cpTentOk, coalesce(cpr.ada, false) AS cpAda,
            coalesce(cpr.pets, false) AS cpPets, coalesce(cpr.quiet, false) AS cpQuiet, cpr.budget AS cpBudget,
            campHistory,
+           hm.label AS homeLabel, hm.location.latitude AS homeLat, hm.location.longitude AS homeLng,
            av.start AS availStart, av.end AS availEnd
     `,
     { userId },
@@ -179,6 +187,7 @@ export async function getUserMemory(userId: string): Promise<UserMemory> {
       budget: r?.cpBudget ?? null,
     },
     campHistory: { saved: r?.campHistory ?? [] },
+    home: { label: r?.homeLabel ?? null, latitude: r?.homeLat ?? null, longitude: r?.homeLng ?? null },
   };
 }
 

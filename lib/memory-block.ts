@@ -10,6 +10,8 @@ import type { UserMemory } from './memory-graph';
 export function renderMemoryBlock(m: UserMemory): string {
   const lines: string[] = [];
 
+  if (m.home.label) lines.push(`- Home: ${m.home.label} (default trip start point)`);
+
   const prefs = m.preferences.map((p) => p.name).filter(Boolean).sort();
   if (prefs.length) lines.push(`- Prefers: ${prefs.join(', ')}`);
 

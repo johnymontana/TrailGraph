@@ -31,7 +31,10 @@ export default async function SharedTripPage({ params }: { params: Promise<{ tok
 
       {stops.some((s) => s.lat != null && s.lng != null) ? (
         <Box mb={6} borderRadius="l2" overflow="hidden" borderWidth="1px" borderColor="border">
-          <TripMap stops={stops.map((s) => ({ lat: s.lat ?? null, lng: s.lng ?? null, label: s.parkName ?? s.name ?? 'Stop', order: s.order }))} />
+          <TripMap
+            stops={stops.map((s) => ({ lat: s.lat ?? null, lng: s.lng ?? null, label: s.parkName ?? s.name ?? 'Stop', order: s.order }))}
+            origin={trip.origin ? { lat: trip.origin.lat, lng: trip.origin.lng, label: trip.origin.label, roundTrip: trip.returnToOrigin ?? false } : null}
+          />
         </Box>
       ) : null}
 

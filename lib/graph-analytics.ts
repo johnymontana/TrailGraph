@@ -64,7 +64,10 @@ export async function ensureNearProjection(): Promise<boolean> {
   if (!(await gdsAvailable())) return false;
   const r = await readGraph<{ exists: boolean }>('CALL gds.graph.exists($name) YIELD exists RETURN exists', { name: NEAR_GRAPH });
   if (r[0]?.exists) return true;
-  const has = await readGraph<{ has: boolean }>('RETURN EXISTS { ()-[:NEAR]->() } AS has');
+  // Park→Park ONLY: the Campgrounds feature also uses NEAR for (:Campground)-[:NEAR]->(:Park), which the
+  // Park-scoped native projection excludes — an untyped check here would "succeed" into an EMPTY near graph
+  // (no fallback to the topical path) whenever camp edges exist but deriveNear hasn't run.
+  const has = await readGraph<{ has: boolean }>('RETURN EXISTS { (:Park)-[:NEAR]->(:Park) } AS has');
   if (!has[0]?.has) return false;
   await projectNear();
   return true;

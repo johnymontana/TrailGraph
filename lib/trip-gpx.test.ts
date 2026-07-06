@@ -48,4 +48,32 @@ describe('tripToGpx (ADR-048)', () => {
     expect((gpx.match(/<wpt /g) ?? []).length).toBe(1);
     expect((gpx.match(/<trkpt /g) ?? []).length).toBe(1);
   });
+
+  // Trip origin (ADR-074): a ⌂ start waypoint + origin-extended route legs.
+  it('prepends the origin waypoint and leg, and closes the loop on a round trip', () => {
+    const gpx = tripToGpx(
+      trip({ origin: { lat: 45.6, lng: -111.0, label: 'Bozeman, MT' }, returnToOrigin: true }),
+      { time: TIME },
+    );
+    expect(gpx).toContain('⌂ Bozeman, MT');
+    expect(gpx).toContain('Round trip — the route returns here.');
+    // Track: origin + 2 located stops + origin again = 4 points.
+    expect((gpx.match(/<trkpt /g) ?? []).length).toBe(4);
+    // The first and last track points are the origin.
+    const pts = [...gpx.matchAll(/<trkpt lat="([^"]+)" lon="([^"]+)"/g)].map((m) => [Number(m[1]), Number(m[2])]);
+    expect(pts[0]).toEqual([45.6, -111]);
+    expect(pts[pts.length - 1]).toEqual([45.6, -111]);
+  });
+
+  it('adds only the start leg when returnToOrigin is off', () => {
+    const gpx = tripToGpx(trip({ origin: { lat: 45.6, lng: -111.0, label: 'Bozeman, MT' }, returnToOrigin: false }), { time: TIME });
+    expect((gpx.match(/<trkpt /g) ?? []).length).toBe(3); // origin + 2 stops, no closing point
+    expect(gpx).not.toContain('Round trip');
+  });
+
+  it('ignores the origin when the trip has no located stops (no phantom one-point route)', () => {
+    const gpx = tripToGpx(trip({ origin: { lat: 45.6, lng: -111.0, label: 'Bozeman, MT' }, returnToOrigin: true, stops: [] }), { time: TIME });
+    expect(gpx).not.toContain('⌂');
+    expect((gpx.match(/<trkpt /g) ?? []).length).toBe(0);
+  });
 });

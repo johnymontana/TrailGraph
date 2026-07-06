@@ -4,6 +4,7 @@ import NextLink from 'next/link';
 import { notFound } from 'next/navigation';
 import {
   LuArrowLeft,
+  LuCalendarCheck,
   LuMapPin,
   LuPlug,
   LuDollarSign,
@@ -19,6 +20,7 @@ import {
   LuTruck,
 } from 'react-icons/lu';
 import { campgroundDetail, campsitesForCampground } from '../../../lib/campgrounds';
+import { bookingSignal, BOOKING_PALETTE } from '../../../lib/camp-booking';
 import { getWeather } from '../../../lib/datasources/weather';
 import { recreationUrl } from '../../../lib/datasources/recreation';
 
@@ -53,6 +55,7 @@ export default async function CampgroundDetailPage({ params }: { params: Promise
   ]);
 
   const bookUrl = cg.reservationUrl ?? (cg.ridbId ? recreationUrl(cg.ridbId) : null);
+  const booking = bookingSignal(cg); // the plain-English "reservation vs first-come" answer
   const agencyLabel = cg.agencyName ?? AGENCY_LABEL[cg.agency ?? ''] ?? 'Campground';
   const where = cg.parkName ?? cg.recAreaName ?? null;
   const confidence = cg.dataConfidence ?? (cg.source === 'nps+ridb' ? 'high' : 'medium');
@@ -138,11 +141,45 @@ export default async function CampgroundDetailPage({ params }: { params: Promise
         {cg.dispersed ? <Badge colorPalette="trail" variant="subtle" gap={1}><Icon boxSize={3}><LuTentTree /></Icon> Dispersed</Badge> : null}
       </HStack>
 
-      {/* CTAs */}
+      {/* Booking clarity — the plain-English "do I reserve or just show up?" callout (user feedback). */}
+      <Box
+        colorPalette={BOOKING_PALETTE[booking.kind]}
+        borderWidth="1px"
+        borderColor="colorPalette.muted"
+        borderLeftWidth="4px"
+        borderLeftColor="colorPalette.solid"
+        borderRadius="md"
+        bg="colorPalette.subtle"
+        p={4}
+        mb={5}
+      >
+        <HStack gap={2} align="start">
+          <Icon boxSize={4} mt={0.5} color="colorPalette.fg">
+            {booking.kind === 'fcfs' ? <LuTentTree /> : booking.kind === 'unknown' ? <LuTriangleAlert /> : <LuCalendarCheck />}
+          </Icon>
+          <Stack gap={0.5}>
+            <Text fontWeight="bold" fontSize="sm" color="colorPalette.fg">{booking.label}</Text>
+            {booking.detail ? <Text fontSize="sm">{booking.detail}</Text> : null}
+            {booking.kind === 'fcfs' ? (
+              <Text fontSize="sm">No reservations — arrive early to claim a site.</Text>
+            ) : null}
+          </Stack>
+        </HStack>
+      </Box>
+
+      {/* CTAs — ONE booking action (the callout above stays informational), labeled to match the booking
+          kind: "Book" would contradict a first-come or unknown-booking campground. */}
       <HStack gap={3} flexWrap="wrap" mb={6}>
         {bookUrl ? (
           <Button asChild colorPalette="pine">
-            <a href={bookUrl} target="_blank" rel="noopener noreferrer">Book on Recreation.gov <Icon boxSize={4}><LuExternalLink /></Icon></a>
+            <a href={bookUrl} target="_blank" rel="noopener noreferrer">
+              {booking.kind === 'reservation' || booking.kind === 'mixed'
+                ? 'Book on Recreation.gov'
+                : booking.kind === 'fcfs'
+                  ? 'View on Recreation.gov'
+                  : 'Check on Recreation.gov'}{' '}
+              <Icon boxSize={4}><LuExternalLink /></Icon>
+            </a>
           </Button>
         ) : null}
         <Button variant="outline" disabled title="Cancellation alerts arrive with availability (coming soon)">Set a Camp Watch (soon)</Button>
@@ -176,9 +213,12 @@ export default async function CampgroundDetailPage({ params }: { params: Promise
                   <Text flex="0 0 70px">{s.maxRvLengthFt ? `${s.maxRvLengthFt} ft` : '—'}</Text>
                   <Text flex="0 0 70px">{s.electricAmps ? `${s.electricAmps}A` : '—'}</Text>
                   <HStack flex="1" gap={1.5} flexWrap="wrap" fontSize="xs" color="fg.muted">
+                    {s.maxPeople != null ? <Text>up to {s.maxPeople} people</Text> : null}
                     {s.hasWater ? <Text>water</Text> : null}
                     {s.hasSewer ? <Text>sewer</Text> : null}
                     {s.pullThrough ? <Text>pull-through</Text> : null}
+                    {s.campfireAllowed != null ? <Text>{s.campfireAllowed ? 'campfire ok' : 'no campfires'}</Text> : null}
+                    {s.shade ? <Text>shade</Text> : null}
                     {s.ada ? <Text>ADA</Text> : null}
                     {s.reservable ? <Text>reservable</Text> : <Text>first-come</Text>}
                   </HStack>

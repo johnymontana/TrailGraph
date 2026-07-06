@@ -19,7 +19,8 @@ import { LuChevronLeft, LuChevronRight, LuSearch, LuTelescope } from 'react-icon
 import { searchParks, facets } from '../../lib/queries';
 import { forYou } from '../../lib/recommend';
 import { getServerUserId } from '../../lib/session';
-import { getTravelConstraints } from '../../lib/bridges';
+import { getTravelConstraints, getHomeLocation } from '../../lib/bridges';
+import { greatCircleMiles } from '../../lib/routing';
 import { ParkCard } from '../../components/ParkCard';
 import { RankPanel } from '../../components/explore/RankPanel';
 import { WhyThisPark } from '../../components/parks/WhyThisPark';
@@ -44,6 +45,8 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
   const userId = await getServerUserId();
   const pageSize = 24;
   const page = Math.max(1, Number(sp.page) || 1);
+  // Saved home (LIVES_AT anchor) unlocks the distance-from-home sort + the "~N mi from home" card line.
+  const home = userId ? await getHomeLocation(userId).catch(() => null) : null;
   const [search, f, recs] = await Promise.all([
     searchParks({
       q: sp.q,
@@ -60,6 +63,8 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
       firstCome: sp.firstCome === '1',
       groupSites: sp.groupSites === '1',
       region: sp.region,
+      home: home ? { latitude: home.latitude, longitude: home.longitude } : undefined,
+      sort: sp.sort === 'home' && home ? 'home' : 'default',
       limit: pageSize,
       offset: (page - 1) * pageSize,
     }),
@@ -145,6 +150,18 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
               {f.regions.length > 0 ? (
                 <FacetSelect name="region" label="Region" value={sp.region} options={f.regions} />
               ) : null}
+              {home ? (
+                <Field.Root w={{ base: 'full', sm: '190px' }}>
+                  <Field.Label>Sort</Field.Label>
+                  <NativeSelect.Root>
+                    <NativeSelect.Field name="sort" defaultValue={sp.sort ?? ''}>
+                      <option value="">Name</option>
+                      <option value="home">Distance from home</option>
+                    </NativeSelect.Field>
+                    <NativeSelect.Indicator />
+                  </NativeSelect.Root>
+                </Field.Root>
+              ) : null}
               <Button type="submit" colorPalette="pine">
                 Apply
               </Button>
@@ -193,9 +210,16 @@ export default async function ExplorePage({ searchParams }: { searchParams: Prom
           </EmptyState>
         ) : (
           <>
-            <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={5}>
+            <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={5} data-testid="explore-results">
               {results.map((p) => (
-                <ParkCard key={p.parkCode} park={p} />
+                <Box key={p.parkCode}>
+                  <ParkCard park={p} />
+                  {home && p.lat != null && p.lng != null ? (
+                    <Text fontSize="xs" color="fg.muted" mt={1.5}>
+                      ~{Math.round(greatCircleMiles({ latitude: home.latitude, longitude: home.longitude }, { latitude: p.lat, longitude: p.lng }))} mi from home
+                    </Text>
+                  ) : null}
+                </Box>
               ))}
             </SimpleGrid>
             {hasPrev || hasNext ? (

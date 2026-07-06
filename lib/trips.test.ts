@@ -9,10 +9,18 @@ vi.mock('./neo4j', () => ({
   writeGraph: (...a: unknown[]) => writeGraph(...a),
 }));
 vi.mock('./routing', () => ({ routing: {} }));
-vi.mock('./bridges', () => ({ considerPark: vi.fn() }));
+const getHomeLocation = vi.fn().mockResolvedValue(null);
+vi.mock('./bridges', () => ({
+  considerPark: vi.fn(),
+  getHomeLocation: (...a: unknown[]) => getHomeLocation(...a),
+}));
 vi.mock('./conditions', () => ({ buildParkConditions: vi.fn() }));
+const cachedDriveSegments = vi.fn();
+vi.mock('./drive-cache', () => ({
+  cachedDriveSegments: (...a: unknown[]) => cachedDriveSegments(...a),
+}));
 
-import { tripCost, tripConditions, createTrip } from './trips';
+import { tripCost, tripConditions, createTrip, setTripOrigin, recomputeSegments } from './trips';
 import { buildParkConditions } from './conditions';
 
 beforeEach(() => {
@@ -72,12 +80,42 @@ describe('tripCost (P2 fees / break-even cost model)', () => {
 });
 
 describe('createTrip (R5 §2.1 — decode model HTML entities at the write boundary)', () => {
+  beforeEach(() => getHomeLocation.mockReset().mockResolvedValue(null));
+
   it('stores a real ampersand, not the double-encoded entity', async () => {
     await createTrip('u1', { name: 'Four Corners Ancestral Puebloan &amp; Dark Skies' });
     // The name write is the writeGraph call whose params carry a `name`.
     const nameCall = writeGraph.mock.calls.find((c) => (c[1] as { name?: string })?.name !== undefined);
     expect(nameCall).toBeDefined();
     expect((nameCall![1] as { name: string }).name).toBe('Four Corners Ancestral Puebloan & Dark Skies');
+  });
+
+  it('defaults the origin from the saved home location, round trip on', async () => {
+    getHomeLocation.mockResolvedValue({ latitude: 45.68, longitude: -111.04, label: 'Bozeman, MT, USA', source: 'geocode' });
+    await createTrip('u1', { name: 'Big Loop' });
+    const call = writeGraph.mock.calls.find((c) => (c[1] as { name?: string })?.name !== undefined);
+    const params = call![1] as { startPoint: unknown; startLabel: string; returnToOrigin: boolean };
+    expect(params.startPoint).toEqual({ latitude: 45.68, longitude: -111.04 });
+    expect(params.startLabel).toBe('Bozeman, MT, USA');
+    expect(params.returnToOrigin).toBe(true);
+  });
+
+  it('leaves the origin unset (no round trip) when there is no home', async () => {
+    await createTrip('u1', { name: 'No Home' });
+    const call = writeGraph.mock.calls.find((c) => (c[1] as { name?: string })?.name !== undefined);
+    const params = call![1] as { startPoint: unknown; returnToOrigin: boolean };
+    expect(params.startPoint).toBeNull();
+    expect(params.returnToOrigin).toBe(false);
+  });
+
+  it('prefers an explicit startPoint over the saved home', async () => {
+    getHomeLocation.mockResolvedValue({ latitude: 45.68, longitude: -111.04, label: 'Bozeman, MT, USA', source: 'geocode' });
+    await createTrip('u1', { name: 'Fly-in', startPoint: { latitude: 36.08, longitude: -115.15, label: 'Las Vegas, NV' }, returnToOrigin: false });
+    const call = writeGraph.mock.calls.find((c) => (c[1] as { name?: string })?.name !== undefined);
+    const params = call![1] as { startPoint: { latitude: number }; startLabel: string; returnToOrigin: boolean };
+    expect(params.startPoint.latitude).toBe(36.08);
+    expect(params.startLabel).toBe('Las Vegas, NV');
+    expect(params.returnToOrigin).toBe(false);
   });
 });
 
@@ -122,5 +160,108 @@ describe('tripConditions (Trip Dashboard aggregation, ADR-042)', () => {
     vi.mocked(buildParkConditions).mockImplementation(async (code: string) => (code === 'gone' ? null : ({ parkCode: code } as any)));
     const dash = await tripConditions('u1', 't1');
     expect(dash!.stops.map((s) => s.parkCode)).toEqual(['yell']);
+  });
+});
+
+describe('setTripOrigin (ADR-074 — per-trip origin + round-trip toggle)', () => {
+  beforeEach(() => {
+    getHomeLocation.mockReset().mockResolvedValue(null);
+    cachedDriveSegments.mockReset().mockResolvedValue([]);
+  });
+
+  it('returns false (and skips the recompute) when the trip is not the caller’s', async () => {
+    writeGraph.mockResolvedValueOnce([]); // MATCH found nothing
+    expect(await setTripOrigin('u1', 'nope', { origin: { latitude: 1, longitude: 2, label: 'X' } })).toBe(false);
+    expect(readGraph).not.toHaveBeenCalled(); // no getTrip → no recompute
+  });
+
+  it('maps origin:null to clear=true and a set origin to a point param', async () => {
+    // Call 1: the SET write. Then recomputeSegments → getTrip (readGraph, no trip → early return).
+    writeGraph.mockResolvedValueOnce([{ ok: true }]);
+    readGraph.mockResolvedValueOnce([]);
+    await setTripOrigin('u1', 't1', { origin: null, returnToOrigin: false });
+    expect(writeGraph.mock.calls[0][1]).toMatchObject({ clear: true, startPoint: null, returnToOrigin: false });
+
+    writeGraph.mockReset().mockResolvedValueOnce([{ ok: true }]);
+    readGraph.mockReset().mockResolvedValueOnce([]);
+    await setTripOrigin('u1', 't1', { origin: { latitude: 45.6, longitude: -111, label: 'Bozeman' } });
+    expect(writeGraph.mock.calls[0][1]).toMatchObject({
+      clear: false,
+      startPoint: { latitude: 45.6, longitude: -111 },
+      startLabel: 'Bozeman',
+      returnToOrigin: null, // toggle untouched
+    });
+  });
+});
+
+describe('recomputeSegments (ADR-074 — origin legs live on :Trip, DRIVE_TO stays stop-to-stop)', () => {
+  const tripRow = (over: Record<string, unknown> = {}) => [{
+    id: 't1', name: 'Loop', startDate: null, endDate: null,
+    origin: { lat: 45.6, lng: -111.0, label: 'Bozeman' },
+    returnToOrigin: true, originLeg: null, returnLeg: null,
+    stops: [
+      { id: 's1', order: 0, kind: 'park', parkName: 'Yellowstone', lat: 44.6, lng: -110.5 },
+      { id: 's2', order: 1, kind: 'park', parkName: 'Glacier', lat: 48.7, lng: -113.8 },
+    ],
+    ...over,
+  }];
+
+  beforeEach(() => {
+    cachedDriveSegments.mockReset();
+  });
+
+  it('writes stop DRIVE_TO edges plus origin + return legs on the trip', async () => {
+    readGraph.mockResolvedValueOnce(tripRow());
+    cachedDriveSegments
+      .mockResolvedValueOnce([{ fromIndex: 0, toIndex: 1, miles: 350, minutes: 330, source: 'ors' }]) // stops
+      .mockResolvedValueOnce([{ fromIndex: 0, toIndex: 1, miles: 90, minutes: 95, source: 'ors' }]) // origin→first
+      .mockResolvedValueOnce([{ fromIndex: 0, toIndex: 1, miles: 260, minutes: 250, source: 'ors' }]); // last→origin
+    await recomputeSegments('u1', 't1');
+
+    // 3 cachedDriveSegments calls: stop chain, origin leg (origin→first), return leg (last→origin).
+    expect(cachedDriveSegments).toHaveBeenCalledTimes(3);
+    expect(cachedDriveSegments.mock.calls[1][0]).toEqual([
+      { latitude: 45.6, longitude: -111.0 },
+      { latitude: 44.6, longitude: -110.5 },
+    ]);
+    expect(cachedDriveSegments.mock.calls[2][0]).toEqual([
+      { latitude: 48.7, longitude: -113.8 },
+      { latitude: 45.6, longitude: -111.0 },
+    ]);
+    // Final write persists both legs as :Trip props.
+    const legWrite = writeGraph.mock.calls.find((c) => (c[1] as { om?: number })?.om !== undefined);
+    expect(legWrite![1]).toMatchObject({ om: 90, omin: 95, osrc: 'ors', rm: 260, rmin: 250, rsrc: 'ors' });
+  });
+
+  it('skips the return leg when returnToOrigin is off, and clears legs when there is no origin', async () => {
+    readGraph.mockResolvedValueOnce(tripRow({ returnToOrigin: false }));
+    cachedDriveSegments
+      .mockResolvedValueOnce([{ fromIndex: 0, toIndex: 1, miles: 350, minutes: 330, source: 'ors' }])
+      .mockResolvedValueOnce([{ fromIndex: 0, toIndex: 1, miles: 90, minutes: 95, source: 'ors' }]);
+    await recomputeSegments('u1', 't1');
+    expect(cachedDriveSegments).toHaveBeenCalledTimes(2); // no return-leg call
+    let legWrite = writeGraph.mock.calls.find((c) => (c[1] as { om?: number })?.om !== undefined);
+    expect(legWrite![1]).toMatchObject({ om: 90, rm: null, rmin: null, rsrc: null });
+
+    writeGraph.mockClear();
+    readGraph.mockResolvedValueOnce(tripRow({ origin: null }));
+    cachedDriveSegments.mockReset().mockResolvedValueOnce([{ fromIndex: 0, toIndex: 1, miles: 350, minutes: 330, source: 'ors' }]);
+    await recomputeSegments('u1', 't1');
+    legWrite = writeGraph.mock.calls.find((c) => Object.prototype.hasOwnProperty.call(c[1] as object, 'om'));
+    expect(legWrite![1]).toMatchObject({ om: null, rm: null }); // stale legs never survive an origin clear
+  });
+
+  it('computes the origin leg even for a single-stop trip (no stop segments)', async () => {
+    readGraph.mockResolvedValueOnce(tripRow({
+      stops: [{ id: 's1', order: 0, kind: 'park', parkName: 'Yellowstone', lat: 44.6, lng: -110.5 }],
+    }));
+    cachedDriveSegments
+      .mockResolvedValueOnce([{ fromIndex: 0, toIndex: 1, miles: 90, minutes: 95, source: 'great_circle' }]) // origin→only stop
+      .mockResolvedValueOnce([{ fromIndex: 0, toIndex: 1, miles: 90, minutes: 95, source: 'great_circle' }]); // stop→origin
+    await recomputeSegments('u1', 't1');
+    // located.length < 2 → NO stop-chain call; the two calls are the origin + return legs.
+    expect(cachedDriveSegments).toHaveBeenCalledTimes(2);
+    const legWrite = writeGraph.mock.calls.find((c) => (c[1] as { om?: number })?.om !== undefined);
+    expect(legWrite![1]).toMatchObject({ om: 90, osrc: 'great_circle', rm: 90 });
   });
 });

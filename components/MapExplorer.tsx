@@ -31,7 +31,6 @@ import { conditionMatchStops, conditionDefaultColor, conditionLegend } from '../
 import { BasemapSwitcher } from './map/BasemapSwitcher';
 import { useColorMode } from './ui/color-mode';
 import { brandColors, type BrandColors } from '../lib/brandColors';
-import { pine } from '../theme/colors';
 import type { ParkPoint } from '../lib/queries';
 import { encodeMapView, type MapView } from '../lib/map-deeplink';
 import { toast } from '../lib/toast';
@@ -62,6 +61,7 @@ interface MineData {
   forYou: MinePin[];
   stamps: MinePin[];
   collective: (MinePin & { travelers: number })[];
+  home: { lat: number; lng: number; label: string | null } | null;
 }
 
 /** The feature.properties the parks source carries (baked in loadAllParks) — for applyParkFilter casts. */
@@ -79,7 +79,7 @@ const POI_ZOOM_MIN = 5;
 const MOVE_DEBOUNCE_MS = 250;
 // "Your map" mode (#6) hides the base parks and shows the personal overlay (and vice versa).
 const BASE_PARK_LAYERS = ['clusters', 'cluster-count', 'park-point', 'park-point-icon'];
-const MINE_LAYERS = ['mine-collective', 'mine-considered', 'mine-foryou', 'mine-stamps'];
+const MINE_LAYERS = ['mine-collective', 'mine-considered', 'mine-foryou', 'mine-stamps', 'mine-home', 'mine-home-label'];
 // Park boundary polygons fade in past this zoom; fetched lazily, capped per pan to bound NPS fan-out (#2c).
 const BOUNDARY_ZOOM_MIN = 7;
 const BOUNDARY_FETCH_CAP = 8;
@@ -438,6 +438,11 @@ export function MapExplorer({
     (map.getSource('mine-foryou') as GeoJSONSource | undefined)?.setData(fc(data.forYou));
     (map.getSource('mine-stamps') as GeoJSONSource | undefined)?.setData(fc(data.stamps));
     (map.getSource('mine-collective') as GeoJSONSource | undefined)?.setData(fc(data.collective));
+    (map.getSource('mine-home') as GeoJSONSource | undefined)?.setData(
+      data.home
+        ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [data.home.lng, data.home.lat] }, properties: { label: data.home.label ?? 'Home' } }] }
+        : { type: 'FeatureCollection', features: [] },
+    );
   }
   // Apply the current mode's visibility (base parks vs personal overlay); in 'mine' also (lazy-)load the data.
   function applyMode(map: MlMap) {
@@ -853,6 +858,13 @@ export function MapExplorer({
         map.addSource('mine-stamps', { type: 'geojson', data: emptyFC() });
         map.addLayer({ id: 'mine-stamps', type: 'circle', source: 'mine-stamps', layout: { visibility: 'none' },
           paint: { 'circle-radius': 6, 'circle-color': c.stamps, 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff' } });
+        // Home pin (user-feedback iteration): the LIVES_AT anchor, an orienting ⌂ in "mine" mode.
+        map.addSource('mine-home', { type: 'geojson', data: emptyFC() });
+        map.addLayer({ id: 'mine-home', type: 'circle', source: 'mine-home', layout: { visibility: 'none' },
+          paint: { 'circle-radius': 8, 'circle-color': c.trail, 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
+        map.addLayer({ id: 'mine-home-label', type: 'symbol', source: 'mine-home', layout: { visibility: 'none',
+          'text-field': '⌂', 'text-size': 11, 'text-font': ['Noto Sans Medium'], 'text-allow-overlap': true },
+          paint: { 'text-color': '#fff' } });
 
         // Ranger command-bar highlight (#7), topmost: a soft halo + a bold ring around the parks the ranger
         // surfaced, in the AI/accent tone. Non-clustered so highlights survive at any zoom (like the overlays).
@@ -911,7 +923,7 @@ export function MapExplorer({
           : p.kind === 'activity' ? `${p.weight} shared activit${p.weight === 1 ? 'y' : 'ies'}`
           : p.via ? `On the “${p.via}” journey`
           : 'On this journey';
-        new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<strong>Why connected</strong><br/><span style="color:#777">${escapeHtml(label)}</span>`).addTo(map);
+        new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<strong>Why connected</strong><br/><span style="color:var(--chakra-colors-fg-muted)">${escapeHtml(label)}</span>`).addTo(map);
       });
       for (const key of POI_ORDER) {
         // Unclustered POI point → popup.
@@ -923,9 +935,9 @@ export function MapExplorer({
           // A trailhead links to the trail detail; every other POI links to its park.
           const link =
             key === 'trails' && props.id
-              ? `<br/><a href="/trails/${encodeURIComponent(props.id)}" style="color:${pine[700]}">View trail →</a>`
+              ? `<br/><a href="/trails/${encodeURIComponent(props.id)}" style="color:var(--chakra-colors-pine-solid)">View trail →</a>`
               : props.parkCode
-                ? `<br/><a href="/parks/${encodeURIComponent(props.parkCode)}" style="color:${pine[700]}">View park →</a>`
+                ? `<br/><a href="/parks/${encodeURIComponent(props.parkCode)}" style="color:var(--chakra-colors-pine-solid)">View park →</a>`
                 : '';
           new maplibregl.Popup().setLngLat([lng, lat]).setHTML(`<strong>${escapeHtml(props.name)}</strong>${link}`).addTo(map);
           // Focusing a trailhead loads that park's trail route lines (ADR-066).
@@ -954,7 +966,7 @@ export function MapExplorer({
         const p = f.properties as { parkCode: string; name: string; designation: string };
         const [lng, lat] = (f.geometry as Point).coordinates;
         new maplibregl.Popup().setLngLat([lng, lat]).setHTML(
-          `<strong>${escapeHtml(p.name)}</strong><br/><span style="color:#777">${escapeHtml(p.designation ?? '')}</span><br/><a href="/parks/${encodeURIComponent(p.parkCode)}" style="color:${pine[700]}">View park →</a>`,
+          `<strong>${escapeHtml(p.name)}</strong><br/><span style="color:var(--chakra-colors-fg-muted)">${escapeHtml(p.designation ?? '')}</span><br/><a href="/parks/${encodeURIComponent(p.parkCode)}" style="color:var(--chakra-colors-pine-solid)">View park →</a>`,
         ).addTo(map);
       });
 
