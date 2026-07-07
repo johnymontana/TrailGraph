@@ -60,18 +60,22 @@ test('Trip Lab: fork a trip + field brief / offline pack export (ADR-056/057)', 
   await page.getByText('Yellowstone National Park').click();
   await expect(page.getByText(/1\. Yellowstone/)).toBeVisible();
 
-  // Fork → the builder switches to the "(copy)". `exact` avoids matching the "Lab Trip E2E" selector button.
-  await page.getByRole('button', { name: 'Fork', exact: true }).click();
+  // Fork lives in the "More" action menu (Plan UX Phase 0) → open it, fork, builder switches to the
+  // "(copy)". Clicking a menu item closes the menu.
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Fork', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Lab Trip E2E \(copy\)/ })).toBeVisible({ timeout: 15000 });
 
-  // Field brief + offline pack endpoints return real artifacts.
-  const briefHref = await page.getByRole('link', { name: 'Field brief' }).getAttribute('href');
+  // Field brief + offline pack endpoints return real artifacts. The anchors are menuitems in "More";
+  // reading hrefs doesn't close the menu, so one open covers both.
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  const briefHref = await page.getByRole('menuitem', { name: 'Field brief' }).getAttribute('href');
   expect(briefHref).toMatch(/\/api\/trips\/.+\/brief/);
   const brief = await page.request.get(briefHref!);
   expect(brief.status()).toBe(200);
   expect(await brief.text()).toContain('field brief');
 
-  const offlineHref = await page.getByRole('link', { name: 'Offline pack' }).getAttribute('href');
+  const offlineHref = await page.getByRole('menuitem', { name: 'Offline pack' }).getAttribute('href');
   const offline = await page.request.get(offlineHref!);
   expect(offline.status()).toBe(200);
   expect(offline.headers()['content-type']).toContain('application/zip');

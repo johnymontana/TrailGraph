@@ -29,9 +29,11 @@ test('Trip Dashboard + GPX/ICS export return valid files (ADR-042/048)', async (
   await page.getByRole('button', { name: 'Trip conditions' }).click();
   await expect(page.getByText('Crowds').first()).toBeVisible(); // Yellowstone has a seeded crowd level
 
-  // Export endpoints: fetch the anchor hrefs and assert real file bodies.
-  const gpxHref = await page.getByRole('link', { name: 'Export .gpx' }).getAttribute('href');
-  const icsHref = await page.getByRole('link', { name: 'Export .ics' }).getAttribute('href');
+  // Export endpoints: the export anchors live in the "More" action menu (Plan UX Phase 0) — open it,
+  // then fetch the hrefs and assert real file bodies. Menu items are role=menuitem, not link.
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  const gpxHref = await page.getByRole('menuitem', { name: 'Export .gpx' }).getAttribute('href');
+  const icsHref = await page.getByRole('menuitem', { name: 'Export .ics' }).getAttribute('href');
   expect(gpxHref).toMatch(/\/api\/trips\/.+\/gpx/);
   const gpx = await page.request.get(gpxHref!);
   expect(gpx.status()).toBe(200);

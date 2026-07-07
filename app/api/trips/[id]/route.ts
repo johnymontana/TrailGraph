@@ -55,23 +55,30 @@ export async function DELETE(req: Request, { params }: Ctx) {
   return Response.json({ ok: true });
 }
 
+/** Ops that never touch ORS routing: pure reads over the trip + external NPS/weather lookups. They get
+ * their own roomier budget (ADR-076) — the plan shell's cross-pane refresh multiplies read traffic
+ * (every trip open auto-fires an `alerts` POST), and reads must never eat the edit budget. */
+const READ_OPS = new Set(['alerts', 'cost', 'conditions', 'suggestDays', 'diff']);
+
 /** Sub-actions on a trip: addStop | removeStop | reorder | alerts. */
 export async function POST(req: Request, { params }: Ctx) {
   const userId = await getUserId(req);
   if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
-  // Cap trip mutations per user (audit C7): addStop/removeStop/reorder/optimize/fork each can fire an
-  // ORS routing call, so an unthrottled edit loop would burn the tight ORS free tier.
-  const rl = await rateLimit(rlUser(userId, 'tripmut'), 30, 60);
+  const { id } = await params;
+  const parsed = await parseBody(req, TripActionSchema);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
+  // Two per-user budgets (ADR-076): `tripmut` caps the ops that fire ORS routing via recomputeSegments
+  // (audit C7 — an unthrottled edit loop would burn the tight ORS free tier); `tripread` caps the
+  // read-only checks (NPS/weather cost) without letting them starve real edits.
+  const scope = READ_OPS.has(body.op) ? 'tripread' : 'tripmut';
+  const rl = await rateLimit(rlUser(userId, scope), scope === 'tripread' ? 60 : 30, 60);
   if (!rl.ok) {
     return Response.json(
       { error: 'rate_limited' },
       { status: 429, headers: { 'Retry-After': String(Math.max(1, Math.ceil((rl.resetAt - Date.now()) / 1000))) } },
     );
   }
-  const { id } = await params;
-  const parsed = await parseBody(req, TripActionSchema);
-  if (!parsed.ok) return parsed.response;
-  const body = parsed.data;
 
   switch (body.op) {
     case 'fork': {

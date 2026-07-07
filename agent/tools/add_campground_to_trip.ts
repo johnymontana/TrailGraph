@@ -37,6 +37,7 @@ export default defineTool({
     }
     const ok = await addLodgingToStop(userId, tripId, stopId, campgroundId, { date, nights });
     if (!ok) return { kind: 'campground_card', data: { error: "I couldn't add that campground to your trip." } };
-    return { kind: 'campground_card', data: { campground: cg, addedTo: { stopLabel, date } } };
+    // `addedTo.tripId` marks a CONFIRMED trip write for the chat panel's trips-changed scanner (ADR-076).
+    return { kind: 'campground_card', data: { campground: cg, addedTo: { tripId, stopLabel, date } } };
   },
 });

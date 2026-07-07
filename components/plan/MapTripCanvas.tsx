@@ -20,8 +20,17 @@ import type { TripMetrics } from '../../lib/trip-lab';
  * builder (which re-renders + fires the `trailgraph:*` events that keep the ranger chat in sync). The numbered
  * route overlay (shared with `TripMap` via `lib/trip-map-render`) redraws stop-to-stop as the plan assembles.
  *
+ * Under the plan shell (ADR-076) this is the permanent map pane, so:
+ *  • `tripId` is nullable — with no trip open the parks still render for browsing and the popup says
+ *    "Open a trip to add parks" instead of the Add button;
+ *  • maplibre construction is GATED on a non-zero container (the NvlGraph pattern): the pane can mount
+ *    `display:none` on mobile, and the constructor `US_BOUNDS` fit + load-time trip fit compute from
+ *    container size — `map.resize()` alone never recovers the camera from a 0×0 birth;
+ *  • `cooperativeGestures` is a prop: true when embedded in a scrollable column (legacy default), false
+ *    from the shell where the pane is full-bleed (matching MapExplorer).
+ *
  * Like every map here it FULLY re-creates on colorMode change, so all state lives in refs and re-applies in
- * `map.on('load')`. Trip mutations are capped 30/60s server-side (ORS cost) — a 429 surfaces as a toast.
+ * `map.on('load')`. Trip mutations are rate-capped server-side (ORS cost) — a 429 surfaces as a note.
  */
 export interface CanvasMutation {
   trip: { id: string; name: string; stops: unknown[] } | null;
@@ -35,13 +44,16 @@ export function MapTripCanvas({
   addedParkCodes,
   metrics,
   onMutated,
+  cooperativeGestures = true,
 }: {
-  tripId: string;
+  tripId: string | null;
   stops: TripMapStop[];
   origin?: TripMapOrigin | null;
   addedParkCodes: string[];
   metrics?: TripMetrics | null;
   onMutated: (data: CanvasMutation) => void;
+  /** One-finger-scroll cooperation — keep true inside scrollable columns; the shell passes false (full-bleed pane). */
+  cooperativeGestures?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
@@ -53,6 +65,7 @@ export function MapTripCanvas({
   const drawRef = useRef<{ stop: () => void } | null>(null);
   const tripIdRef = useRef(tripId);
   const framedTripRef = useRef<string | null>(null); // last trip id the camera framed — reframe only on switch
+  const pendingFrameRef = useRef(false); // a trip switched while the pane was hidden (0×0) — reframe on reveal
   const onMutatedRef = useRef(onMutated);
   const busyRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -89,7 +102,7 @@ export function MapTripCanvas({
 
   // POST addStop for a clicked park, then bubble the new trip + live metrics up to the builder (#9).
   async function addPark(parkCode: string, name: string) {
-    if (busyRef.current) return;
+    if (busyRef.current || !tripIdRef.current) return;
     busyRef.current = true;
     setNote(`Adding ${name}…`);
     try {
@@ -124,94 +137,158 @@ export function MapTripCanvas({
     registerMapProtocols();
     const ac = new AbortController();
     abortRef.current = ac;
-    let map: MlMap;
-    try {
-      map = new maplibregl.Map({ container, style: mapStyle(colorMode === 'dark' ? 'dark' : 'light'), bounds: US_BOUNDS, fitBoundsOptions: { padding: 24 } });
-      attachBasemapFallback(map);
-    } catch (err) {
-      console.warn('[MapTripCanvas] map unavailable (WebGL?):', (err as Error).message);
-      return;
-    }
-    mapRef.current = map;
-    // The builder column scrolls: when added stops first overflow it, the scrollbar narrows this container
-    // but the GL canvas keeps its old pixel size (maplibre only tracks window resize) — the "map shrinks"
-    // bug. Observe the container and resize the canvas to match.
-    const ro = new ResizeObserver(() => mapRef.current?.resize());
-    ro.observe(container);
+    let map: MlMap | null = null;
+    let disposed = false;
 
-    map.on('load', async () => {
-      attachMarkerImages(map); // designation glyphs rendered on demand (#2d)
+    // Source/layer creation, guarded so it can re-run after ANY style swap: the basemap fallback calls
+    // map.setStyle(demo) on a broken .pmtiles, which used to wipe canvas-parks permanently — the add flow
+    // died until a colorMode remount (the load-only install). MapExplorer's installLayers convention.
+    const installLayers = (m: MlMap) => {
+      if (m.getSource('canvas-parks')) return;
       const parkColorExpr = ['match', ['get', 'desigKey'], ...designationMatchStops(colorMode), designationDefaultColor(colorMode)] as unknown as ExpressionSpecification;
-      map.addSource('canvas-parks', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, cluster: true, clusterMaxZoom: 8, clusterRadius: 50 });
-      map.addLayer({ id: 'canvas-clusters', type: 'circle', source: 'canvas-parks', filter: ['has', 'point_count'],
+      m.addSource('canvas-parks', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, cluster: true, clusterMaxZoom: 8, clusterRadius: 50 });
+      m.addLayer({ id: 'canvas-clusters', type: 'circle', source: 'canvas-parks', filter: ['has', 'point_count'],
         paint: { 'circle-color': c.pine, 'circle-opacity': 0.8, 'circle-radius': ['step', ['get', 'point_count'], 15, 10, 20, 30, 26] } });
-      map.addLayer({ id: 'canvas-cluster-count', type: 'symbol', source: 'canvas-parks', filter: ['has', 'point_count'],
+      m.addLayer({ id: 'canvas-cluster-count', type: 'symbol', source: 'canvas-parks', filter: ['has', 'point_count'],
         layout: { 'text-field': '{point_count_abbreviated}', 'text-size': 12, 'text-font': ['Noto Sans Medium'] }, paint: { 'text-color': '#fff' } });
-      map.addLayer({ id: 'canvas-park', type: 'circle', source: 'canvas-parks', filter: ['!', ['has', 'point_count']],
+      m.addLayer({ id: 'canvas-park', type: 'circle', source: 'canvas-parks', filter: ['!', ['has', 'point_count']],
         paint: { 'circle-color': parkColorExpr, 'circle-radius': 6, 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff' } });
-      map.addLayer({ id: 'canvas-park-icon', type: 'symbol', source: 'canvas-parks', filter: ['!', ['has', 'point_count']],
+      m.addLayer({ id: 'canvas-park-icon', type: 'symbol', source: 'canvas-parks', filter: ['!', ['has', 'point_count']],
         layout: { 'icon-image': ['get', 'icon'], 'icon-size': 0.55, 'icon-allow-overlap': true, 'icon-ignore-placement': true } });
+    };
 
-      // Click an addable park → an "Add to trip" popup (setDOMContent so the button can carry a real handler).
-      map.on('mouseenter', 'canvas-park', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', 'canvas-park', () => { map.getCanvas().style.cursor = ''; });
-      map.on('click', 'canvas-park', (e) => {
-        const f = e.features?.[0];
-        if (!f) return;
-        const props = f.properties as { parkCode: string; name: string; designation?: string };
-        const [lng, lat] = (f.geometry as Point).coordinates;
-        const root = document.createElement('div');
-        const title = document.createElement('strong');
-        title.textContent = props.name ?? props.parkCode;
-        const sub = document.createElement('div');
-        sub.style.cssText = 'color:var(--chakra-colors-fg-muted);font-size:12px;margin:2px 0 6px';
-        sub.textContent = props.designation ?? '';
-        const btn = document.createElement('button');
-        btn.textContent = 'Add to trip';
-        btn.style.cssText = `background:${c.pine};color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer`;
-        const popup = new maplibregl.Popup({ closeButton: false }).setLngLat([lng, lat]);
-        btn.onclick = () => { addPark(props.parkCode, props.name); popup.remove(); };
-        root.append(title, sub, btn);
-        popup.setDOMContent(root).addTo(map);
-      });
-      // Cluster → zoom to expand.
-      map.on('click', 'canvas-clusters', (e) => {
-        const f = map.queryRenderedFeatures(e.point, { layers: ['canvas-clusters'] })[0];
-        if (!f) return;
-        (map.getSource('canvas-parks') as GeoJSONSource).getClusterExpansionZoom(f.properties?.cluster_id).then((zoom) =>
-          map.easeTo({ center: (f.geometry as Point).coordinates as [number, number], zoom }),
-        );
-      });
+    const init = () => {
+      if (disposed || map) return;
+      let m: MlMap;
+      try {
+        // cooperativeGestures per the prop: inside a scrollable column a bare map is a scroll trap —
+        // one-finger drags pan the map (mobile) and the wheel zooms it (desktop) instead of scrolling
+        // the pane. The shell's full-bleed pane turns it off (nothing behind the map to scroll).
+        m = new maplibregl.Map({ container, style: mapStyle(colorMode === 'dark' ? 'dark' : 'light'), bounds: US_BOUNDS, fitBoundsOptions: { padding: 24 }, cooperativeGestures });
+        attachBasemapFallback(m);
+      } catch (err) {
+        console.warn('[MapTripCanvas] map unavailable (WebGL?):', (err as Error).message);
+        return;
+      }
+      map = m;
+      mapRef.current = m;
+      let initialized = false;
 
-      // Load parks once, then paint the parks + the current route overlay.
-      if (!allParksRef.current) {
-        try {
-          const res = await fetch('/api/graph?op=parks-all', { signal: ac.signal });
-          const { parks } = (await res.json()) as { parks: ParkPoint[] };
-          allParksRef.current = parks ?? [];
-        } catch {
-          // Don't poison the cache on an abort (a colorMode swap mid-fetch) — leaving it null lets the
-          // recreated map refetch (matches MapExplorer.loadAllParks). Only a real error yields an empty set.
-          if (!ac.signal.aborted) allParksRef.current = [];
+      m.on('load', async () => {
+        attachMarkerImages(m); // styleimagemissing hook — survives setStyle image wipes (#2d)
+        installLayers(m);
+
+        // Click an addable park → an "Add to trip" popup (setDOMContent so the button can carry a real
+        // handler). With NO trip open (the shell's browse state) the popup explains instead of adding.
+        // Layer-scoped handlers attach ONCE — they survive setStyle by id; re-adding double-fires.
+        m.on('mouseenter', 'canvas-park', () => { m.getCanvas().style.cursor = 'pointer'; });
+        m.on('mouseleave', 'canvas-park', () => { m.getCanvas().style.cursor = ''; });
+        m.on('click', 'canvas-park', (e) => {
+          const f = e.features?.[0];
+          if (!f) return;
+          const props = f.properties as { parkCode: string; name: string; designation?: string };
+          const [lng, lat] = (f.geometry as Point).coordinates;
+          const root = document.createElement('div');
+          const title = document.createElement('strong');
+          title.textContent = props.name ?? props.parkCode;
+          const sub = document.createElement('div');
+          sub.style.cssText = 'color:var(--chakra-colors-fg-muted);font-size:12px;margin:2px 0 6px';
+          sub.textContent = props.designation ?? '';
+          const popup = new maplibregl.Popup({ closeButton: false }).setLngLat([lng, lat]);
+          if (tripIdRef.current) {
+            const btn = document.createElement('button');
+            btn.textContent = 'Add to trip';
+            // ≥40px tall + touch-action:manipulation — a finger-sized target with no 300ms double-tap delay.
+            btn.style.cssText = `background:${c.pine};color:#fff;border:none;border-radius:6px;padding:8px 14px;min-height:40px;font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation`;
+            btn.onclick = () => { addPark(props.parkCode, props.name); popup.remove(); };
+            root.append(title, sub, btn);
+          } else {
+            const hint = document.createElement('div');
+            hint.style.cssText = 'color:var(--chakra-colors-fg-muted);font-size:12px';
+            hint.textContent = 'Open a trip to add parks.';
+            root.append(title, sub, hint);
+          }
+          popup.setDOMContent(root).addTo(m);
+        });
+        // Cluster → zoom to expand.
+        m.on('click', 'canvas-clusters', (e) => {
+          const f = m.queryRenderedFeatures(e.point, { layers: ['canvas-clusters'] })[0];
+          if (!f) return;
+          (m.getSource('canvas-parks') as GeoJSONSource).getClusterExpansionZoom(f.properties?.cluster_id).then((zoom) =>
+            m.easeTo({ center: (f.geometry as Point).coordinates as [number, number], zoom }),
+          );
+        });
+
+        // Mark initialized BEFORE the awaited fetch: attachBasemapFallback can setStyle(demo) on a broken
+        // pmtiles host DURING this await, firing a style.load we must NOT gate off — else the wiped
+        // canvas-parks source is never reinstalled and the add flow dies until a colorMode remount.
+        initialized = true;
+
+        // Load parks once, then paint the parks + the current route overlay.
+        if (!allParksRef.current) {
+          try {
+            const res = await fetch('/api/graph?op=parks-all', { signal: ac.signal });
+            const { parks } = (await res.json()) as { parks: ParkPoint[] };
+            allParksRef.current = parks ?? [];
+          } catch {
+            // Don't poison the cache on an abort (a colorMode swap mid-fetch) — leaving it null lets the
+            // recreated map refetch (matches MapExplorer.loadAllParks). Only a real error yields an empty set.
+            if (!ac.signal.aborted) allParksRef.current = [];
+          }
+        }
+        if (ac.signal.aborted) return; // the map may have been removed during the await — never touch it
+        // A fallback setStyle may be mid-flight (style not yet loaded): its style.load handler (now
+        // un-gated) will reinstall + repaint. Painting here would throw "Style is not done loading".
+        if (!m.isStyleLoaded()) return;
+        applyParks(m);
+        renderTripOverlay(m, stopsRef.current, c, markersRef, drawRef, true, true, originRef.current); // frame existing stops on open
+        framedTripRef.current = tripIdRef.current;
+      });
+      // After a style swap (the basemap fallback), re-install the wiped source/layers + re-paint.
+      // 'style.load' also fires on the initial style — gate on `initialized` so first paint stays
+      // the load handler's job (which awaits the parks fetch + frames the camera).
+      m.on('style.load', () => {
+        if (!initialized || ac.signal.aborted) return;
+        installLayers(m);
+        applyParks(m);
+        renderTripOverlay(m, stopsRef.current, c, markersRef, drawRef, false, false, originRef.current);
+      });
+    };
+
+    // Init gate + resize in ONE observer (ADR-076, the NvlGraph non-zero-mount pattern): under the plan
+    // shell this pane can mount display:none (mobile default pane = Itinerary), and a map born at 0×0
+    // gets a degenerate camera nothing re-frames. Defer construction until the container has real size —
+    // the first tab reveal constructs against true dimensions, so the normal frame-on-open path just works.
+    if (container.clientWidth > 0 && container.clientHeight > 0) init();
+    const ro = new ResizeObserver(() => {
+      if (!map) {
+        if (container.clientWidth > 0 && container.clientHeight > 0) init();
+      } else {
+        // The pane can also narrow while visible (scrollbar appears) — maplibre only tracks window resize.
+        map.resize();
+        // Reveal after a trip switched while the pane was hidden (ADR-076): the stops effect drew the
+        // markers but deferred the camera fit (fitBounds no-ops on a 0×0 canvas) — do it now.
+        if (pendingFrameRef.current && container.clientWidth > 0 && container.clientHeight > 0 && map.isStyleLoaded()) {
+          pendingFrameRef.current = false;
+          renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, true, true, originRef.current);
+          framedTripRef.current = tripIdRef.current;
         }
       }
-      if (ac.signal.aborted) return; // the map may have been removed during the await — never touch it
-      applyParks(map);
-      renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, true, true, originRef.current); // frame existing stops on open
-      framedTripRef.current = tripIdRef.current;
     });
+    ro.observe(container);
 
     return () => {
+      disposed = true;
       ro.disconnect();
       drawRef.current?.stop();
-      markersRef.current.forEach((m) => m.remove());
+      markersRef.current.forEach((mk) => mk.remove());
       markersRef.current = [];
       ac.abort();
       mapRef.current = null;
-      map.remove();
+      map?.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [colorMode]);
+  }, [colorMode, cooperativeGestures]);
 
   // Re-paint the addable parks (added set changed) + redraw the route whenever the stops change.
   useEffect(() => {
@@ -219,11 +296,17 @@ export function MapTripCanvas({
     if (!map) return;
     const render = () => {
       applyParks(map);
-      // Reframe only when the active TRIP changed (switched trips) — not when a park was added to the current
-      // one (you just clicked it, it's on-screen; yanking the camera mid-build is jarring). (#9, review MEDIUM-3)
+      // Reframe only when the active TRIP changed (switched trips, opened the first one, or deselected)
+      // — not when a park was added to the current one (you just clicked it, it's on-screen; yanking the
+      // camera mid-build is jarring). (#9, review MEDIUM-3)
       const switched = framedTripRef.current !== tripId;
-      renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, true, switched, originRef.current);
-      framedTripRef.current = tripIdRef.current;
+      // If the pane is hidden (0×0 — a trip switched from the itinerary/ranger tab, ADR-076), draw the
+      // markers/line but DON'T fit: fitBounds no-ops on a zero-size canvas and would falsely mark the
+      // trip framed. Defer the fit to the reveal (the ResizeObserver), leaving framedTripRef untouched.
+      const hidden = map.getContainer().clientWidth === 0 || map.getContainer().clientHeight === 0;
+      renderTripOverlay(map, stopsRef.current, c, markersRef, drawRef, true, switched && !hidden, originRef.current);
+      if (switched && hidden) pendingFrameRef.current = true;
+      else framedTripRef.current = tripIdRef.current;
     };
     // A stops update can land while the style is momentarily not loaded (mid style/terrain reload). The old
     // bail-with-no-retry dropped that render until the next map interaction ("stops don't show till you move
@@ -232,7 +315,7 @@ export function MapTripCanvas({
     else map.once('idle', render);
     return () => { map.off('idle', render); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stops, addedParkCodes, origin]);
+  }, [stops, addedParkCodes, origin, tripId]);
 
   // The "Added X" / rate-limit note reads like a toast — let it auto-dismiss (and clear on unmount).
   useEffect(() => {
