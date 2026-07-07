@@ -112,6 +112,27 @@ export function ChatPanel({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
 
+  // Seed the announce-dedup sets from a REPLAYED transcript on mount (ADR-076 P3.9): when the store is
+  // constructed from `initialEvents` (the /plan reload-persistence path, and /learn), the messages effects
+  // below would otherwise re-fire trips-changed / ranger-activity / quiz-graded for every historical
+  // message. This effect runs once, BEFORE those effects on the same commit (declaration order), marking
+  // the replayed messages as already-announced so only genuinely new turns dispatch. No-op with no seed.
+  const replaySeededRef = useRef(false);
+  useEffect(() => {
+    if (replaySeededRef.current || !initialEvents) return;
+    replaySeededRef.current = true;
+    for (const m of messages as { id?: string; role: string; parts: unknown[] }[]) {
+      if (m.role !== 'assistant' || !m.id) continue;
+      announcedActivity.current.add(m.id);
+      announcedGrades.current.add(m.id);
+      for (const tripId of tripIdsFromParts(m.parts as never)) {
+        announcedTrips.current.add(`${m.id}:${tripId}:stream`);
+        announcedTrips.current.add(`${m.id}:${tripId}:final`);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Snap-to-bottom on reveal (ADR-076): the autoscroll above is a spec-level no-op while the pane is
   // display:none (the element has no layout box), and nothing re-fires on reveal — a thread that streamed
   // into a hidden pane (mobile tab switching) used to show a stale scroll offset when opened. Watch the

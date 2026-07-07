@@ -4,6 +4,7 @@ import { type LatLng } from './routing';
 import { cachedDriveSegments } from './drive-cache';
 import { considerPark, getHomeLocation } from './bridges';
 import { buildParkConditions, type ConditionsCardData, type TripDashboard } from './conditions';
+import { suggestDays } from './itinerary';
 import { decodeEntities } from './html-entities';
 
 /**
@@ -87,6 +88,57 @@ export async function renameTrip(userId: string, tripId: string, name: string): 
     `MATCH (t:Trip {id: $tripId, userId: $userId}) SET t.name = $name`,
     { userId, tripId, name: decodeEntities(name) },
   );
+}
+
+/**
+ * Set the trip window (ADR-076 P3.1). Stored as plain YYYY-MM-DD strings (every consumer — tripMetrics
+ * dark-hours, the ICS export, the ranger's active-trip context — parses strings; no graph date() migration).
+ * Each end is nullable to clear it independently. No server recompute: conditions/day-plans read dates at
+ * render time, so the client just invalidates its cards.
+ */
+export async function setTripDates(
+  userId: string,
+  tripId: string,
+  dates: { startDate?: string | null; endDate?: string | null },
+): Promise<boolean> {
+  const rows = await writeGraph<{ ok: boolean }>(
+    `MATCH (t:Trip {id: $tripId, userId: $userId})
+     SET t.startDate = CASE WHEN $setStart THEN $startDate ELSE t.startDate END,
+         t.endDate   = CASE WHEN $setEnd   THEN $endDate   ELSE t.endDate   END
+     RETURN true AS ok`,
+    {
+      userId,
+      tripId,
+      setStart: dates.startDate !== undefined,
+      setEnd: dates.endDate !== undefined,
+      startDate: dates.startDate ?? null,
+      endDate: dates.endDate ?? null,
+    },
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Persist a suggested day plan to `stop.day` (ADR-076 P3.8) so it survives a trip switch / reload — the
+ * `suggestDays` op computes but never wrote, so the plan died on reopen. Recomputes the same pure pacing,
+ * then writes each stop's day. Returns false when the trip has no stops.
+ */
+export async function applyDayPlan(userId: string, tripId: string, maxHoursPerDay?: number): Promise<boolean> {
+  const trip = await getTrip(userId, tripId);
+  if (!trip) return false;
+  const stops = (trip.stops ?? []).filter(Boolean) as { id: string; driveTo?: { minutes: number } | null }[];
+  if (stops.length === 0) return false;
+  const assignments = suggestDays(
+    stops.map((s) => ({ id: s.id, driveMinutesToHere: s.driveTo?.minutes ?? 0 })),
+    maxHoursPerDay ? { maxMinutesPerDay: maxHoursPerDay * 60 } : {},
+  );
+  await writeGraph(
+    `UNWIND $days AS d
+     MATCH (t:Trip {id: $tripId, userId: $userId})-[:HAS_STOP]->(s:Stop {id: d.id})
+     SET s.day = d.day`,
+    { userId, tripId, days: assignments },
+  );
+  return true;
 }
 
 export async function listTrips(userId: string) {
@@ -394,13 +446,13 @@ export async function reorderStops(userId: string, tripId: string, orderedStopId
   await writeGraph(
     `MATCH (t:Trip {id:$tripId, userId:$userId})-[:HAS_STOP]->(s:Stop)
      WITH s, $ids AS ids
-     SET s.order = apoc.coll.indexOf(ids, s.id)`,
+     SET s.order = apoc.coll.indexOf(ids, s.id), s.day = null`,
     { userId, tripId, ids: orderedStopIds },
   ).catch(async () => {
     // No APOC? fall back to per-stop updates.
     for (let i = 0; i < orderedStopIds.length; i++) {
       await writeGraph(
-        `MATCH (t:Trip {id:$tripId, userId:$userId})-[:HAS_STOP]->(s:Stop {id:$sid}) SET s.order = $o`,
+        `MATCH (t:Trip {id:$tripId, userId:$userId})-[:HAS_STOP]->(s:Stop {id:$sid}) SET s.order = $o, s.day = null`,
         { userId, tripId, sid: orderedStopIds[i], o: i },
       );
     }

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { Box, Heading } from '@chakra-ui/react';
 import { getServerUserId } from '../../lib/session';
+import { getPlanTranscript } from '../../lib/plan-transcript';
 import { PlanShell } from '../../components/plan/PlanShell';
 
 /**
@@ -17,6 +18,9 @@ export default async function PlanPage() {
   const userId = await getServerUserId();
   if (!userId) redirect('/signin');
 
+  // Rehydrate the ranger chat from the saved transcript (P3.9). Failure degrades to an empty thread.
+  const { events } = await getPlanTranscript(userId).catch(() => ({ events: [] as unknown[] }));
+
   return (
     <Box
       position="fixed"
@@ -32,7 +36,7 @@ export default async function PlanPage() {
       }}
     >
       <Heading as="h1" srOnly>Plan a trip</Heading>
-      <PlanShell />
+      <PlanShell initialChatEvents={events} />
     </Box>
   );
 }

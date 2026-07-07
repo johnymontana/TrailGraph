@@ -122,11 +122,16 @@ export interface TripBuilderValue {
   openTrip: (id: string) => Promise<void>;
   create: (name: string) => Promise<void>;
   rename: (name: string) => Promise<boolean>;
+  setDates: (dates: { startDate?: string | null; endDate?: string | null }) => Promise<boolean>;
+  removeTrip: () => Promise<void>;
   addPark: (code: string) => Promise<void>;
   removeStop: (stopId: string) => Promise<void>;
   removeHike: (stopId: string, trailId: string) => Promise<void>;
   removeLodging: (stopId: string, campgroundId: string) => Promise<void>;
   persistReorder: (orderedStopIds: string[]) => Promise<'ok' | 'unchanged' | 'limited'>;
+  /** Keyboard-accessible reorder (P3.3): move a stop one slot up/down and persist. motion's Reorder is
+   * pointer-only, so this is the a11y path. */
+  moveStop: (stopId: string, dir: 'up' | 'down') => Promise<void>;
   checkAlerts: () => Promise<void>;
   checkCost: () => Promise<void>;
   checkConditions: () => Promise<void>;
@@ -336,6 +341,52 @@ export function TripBuilderProvider({ children }: { children: ReactNode }) {
     [postOp, loadTrips],
   );
 
+  // Set the trip window (P3.1). Each end is nullable to clear; the server rejects an inverted window (the
+  // client also guards). Returns whether it applied so TripHeader closes its editor only on success.
+  const setDates = useCallback(
+    async (dates: { startDate?: string | null; endDate?: string | null }): Promise<boolean> => {
+      const t = tripRef.current;
+      if (!t) return false;
+      const r = await postOp<{ trip?: Trip | null }>(t.id, { op: 'setDates', ...dates });
+      if (r.ok && r.data.trip) {
+        setTrip(r.data.trip);
+        // Dates changed → the conditions/cost cards may be stale; drop them (the active-trip broadcast
+        // re-fires from the trip effect, so dated ranger answers pick up the new window for free).
+        setDashboard(null);
+        setCost(null);
+        setCostErr(null);
+        return true;
+      }
+      return false;
+    },
+    [postOp],
+  );
+
+  // Delete the open trip (P3.2). Callers confirm first (destructive); the DELETE route is rate-limited.
+  const removeTrip = useCallback(async () => {
+    const t = tripRef.current;
+    if (!t) return;
+    const res = await fetch(`/api/trips/${encodeURIComponent(t.id)}`, { method: 'DELETE' });
+    if (res.status === 429) {
+      toast.info('Slow down — too many trip edits. Try again in a moment.');
+      return;
+    }
+    if (!res.ok) {
+      toast.error("Couldn't delete this trip", 'Please try again in a moment.');
+      return;
+    }
+    autoOpenedRef.current.delete(t.id);
+    setTrip(null); // deselect → the itinerary pane falls back to the switcher / empty state
+    setMetrics(null);
+    setAlerts(null);
+    setCost(null);
+    setCostErr(null);
+    setDashboard(null);
+    setDayMap({});
+    await loadTrips();
+    toast.success('Trip deleted');
+  }, [loadTrips]);
+
   const addPark = useCallback(
     async (code: string) => {
       const t = tripRef.current;
@@ -394,6 +445,26 @@ export function TripBuilderProvider({ children }: { children: ReactNode }) {
       setDayMap({}); // the route order changed → the prior day grouping no longer maps cleanly (#9 LOW-2)
       applyMutation(r.data);
       return 'ok';
+    },
+    [postOp, applyMutation],
+  );
+
+  // Keyboard reorder (P3.3): swap the stop with its neighbor and persist via the reorder op. Reads the
+  // CURRENT order from tripRef (not a render closure) so rapid presses compose correctly.
+  const moveStop = useCallback(
+    async (stopId: string, dir: 'up' | 'down') => {
+      const t = tripRef.current;
+      if (!t) return;
+      const ids = liveStops(t).map((s) => s.id);
+      const i = ids.indexOf(stopId);
+      const j = dir === 'up' ? i - 1 : i + 1;
+      if (i < 0 || j < 0 || j >= ids.length) return;
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+      const r = await postOp<{ trip?: Trip | null; metrics?: TripMetrics | null }>(t.id, { op: 'reorder', orderedStopIds: ids });
+      if (r.ok) {
+        setDayMap({}); // reorder clears the day plan (server-side too) — the prior grouping no longer maps
+        applyMutation(r.data);
+      }
     },
     [postOp, applyMutation],
   );
@@ -464,16 +535,22 @@ export function TripBuilderProvider({ children }: { children: ReactNode }) {
     if (res.ok) {
       const { url } = (await res.json()) as { url: string };
       const full = `${window.location.origin}${url}`;
-      setShareUrl(full);
+      setShareUrl(full); // the copy row is always shown as a backstop (P3.6)
+      // Native share sheet where available (mobile / Safari) — P3.6. It must run in the click's user
+      // activation; the POST above is fast, but if activation lapsed navigator.share throws → clipboard.
+      if (typeof navigator.share === 'function') {
+        try {
+          await navigator.share({ title: t.name, text: `Trip plan: ${t.name}`, url: full });
+          return;
+        } catch (e) {
+          if ((e as Error)?.name === 'AbortError') return; // the user dismissed the sheet — not a failure
+        }
+      }
       let copied = false;
       if (navigator.clipboard?.writeText) {
         copied = await navigator.clipboard.writeText(full).then(() => true).catch(() => false);
       }
-      if (copied) {
-        toast.success('Share link copied', 'A read-only link to this trip is on your clipboard.');
-      } else {
-        toast.success('Share link ready', 'Copy the read-only link shown below.');
-      }
+      toast.success(copied ? 'Share link copied' : 'Share link ready', copied ? 'A read-only link to this trip is on your clipboard.' : 'Copy the read-only link shown below.');
     } else {
       toast.error("Couldn't create share link", 'Please try again in a moment.');
     }
@@ -542,17 +619,24 @@ export function TripBuilderProvider({ children }: { children: ReactNode }) {
     [postOp, applyMutation],
   );
 
+  // Suggest a day plan AND persist it (P3.8): `applyDays` writes stop.day so the plan survives a trip
+  // switch / reload (the old `suggestDays` op only previewed and was lost on reopen). The fresh trip
+  // carries the days on `stop.day`, so we clear the ephemeral dayMap and let the rows read the persisted
+  // value. A reorder later clears the days (server-side), which is correct — reordering invalidates pacing.
   const suggestDayPlan = useCallback(async () => {
     const t = tripRef.current;
     if (!t) return;
     opStart('days');
     try {
-      const r = await postOp<{ days?: { id: string; day: number }[] }>(t.id, { op: 'suggestDays' });
-      if (r.ok) setDayMap(Object.fromEntries((r.data.days ?? []).map((d) => [d.id, d.day])));
+      const r = await postOp<{ trip?: Trip | null; metrics?: TripMetrics | null }>(t.id, { op: 'applyDays' });
+      if (r.ok) {
+        setDayMap({});
+        applyMutation(r.data);
+      }
     } finally {
       opEnd('days');
     }
-  }, [postOp]);
+  }, [postOp, applyMutation]);
 
   // Drag choreography (ADR-076): while a stop row is mid-drag, an incoming ranger refresh is stashed
   // instead of replacing the list under the user's finger. endDrag applies the stash — the fresh server
@@ -675,11 +759,14 @@ export function TripBuilderProvider({ children }: { children: ReactNode }) {
       openTrip,
       create,
       rename,
+      setDates,
+      removeTrip,
       addPark,
       removeStop,
       removeHike,
       removeLodging,
       persistReorder,
+      moveStop,
       checkAlerts,
       checkCost,
       checkConditions,
@@ -695,9 +782,9 @@ export function TripBuilderProvider({ children }: { children: ReactNode }) {
     [
       trips, trip, stops, metrics, alerts, cost, costErr, dashboard, dayMap, shareUrl, err, busyOps, openingId,
       overPackedDays, canvasStops, canvasOrigin, addedParkCodes,
-      loadTrips, openTrip, create, rename, addPark, removeStop, removeHike, removeLodging, persistReorder,
-      checkAlerts, checkCost, checkConditions, share, optimizeRoute, fork, setOrigin, suggestDayPlan,
-      applyMutation, beginDrag, endDrag,
+      loadTrips, openTrip, create, rename, setDates, removeTrip, addPark, removeStop, removeHike,
+      removeLodging, persistReorder, moveStop, checkAlerts, checkCost, checkConditions, share,
+      optimizeRoute, fork, setOrigin, suggestDayPlan, applyMutation, beginDrag, endDrag,
     ],
   );
 

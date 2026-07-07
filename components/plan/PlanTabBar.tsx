@@ -26,8 +26,11 @@ export function PlanTabBar({
   flashItinerary: boolean;
   rangerUnread: boolean;
 }) {
-  const { trip, stops } = useTripBuilder();
+  const { trip, stops, alerts } = useTripBuilder();
   const count = trip ? stops.length : null;
+  // Mirror the TripHeader alert count on the Itinerary tab (P3.10) so the surface's only safety signal is
+  // visible from the Map/Ranger panes on mobile.
+  const alertCount = alerts ? alerts.reduce((sum, a) => sum + a.alerts.length, 0) : 0;
 
   const tabs: { key: PlanPane; label: string; icon: React.ReactNode; ariaLabel: string }[] = [
     { key: 'map', label: 'Map', icon: <LuMap />, ariaLabel: 'Map' },
@@ -35,7 +38,10 @@ export function PlanTabBar({
       key: 'itinerary',
       label: 'Itinerary',
       icon: <LuListChecks />,
-      ariaLabel: count != null && count > 0 ? `Itinerary, ${count} stop${count === 1 ? '' : 's'}` : 'Itinerary',
+      ariaLabel: [
+        count != null && count > 0 ? `Itinerary, ${count} stop${count === 1 ? '' : 's'}` : 'Itinerary',
+        alertCount > 0 ? `${alertCount} alert${alertCount === 1 ? '' : 's'}` : null,
+      ].filter(Boolean).join(', '),
     },
     { key: 'ranger', label: 'Ranger', icon: <LuSparkles />, ariaLabel: rangerUnread ? 'Ranger, new activity' : 'Ranger' },
   ];
@@ -81,6 +87,12 @@ export function PlanTabBar({
                 >
                   {count}
                 </Badge>
+              ) : null}
+              {/* Alert indicator (P3.10): a small red dot on the Itinerary tab when the trip has active
+                  Closure/Danger alerts — the safety signal, visible from any pane. Distinct from the
+                  stop-count badge (top-right) and its flash. */}
+              {t.key === 'itinerary' && alertCount > 0 ? (
+                <Box data-testid="plan-tab-alert" position="absolute" top={-1} left={-3} boxSize={2} borderRadius="full" bg="red.solid" />
               ) : null}
               {t.key === 'ranger' && rangerUnread ? (
                 <Box data-testid="plan-tab-unread" position="absolute" top={-1} right={-2} boxSize={2} borderRadius="full" bg="orange.solid" />

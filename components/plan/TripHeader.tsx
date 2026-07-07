@@ -1,9 +1,14 @@
 'use client';
 import { useState } from 'react';
 import { Badge, Button, Heading, HStack, Icon, Input, Text } from '@chakra-ui/react';
-import { LuHouse, LuRepeat } from 'react-icons/lu';
+import { LuHouse, LuRepeat, LuCalendar } from 'react-icons/lu';
+import { toast } from '../../lib/toast';
 import { decodeEntities } from '../../lib/html-entities';
 import { useTripBuilder } from './useTripBuilder';
+
+/** A stored trip date is a YYYY-MM-DD string (or an older free-form value) — take the first 10 chars for
+ * the native date input, which needs exactly that shape. */
+const ymd = (d?: string | null): string => (d ? d.slice(0, 10) : '');
 
 /**
  * The open trip's header: name/rename, the persistent alert-count badge (P1.2 — safety at a glance), a
@@ -12,11 +17,14 @@ import { useTripBuilder } from './useTripBuilder';
  * stays exclusive to the chip so e2e text selectors never collide), and the trip-origin row (ADR-074).
  */
 export function TripHeader() {
-  const { trip, alerts, metrics, rename, setOrigin } = useTripBuilder();
+  const { trip, alerts, metrics, rename, setOrigin, setDates } = useTripBuilder();
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [editingOrigin, setEditingOrigin] = useState(false);
   const [originDraft, setOriginDraft] = useState('');
+  const [editingDates, setEditingDates] = useState(false);
+  const [startDraft, setStartDraft] = useState('');
+  const [endDraft, setEndDraft] = useState('');
 
   if (!trip) return null;
 
@@ -32,6 +40,19 @@ export function TripHeader() {
       setEditingOrigin(false);
       setOriginDraft('');
     }
+  }
+  function openDatesEditor() {
+    setStartDraft(ymd(trip?.startDate));
+    setEndDraft(ymd(trip?.endDate));
+    setEditingDates(true);
+  }
+  async function saveDates() {
+    if (startDraft && endDraft && endDraft < startDraft) {
+      toast.info('The end date must be on or after the start date.');
+      return;
+    }
+    // Empty input → null (clear that end); a value → set it.
+    if (await setDates({ startDate: startDraft || null, endDate: endDraft || null })) setEditingDates(false);
   }
 
   const hrs = (min: number | null | undefined) => (min == null ? null : Math.round((min / 60) * 10) / 10);
@@ -85,6 +106,51 @@ export function TripHeader() {
           {metrics.darkHoursTotal != null ? <Text>{Math.round(metrics.darkHoursTotal)} dark h</Text> : null}
         </HStack>
       ) : null}
+      {/* Trip window (P3.1): drives dark-hours, the ICS export, and the ranger's dated answers. Native
+          date inputs — accessible + a real mobile date picker. */}
+      <HStack gap={2} flexWrap="wrap">
+        <Icon color="trail.solid" boxSize={3.5}><LuCalendar /></Icon>
+        {editingDates ? (
+          <>
+            <Input
+              size="xs"
+              type="date"
+              fontSize={{ base: 'md', md: 'xs' }}
+              maxW="150px"
+              aria-label="Trip start date"
+              value={startDraft}
+              max={endDraft || undefined}
+              onChange={(e) => setStartDraft(e.target.value)}
+            />
+            <Text fontSize="xs" color="fg.muted">→</Text>
+            <Input
+              size="xs"
+              type="date"
+              fontSize={{ base: 'md', md: 'xs' }}
+              maxW="150px"
+              aria-label="Trip end date"
+              value={endDraft}
+              min={startDraft || undefined}
+              onChange={(e) => setEndDraft(e.target.value)}
+            />
+            <Button size="xs" minH={{ base: '9', md: '6' }} colorPalette="pine" onClick={saveDates}>Set</Button>
+            <Button size="xs" minH={{ base: '9', md: '6' }} variant="ghost" onClick={() => setEditingDates(false)}>Cancel</Button>
+          </>
+        ) : trip.startDate || trip.endDate ? (
+          <>
+            <Text fontSize="xs">
+              {ymd(trip.startDate) || '—'} → {ymd(trip.endDate) || '—'}
+            </Text>
+            <Button size="2xs" minH={{ base: '9', md: '5' }} variant="ghost" onClick={openDatesEditor}>Change</Button>
+            <Button size="2xs" minH={{ base: '9', md: '5' }} variant="ghost" colorPalette="red" onClick={() => setDates({ startDate: null, endDate: null })}>Clear</Button>
+          </>
+        ) : (
+          <>
+            <Text fontSize="xs" color="fg.muted">No dates set.</Text>
+            <Button size="2xs" minH={{ base: '9', md: '5' }} variant="outline" onClick={openDatesEditor}>Add dates</Button>
+          </>
+        )}
+      </HStack>
       {/* Trip origin (ADR-074): defaults from the saved home location; editable per trip (fly-in trips),
           with a round-trip toggle that adds the drive home to the route. */}
       <HStack gap={2} flexWrap="wrap">

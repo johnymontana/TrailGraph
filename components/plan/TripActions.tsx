@@ -1,7 +1,9 @@
 'use client';
-import { Button, HStack, Icon, IconButton, Menu, Portal, Stack, Text } from '@chakra-ui/react';
+import { useState } from 'react';
+import { Button, CloseButton, Dialog, HStack, Icon, IconButton, Menu, Portal, Stack, Text } from '@chakra-ui/react';
 import { LuChevronDown, LuCopy } from 'react-icons/lu';
 import { toast } from '../../lib/toast';
+import { decodeEntities } from '../../lib/html-entities';
 import { useTripBuilder, touchTarget } from './useTripBuilder';
 
 /**
@@ -11,8 +13,20 @@ import { useTripBuilder, touchTarget } from './useTripBuilder';
  * only when the trip has stops; the share row appears under it once a link exists.
  */
 export function TripActions() {
-  const { trip, stops, busyOps, shareUrl, checkAlerts, checkCost, checkConditions, suggestDayPlan, optimizeRoute, share, fork } = useTripBuilder();
+  const { trip, stops, busyOps, shareUrl, checkAlerts, checkCost, checkConditions, suggestDayPlan, optimizeRoute, share, fork, removeTrip } = useTripBuilder();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   if (!trip || stops.length === 0) return null;
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await removeTrip();
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <Stack gap={2}>
@@ -58,11 +72,42 @@ export function TripActions() {
                 <Menu.Item value="gpx" asChild>
                   <a href={`/api/trips/${trip.id}/gpx`}>Export .gpx</a>
                 </Menu.Item>
+                <Menu.Separator />
+                <Menu.Item value="delete" color="red.fg" _hover={{ bg: 'red.subtle' }} onClick={() => setConfirmDelete(true)}>
+                  Delete trip…
+                </Menu.Item>
               </Menu.Content>
             </Menu.Positioner>
           </Portal>
         </Menu.Root>
       </HStack>
+
+      {/* Destructive: confirm before deleting (P3.2). The API DELETE has no undo. */}
+      <Dialog.Root role="alertdialog" open={confirmDelete} onOpenChange={(e) => setConfirmDelete(e.open)}>
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content>
+              <Dialog.Header><Dialog.Title>Delete this trip?</Dialog.Title></Dialog.Header>
+              <Dialog.Body>
+                <Text>
+                  “{decodeEntities(trip.name)}” and its {stops.length} stop{stops.length === 1 ? '' : 's'} will be
+                  permanently deleted. This can’t be undone.
+                </Text>
+              </Dialog.Body>
+              <Dialog.Footer>
+                <Dialog.ActionTrigger asChild>
+                  <Button variant="outline">Cancel</Button>
+                </Dialog.ActionTrigger>
+                <Button colorPalette="red" loading={deleting} onClick={handleDelete}>Delete trip</Button>
+              </Dialog.Footer>
+              <Dialog.CloseTrigger asChild>
+                <CloseButton size="sm" />
+              </Dialog.CloseTrigger>
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
       {shareUrl ? (
         <HStack gap={1.5}>
           <Text fontSize="xs" color="fg.muted" minW={0} flex="1" truncate>

@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl, { type Map as MlMap, type Marker as MlMarker, type GeoJSONSource, type ExpressionSpecification } from 'maplibre-gl';
 import type { FeatureCollection, Point } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { Box, HStack, Text } from '@chakra-ui/react';
+import { Box, Button, HStack, IconButton, Icon, Stack, Text } from '@chakra-ui/react';
+import { LuX } from 'react-icons/lu';
 import { mapStyle, US_BOUNDS, registerMapProtocols, attachBasemapFallback } from '../../lib/mapStyle';
 import { useColorMode } from '../ui/color-mode';
 import { brandColors } from '../../lib/brandColors';
@@ -72,6 +73,21 @@ export function MapTripCanvas({
   const { colorMode } = useColorMode();
   const c = brandColors(colorMode);
   const [note, setNote] = useState<string | null>(null);
+  // The park tapped on the map (P3.7): drives a React bottom card instead of a maplibre popup, so the Add
+  // button is a real ≥40px control and the card reads like the rest of the UI. Coords ride along for the pulse.
+  const [selected, setSelected] = useState<{ parkCode: string; name: string; designation?: string; lng: number; lat: number } | null>(null);
+
+  // A short ring pulse at the just-added park (P3.7) — Web Animations, no global keyframe needed.
+  function pulseAt(lng: number, lat: number) {
+    const map = mapRef.current;
+    if (!map || typeof document === 'undefined') return;
+    const el = document.createElement('div');
+    Object.assign(el.style, { width: '20px', height: '20px', borderRadius: '50%', border: `2px solid ${c.pine}`, pointerEvents: 'none' });
+    const marker = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
+    const anim = el.animate?.([{ transform: 'scale(0.5)', opacity: 0.9 }, { transform: 'scale(2.6)', opacity: 0 }], { duration: 850, easing: 'ease-out' });
+    if (anim) anim.onfinish = () => marker.remove();
+    else window.setTimeout(() => marker.remove(), 850);
+  }
 
   stopsRef.current = stops;
   originRef.current = origin ?? null;
@@ -100,16 +116,18 @@ export function MapTripCanvas({
     (map.getSource('canvas-parks') as GeoJSONSource | undefined)?.setData(fc);
   }
 
-  // POST addStop for a clicked park, then bubble the new trip + live metrics up to the builder (#9).
-  async function addPark(parkCode: string, name: string) {
+  // POST addStop for a chosen park, then bubble the new trip + live metrics up to the builder (#9) and pulse
+  // the spot (P3.7). Called by the React bottom card's Add button.
+  async function addPark(park: { parkCode: string; name: string; lng: number; lat: number }) {
     if (busyRef.current || !tripIdRef.current) return;
     busyRef.current = true;
-    setNote(`Adding ${name}…`);
+    setSelected(null);
+    setNote(`Adding ${park.name}…`);
     try {
       const res = await fetch(`/api/trips/${encodeURIComponent(tripIdRef.current)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ op: 'addStop', stop: { kind: 'park', refId: parkCode } }),
+        body: JSON.stringify({ op: 'addStop', stop: { kind: 'park', refId: park.parkCode } }),
         signal: abortRef.current?.signal,
       });
       if (res.status === 429) {
@@ -123,7 +141,8 @@ export function MapTripCanvas({
       }
       const data = (await res.json()) as CanvasMutation;
       onMutatedRef.current(data);
-      setNote(`Added ${name}`);
+      pulseAt(park.lng, park.lat);
+      setNote(`Added ${park.name}`);
     } catch {
       /* aborted / network — leave the trip unchanged */
     } finally {
@@ -155,6 +174,10 @@ export function MapTripCanvas({
         paint: { 'circle-color': parkColorExpr, 'circle-radius': 6, 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff' } });
       m.addLayer({ id: 'canvas-park-icon', type: 'symbol', source: 'canvas-parks', filter: ['!', ['has', 'point_count']],
         layout: { 'icon-image': ['get', 'icon'], 'icon-size': 0.55, 'icon-allow-overlap': true, 'icon-ignore-placement': true } });
+      // Invisible fat hit target (P3.7): the visible dot is 6px, murder to tap on touch — a transparent
+      // ~14px circle around each dot makes the whole ~24px area tappable. Handlers bind to this layer.
+      m.addLayer({ id: 'canvas-park-hit', type: 'circle', source: 'canvas-parks', filter: ['!', ['has', 'point_count']],
+        paint: { 'circle-color': '#000', 'circle-opacity': 0, 'circle-radius': 14 } });
     };
 
     const init = () => {
@@ -178,37 +201,22 @@ export function MapTripCanvas({
         attachMarkerImages(m); // styleimagemissing hook — survives setStyle image wipes (#2d)
         installLayers(m);
 
-        // Click an addable park → an "Add to trip" popup (setDOMContent so the button can carry a real
-        // handler). With NO trip open (the shell's browse state) the popup explains instead of adding.
-        // Layer-scoped handlers attach ONCE — they survive setStyle by id; re-adding double-fires.
-        m.on('mouseenter', 'canvas-park', () => { m.getCanvas().style.cursor = 'pointer'; });
-        m.on('mouseleave', 'canvas-park', () => { m.getCanvas().style.cursor = ''; });
-        m.on('click', 'canvas-park', (e) => {
+        // Tap an addable park (on the fat hit layer, P3.7) → open the React bottom card via state. Layer-
+        // scoped handlers attach ONCE — they survive setStyle by id; re-adding double-fires. setSelected is
+        // a stable useState setter, safe to call from this load-time closure.
+        m.on('mouseenter', 'canvas-park-hit', () => { m.getCanvas().style.cursor = 'pointer'; });
+        m.on('mouseleave', 'canvas-park-hit', () => { m.getCanvas().style.cursor = ''; });
+        m.on('click', 'canvas-park-hit', (e) => {
           const f = e.features?.[0];
           if (!f) return;
           const props = f.properties as { parkCode: string; name: string; designation?: string };
           const [lng, lat] = (f.geometry as Point).coordinates;
-          const root = document.createElement('div');
-          const title = document.createElement('strong');
-          title.textContent = props.name ?? props.parkCode;
-          const sub = document.createElement('div');
-          sub.style.cssText = 'color:var(--chakra-colors-fg-muted);font-size:12px;margin:2px 0 6px';
-          sub.textContent = props.designation ?? '';
-          const popup = new maplibregl.Popup({ closeButton: false }).setLngLat([lng, lat]);
-          if (tripIdRef.current) {
-            const btn = document.createElement('button');
-            btn.textContent = 'Add to trip';
-            // ≥40px tall + touch-action:manipulation — a finger-sized target with no 300ms double-tap delay.
-            btn.style.cssText = `background:${c.pine};color:#fff;border:none;border-radius:6px;padding:8px 14px;min-height:40px;font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation`;
-            btn.onclick = () => { addPark(props.parkCode, props.name); popup.remove(); };
-            root.append(title, sub, btn);
-          } else {
-            const hint = document.createElement('div');
-            hint.style.cssText = 'color:var(--chakra-colors-fg-muted);font-size:12px';
-            hint.textContent = 'Open a trip to add parks.';
-            root.append(title, sub, hint);
-          }
-          popup.setDOMContent(root).addTo(m);
+          setSelected({ parkCode: props.parkCode, name: props.name ?? props.parkCode, designation: props.designation, lng, lat });
+        });
+        // Tap the map background (not on a park dot) → dismiss the card. The layer handler above runs first;
+        // this general handler queries the hit layer so it doesn't clobber a fresh selection.
+        m.on('click', (e) => {
+          if (m.queryRenderedFeatures(e.point, { layers: ['canvas-park-hit'] }).length === 0) setSelected(null);
         });
         // Cluster → zoom to expand.
         m.on('click', 'canvas-clusters', (e) => {
@@ -337,6 +345,30 @@ export function MapTripCanvas({
           {metrics.costTotal > 0 ? <Text color="fg.muted">${metrics.costTotal}</Text> : null}
           {metrics.darkHoursTotal != null ? <Text color="fg.muted">{Math.round(metrics.darkHoursTotal)} dark h</Text> : null}
         </HStack>
+      ) : null}
+      {/* Selected-park bottom card (P3.7): replaces the maplibre popup with a real UI card — name +
+          designation + a finger-sized Add (or a browse hint with no trip open). Sits above the note/pill. */}
+      {selected ? (
+        <Box position="absolute" bottom={{ base: 20, md: 4 }} left="50%" transform="translateX(-50%)" w="calc(100% - 24px)" maxW="360px" zIndex={2}
+          bg="bg.panel" borderWidth="1px" borderColor="border" borderRadius="l2" shadow="lg" p={3}>
+          <HStack align="start" gap={2}>
+            <Stack gap={0.5} flex="1" minW={0}>
+              <Text fontWeight="semibold" lineClamp={1}>{selected.name}</Text>
+              {selected.designation ? <Text fontSize="xs" color="fg.muted" lineClamp={1}>{selected.designation}</Text> : null}
+            </Stack>
+            <IconButton size="xs" variant="ghost" aria-label="Dismiss" minW="8" minH="8" onClick={() => setSelected(null)}>
+              <LuX />
+            </IconButton>
+          </HStack>
+          {tripId ? ( // the reactive prop (not the ref) so the button appears the moment a trip opens
+            <Button mt={2} w="full" size="sm" minH="10" colorPalette="pine" style={{ touchAction: 'manipulation' }}
+              onClick={() => addPark({ parkCode: selected.parkCode, name: selected.name, lng: selected.lng, lat: selected.lat })}>
+              Add to trip
+            </Button>
+          ) : (
+            <Text mt={2} fontSize="xs" color="fg.muted">Open a trip to add parks.</Text>
+          )}
+        </Box>
       ) : null}
       {note ? (
         <Box position="absolute" bottom={2} left="50%" transform="translateX(-50%)" bg="bg.panel/95" backdropFilter="blur(8px)" borderWidth="1px" borderColor="border" borderRadius="full" px={3} py={1} shadow="sm" fontSize="xs" aria-live="polite">

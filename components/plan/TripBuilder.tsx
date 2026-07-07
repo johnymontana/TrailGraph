@@ -1,6 +1,8 @@
 'use client';
-import { Box, Stack, Heading, Text, HStack, Icon, Separator } from '@chakra-ui/react';
-import { LuTriangleAlert } from 'react-icons/lu';
+import { Box, Button, Stack, Heading, Text, HStack, Icon, Separator } from '@chakra-ui/react';
+import { LuTriangleAlert, LuMapPinned, LuSparkles } from 'react-icons/lu';
+import { EmptyState } from '../ui/empty-state';
+import { requestPlanPane } from './plan-events';
 import { ParkSearchInput } from './ParkSearchInput';
 import { TripSwitcher } from './TripSwitcher';
 import { TripHeader } from './TripHeader';
@@ -17,7 +19,7 @@ import { useTripBuilder } from './useTripBuilder';
  * own grid cell from the same provider. Fully functional without the agent.
  */
 export function TripBuilder() {
-  const { err, trip, addPark, overPackedDays } = useTripBuilder();
+  const { err, trips, trip, addPark, overPackedDays } = useTripBuilder();
 
   if (err) return <Box p={4}><Text color="fg.muted">{err}</Text></Box>;
 
@@ -56,8 +58,20 @@ export function TripBuilder() {
           <TripActions />
           <TripInsights />
         </>
+      ) : trips.length === 0 ? (
+        // No-trips hero (P3.5): first-run — name a trip above, or hand off to the ranger.
+        <EmptyState
+          icon={<LuMapPinned />}
+          title="Plan your first trip"
+          description="Name a trip above to start adding parks, or let the ranger draft one from what you love."
+        >
+          <Button colorPalette="pine" variant="outline" onClick={() => requestPlanPane('ranger')}>
+            <Icon><LuSparkles /></Icon>
+            Ask the ranger
+          </Button>
+        </EmptyState>
       ) : (
-        <Text color="fg.muted" fontSize="sm">Create or select a trip to start building an itinerary.</Text>
+        <Text color="fg.muted" fontSize="sm">Select a trip above to keep building, or create a new one.</Text>
       )}
     </Stack>
   );

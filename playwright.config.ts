@@ -43,7 +43,7 @@ export default defineConfig({
         isMobile: true,
         hasTouch: true,
       },
-      testMatch: ['**/plan-canvas.spec.ts', '**/plan-hardening.spec.ts', '**/home-origin.spec.ts', '**/plan-mobile.spec.ts'],
+      testMatch: ['**/plan-canvas.spec.ts', '**/plan-hardening.spec.ts', '**/home-origin.spec.ts', '**/plan-mobile.spec.ts', '**/plan-phase3.spec.ts'],
     },
   ],
   webServer: {

@@ -1,13 +1,21 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Box, Button, Grid } from '@chakra-ui/react';
+import { Box, Button, Grid, HStack, Icon, IconButton, Text } from '@chakra-ui/react';
+import { LuSparkles, LuX } from 'react-icons/lu';
 import { TripBuilderProvider, useTripBuilder, type Trip } from './useTripBuilder';
 import { TripBuilder } from './TripBuilder';
 import { MapTripCanvas } from './MapTripCanvas';
 import { PlanTabBar } from './PlanTabBar';
+import { PlanSheet } from './PlanSheet';
+import { onPlanPaneRequest } from './plan-events';
 import { ChatPanel } from '../chat/ChatPanel';
 
 export type PlanPane = 'map' | 'itinerary' | 'ranger';
+
+/** Phase 2 (ADR-076): the AllTrails-style full-bleed map + draggable itinerary sheet, behind
+ * NEXT_PUBLIC_PLAN_SHEET. A build-time NEXT_PUBLIC_ flag → the same value on server and client, so
+ * branching layout on it introduces no hydration mismatch. Off by default: the Phase-1 tabs ship. */
+const SHEET = process.env.NEXT_PUBLIC_PLAN_SHEET === '1';
 
 /**
  * The /plan responsive frame (ADR-076): ONE client component owns a CSS grid whose children are the
@@ -25,20 +33,25 @@ export type PlanPane = 'map' | 'itinerary' | 'ranger';
  * still leaves /plan; a reload restores the pane). Desktop never reads or writes ?pane (the tab bar
  * and map pill are base-only, the only setPane callers).
  */
-export function PlanShell() {
+export function PlanShell({ initialChatEvents }: { initialChatEvents?: unknown[] }) {
   return (
     <TripBuilderProvider>
-      <PlanShellInner />
+      <PlanShellInner initialChatEvents={initialChatEvents} />
     </TripBuilderProvider>
   );
 }
 
-function PlanShellInner() {
+function PlanShellInner({ initialChatEvents }: { initialChatEvents?: unknown[] }) {
   const [pane, setPaneState] = useState<PlanPane>('itinerary');
   const [flashItinerary, setFlashItinerary] = useState(false);
   const [rangerUnread, setRangerUnread] = useState(false);
+  // Sheet mode (Phase 2): the map is full-bleed + a draggable itinerary sheet; the ranger opens as an
+  // overlay from a FAB instead of a tab. `rangerOpen` toggles that overlay (base only).
+  const [rangerOpen, setRangerOpen] = useState(false);
   const paneRef = useRef(pane);
   paneRef.current = pane;
+  const rangerOpenRef = useRef(rangerOpen);
+  rangerOpenRef.current = rangerOpen;
 
   // Capture the landing query string during the FIRST client render — before any child effect can touch
   // it. ChatPanel's graph-handoff cleanup replaceStates seed/from away in ITS mount effect, and child
@@ -67,6 +80,8 @@ function PlanShellInner() {
     setPaneState(next);
     if (next === 'itinerary') setFlashItinerary(false);
     if (next === 'ranger') setRangerUnread(false);
+    // In sheet mode the ranger is a FAB overlay, not a tab — a 'ranger' request opens it; map/itinerary close it.
+    if (SHEET) setRangerOpen(next === 'ranger');
     // Write-back so a mid-session reload restores the pane; replaceState (never push) keeps Back = leave /plan.
     const url = new URL(window.location.href);
     url.searchParams.set('pane', next);
@@ -81,17 +96,28 @@ function PlanShellInner() {
       if (paneRef.current !== 'itinerary') setFlashItinerary(true);
     }
     function onRangerActivity() {
-      if (paneRef.current !== 'ranger') setRangerUnread(true);
+      // "Ranger visible" is the open overlay in sheet mode, else the active tab.
+      const visible = SHEET ? rangerOpenRef.current : paneRef.current === 'ranger';
+      if (!visible) setRangerUnread(true);
     }
     window.addEventListener('trailgraph:trips-changed', onTripsChanged);
     window.addEventListener('trailgraph:ranger-activity', onRangerActivity);
+    // In-pane handoffs (e.g. the no-trips hero's "Ask the ranger", P3.5) request a pane switch.
+    const offPane = onPlanPaneRequest((p) => setPane(p));
     return () => {
       window.removeEventListener('trailgraph:trips-changed', onTripsChanged);
       window.removeEventListener('trailgraph:ranger-activity', onRangerActivity);
+      offPane();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const paneDisplay = (key: PlanPane) => ({ base: pane === key ? 'flex' : 'none', md: 'flex' });
+  // Sheet mode reshapes the BASE layout only (md+ is always the three-region grid): the itinerary rail
+  // hides (the sheet hosts it), the map is full-bleed, and the chat is a FAB-toggled overlay.
+  const itinDisplay = SHEET ? { base: 'none', md: 'flex' } : paneDisplay('itinerary');
+  const mapDisplay = SHEET ? { base: 'flex', md: 'flex' } : paneDisplay('map');
+  const chatDisplay = SHEET ? { base: rangerOpen ? 'flex' : 'none', md: 'flex' } : paneDisplay('ranger');
 
   return (
     <Grid
@@ -106,7 +132,7 @@ function PlanShellInner() {
       {/* Itinerary rail — the ONE TripBuilder composition, both breakpoints (ADR-076). */}
       <Box
         gridArea={{ base: 'content', md: 'itinerary' }}
-        display={paneDisplay('itinerary')}
+        display={itinDisplay}
         flexDirection="column"
         minH={0}
         minW={0}
@@ -119,8 +145,8 @@ function PlanShellInner() {
 
       {/* Map cell — the permanent build-on-map canvas. Construction is init-gated inside MapTripCanvas,
           so mounting it display:none here (mobile default pane = Itinerary) is safe. */}
-      <Box gridArea={{ base: 'content', md: 'map' }} display={paneDisplay('map')} minH={0} minW={0} position="relative">
-        <MapCell onViewItinerary={() => setPane('itinerary')} />
+      <Box gridArea={{ base: 'content', md: 'map' }} display={mapDisplay} minH={0} minW={0} position="relative">
+        <MapCell onViewItinerary={() => setPane('itinerary')} showPill={!SHEET} />
       </Box>
 
       {/* Ranger chat — mounts exactly once per /plan visit (the Eve session). The chat input's safe-area
@@ -128,11 +154,12 @@ function PlanShellInner() {
           because the input reaches the viewport bottom again. */}
       <Box
         gridArea={{ base: 'content', md: 'chat' }}
-        display={paneDisplay('ranger')}
+        display={chatDisplay}
         flexDirection="column"
         minH={0}
         minW={0}
         overflow="hidden"
+        position="relative"
         borderLeftWidth={{ md: '1px' }}
         borderColor="border"
         css={{
@@ -140,18 +167,86 @@ function PlanShellInner() {
           '@media (min-width: 48em)': { '--chat-safe-bottom': 'env(safe-area-inset-bottom, 0px)' },
         }}
       >
-        <ChatPanel />
+        {/* Reload persistence (P3.9): seed the thread from the saved transcript (cards included) and persist
+            each turn. initialEvents replays for DISPLAY only — no initialSession, so the next send starts a
+            fresh Eve session (mirrors /learn; a stale server session can't wedge the next turn). */}
+        <ChatPanel initialEvents={initialChatEvents} persistUrl="/api/plan/transcript" />
+        {/* Sheet mode: a close affordance since there's no tab bar to switch away from the ranger overlay. */}
+        {SHEET ? (
+          <IconButton
+            display={{ base: 'inline-flex', md: 'none' }}
+            aria-label="Back to map"
+            position="absolute"
+            top={2}
+            right={2}
+            size="sm"
+            variant="solid"
+            colorPalette="gray"
+            onClick={() => setRangerOpen(false)}
+          >
+            <LuX />
+          </IconButton>
+        ) : null}
       </Box>
 
-      <PlanTabBar pane={pane} onSelect={setPane} flashItinerary={flashItinerary} rangerUnread={rangerUnread} />
+      {/* Phase 2 sheet overlay + Ranger FAB (base only; same grid cell as the map, layered above it). The
+          sheet's own container is pointer-transparent except the sheet itself, so the map stays interactive
+          above the peek strip. */}
+      {SHEET ? (
+        <Box gridArea="content" display={{ base: 'block', md: 'none' }} position="relative" pointerEvents="none" zIndex={1}>
+          <PlanSheet peek={<SheetPeek />}>
+            <TripBuilder />
+          </PlanSheet>
+          {!rangerOpen ? (
+            <IconButton
+              aria-label={rangerUnread ? 'Ranger, new activity' : 'Open the ranger'}
+              position="absolute"
+              top={3}
+              right={3}
+              size="lg"
+              borderRadius="full"
+              colorPalette="pine"
+              shadow="lg"
+              pointerEvents="auto"
+              onClick={() => setPane('ranger')}
+            >
+              <Icon><LuSparkles /></Icon>
+              {rangerUnread ? <Box position="absolute" top={1} right={1} boxSize={2.5} borderRadius="full" bg="orange.solid" /> : null}
+            </IconButton>
+          ) : null}
+        </Box>
+      ) : null}
+
+      {!SHEET ? (
+        <PlanTabBar pane={pane} onSelect={setPane} flashItinerary={flashItinerary} rangerUnread={rangerUnread} />
+      ) : null}
     </Grid>
+  );
+}
+
+/** The always-visible peek header inside the sheet (Phase 2): trip name + a compact running total. */
+function SheetPeek() {
+  const { trip, stops, metrics } = useTripBuilder();
+  const hrs = (min: number | null | undefined) => (min == null ? null : Math.round((min / 60) * 10) / 10);
+  return (
+    <HStack gap={2} minW={0}>
+      <Text fontWeight="semibold" fontFamily="heading" lineClamp={1} flex="1">
+        {trip ? trip.name : 'Your trips'}
+      </Text>
+      {trip && metrics && metrics.stops > 0 ? (
+        <Text fontSize="xs" color="fg.muted" flexShrink={0}>
+          {stops.length} stop{stops.length === 1 ? '' : 's'}
+          {metrics.driveMiles > 0 ? ` · ${Math.round(metrics.driveMiles)} mi · ${hrs(metrics.driveMinutes)} h` : ''}
+        </Text>
+      ) : null}
+    </HStack>
   );
 }
 
 /** The map region: canvas props from the shared provider + the base-only "View itinerary" pill. Pane
  * switching rides the shell's `setPane` callback (context/props, not a window event — trailgraph:* stays
  * reserved for genuinely cross-tree producers like ChatPanel). */
-function MapCell({ onViewItinerary }: { onViewItinerary: () => void }) {
+function MapCell({ onViewItinerary, showPill }: { onViewItinerary: () => void; showPill: boolean }) {
   const { trip, canvasStops, canvasOrigin, addedParkCodes, metrics, applyMutation } = useTripBuilder();
   return (
     <>
@@ -165,23 +260,26 @@ function MapCell({ onViewItinerary }: { onViewItinerary: () => void }) {
         cooperativeGestures={false}
       />
       {/* bottom clears maplibre's attribution strip (~24px, z-indexed above siblings) — at 390px its
-          expanded inner div otherwise intercepts the tap (caught by plan-mobile e2e). */}
-      <Button
-        display={{ base: 'inline-flex', md: 'none' }}
-        position="absolute"
-        bottom={10}
-        left="50%"
-        transform="translateX(-50%)"
-        zIndex={1}
-        size="sm"
-        minH="10"
-        borderRadius="full"
-        colorPalette="pine"
-        shadow="md"
-        onClick={onViewItinerary}
-      >
-        View itinerary
-      </Button>
+          expanded inner div otherwise intercepts the tap (caught by plan-mobile e2e). Hidden in sheet mode
+          (the sheet is always present). */}
+      {showPill ? (
+        <Button
+          display={{ base: 'inline-flex', md: 'none' }}
+          position="absolute"
+          bottom={10}
+          left="50%"
+          transform="translateX(-50%)"
+          zIndex={1}
+          size="sm"
+          minH="10"
+          borderRadius="full"
+          colorPalette="pine"
+          shadow="md"
+          onClick={onViewItinerary}
+        >
+          View itinerary
+        </Button>
+      ) : null}
     </>
   );
 }
