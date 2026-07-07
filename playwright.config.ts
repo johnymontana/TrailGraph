@@ -27,7 +27,25 @@ export default defineConfig({
     // Software WebGL so MapLibre renders in headless CI.
     launchOptions: { args: ['--enable-unsafe-swiftshader', '--use-gl=swiftshader'] },
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // Mobile project (ADR-076): Chromium-based emulation with iPhone-13 metrics, NOT `devices['iPhone 13']`
+    // — that descriptor defaults to WebKit, but CI installs chromium only and the shared swiftshader
+    // launchOptions above are Chromium-specific. Real-Safari fidelity waits for the Phase-2 gesture work.
+    // Scoped to the plan-surface specs the shell affects; the shared openPane() helper makes them
+    // layout-agnostic (it taps the tab bar only when it's visible).
+    {
+      name: 'mobile',
+      use: {
+        browserName: 'chromium',
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 3,
+        isMobile: true,
+        hasTouch: true,
+      },
+      testMatch: ['**/plan-canvas.spec.ts', '**/plan-hardening.spec.ts', '**/home-origin.spec.ts', '**/plan-mobile.spec.ts', '**/plan-phase3.spec.ts'],
+    },
+  ],
   webServer: {
     // Run e2e against a PRODUCTION build, not `pnpm dev`. Dev mode emits Emotion class-hash hydration
     // *false positives* (React dev double-renders + on-demand style insertion) that the hydration gate

@@ -32,6 +32,10 @@ export default defineTool({
         // Include trip.id so the chat dedups all itinerary cards from one build to a single rendered
         // card (R5 §2.7) — build_itinerary/add_stop/fork all key by trip.id too.
         trip: { id: trip.id, name: trip.name, stops: stops.map((s) => ({ ...s, day: dayById.get(s.id) })) },
+        // Read-only: the day plan is a suggestion in this card, NOT persisted to the trip. Marks the
+        // output so the plan panel's trips-changed scanner (lib/chat-trips.ts, ADR-076) doesn't treat it
+        // as a write — a spurious cross-pane refresh + "itinerary changed" tab flash.
+        readOnly: true,
         days: Math.max(0, ...assignments.map((a) => a.day)),
       },
     };

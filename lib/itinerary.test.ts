@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { suggestDays, suggestLodging, type LodgingCandidate } from './itinerary';
+import { sameIdSet, suggestDays, suggestLodging, type LodgingCandidate } from './itinerary';
 
 describe('suggestLodging (Campgrounds feature)', () => {
   const cands = (over: Partial<LodgingCandidate>[]): LodgingCandidate[] =>
@@ -81,5 +81,19 @@ describe('suggestDays', () => {
   it('never strands an oversized single stop in a loop', () => {
     const days = suggestDays([{ id: 'big', visitMinutes: 1000 }], { maxMinutesPerDay: 480 });
     expect(days).toEqual([{ id: 'big', day: 1 }]);
+  });
+});
+
+describe('sameIdSet (ADR-076 dayMap preservation)', () => {
+  it('matches the same ids regardless of order (a ranger reorder keeps the day plan)', () => {
+    expect(sameIdSet(['a', 'b', 'c'], ['c', 'a', 'b'])).toBe(true);
+  });
+  it('rejects an add or remove (the day plan no longer maps)', () => {
+    expect(sameIdSet(['a', 'b'], ['a', 'b', 'c'])).toBe(false);
+    expect(sameIdSet(['a', 'b', 'c'], ['a', 'b'])).toBe(false);
+    expect(sameIdSet(['a', 'b'], ['a', 'c'])).toBe(false);
+  });
+  it('treats empty lists as equal', () => {
+    expect(sameIdSet([], [])).toBe(true);
   });
 });

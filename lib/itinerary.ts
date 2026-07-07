@@ -43,6 +43,17 @@ export function suggestDays(
   return out;
 }
 
+/**
+ * Whether two stop-id lists contain the same ids, order-insensitive (stop ids are unique). The plan
+ * provider uses this to decide whether a background `refreshTrip` may keep the client-only day plan
+ * (ADR-076): same ids → the suggested days still map onto the stops; any add/remove → reset.
+ */
+export function sameIdSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
+}
+
 export interface DayLoadStop {
   day: number | null;
   driveMinutesToHere?: number | null;

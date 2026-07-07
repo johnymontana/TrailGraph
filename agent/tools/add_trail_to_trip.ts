@@ -37,6 +37,8 @@ export default defineTool({
     }
     const ok = await addTrailToStop(userId, tripId, stopId, trailId);
     if (!ok) return { kind: 'trail_detail_card', data: { error: "I couldn't add that hike to your trip." } };
-    return { kind: 'trail_detail_card', data: { ...trail, addedTo: { stopLabel, day: stop.day } } };
+    // `addedTo.tripId` marks a CONFIRMED trip write for the chat panel's trips-changed scanner (ADR-076) —
+    // previews (`pendingAdd`) deliberately never announce, since nothing was written.
+    return { kind: 'trail_detail_card', data: { ...trail, addedTo: { tripId, stopLabel, day: stop.day } } };
   },
 });

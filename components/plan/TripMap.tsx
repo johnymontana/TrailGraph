@@ -33,7 +33,9 @@ export function TripMap({ stops, origin }: { stops: TripMapStop[]; origin?: Trip
     registerMapProtocols();
     let map: MlMap;
     try {
-      map = new maplibregl.Map({ container, style: mapStyle(colorMode === 'dark' ? 'dark' : 'light'), center: US_CENTER, zoom: 3 });
+      // cooperativeGestures — this map embeds in scrollable pages (trip builder, shared trip, park pages),
+      // where a bare map hijacks one-finger scrolling on touch and wheel-scrolling on desktop.
+      map = new maplibregl.Map({ container, style: mapStyle(colorMode === 'dark' ? 'dark' : 'light'), center: US_CENTER, zoom: 3, cooperativeGestures: true });
       attachBasemapFallback(map);
     } catch (err) {
       console.warn('[TripMap] map unavailable (WebGL?):', (err as Error).message);

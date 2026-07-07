@@ -59,10 +59,15 @@ export const CreateTripSchema = z.object({
   fromTourId: id.optional(),
 });
 
+// A calendar date, YYYY-MM-DD, or null to clear (ADR-076 P3.1 dates editor). Nullable so `setDates` can
+// unset one end; the route additionally rejects endDate < startDate.
+const ymdDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD').nullable();
+
 export const TripActionSchema = z.object({
   op: z.enum([
     'addStop', 'removeStop', 'reorder', 'alerts', 'cost', 'conditions',
-    'suggestDays', 'optimize', 'rename', 'fork', 'diff',
+    'suggestDays', 'applyDays', 'optimize', 'rename', 'fork', 'diff',
+    'setDates', // P3.1: persist the trip window (start/end), each YYYY-MM-DD or null to clear
     'includeTrail', 'excludeTrail',
     'includeCampground', 'excludeCampground', // Campgrounds feature: (:Stop)-[:STAYS_AT]->(:Campground)
     'setOrigin', // trip origin (defaults from home): place text OR coords OR clear, + returnToOrigin toggle
@@ -76,6 +81,10 @@ export const TripActionSchema = z.object({
   campgroundId: z.string().max(200).optional(), // (:Stop)-[:STAYS_AT]->(:Campground)
   nights: z.number().int().min(1).max(60).optional(),
   date: z.string().max(20).optional(), // YYYY-MM-DD the lodging covers
+  // setDates: the trip window; each nullable so one end can be cleared independently.
+  startDate: ymdDate.optional(),
+  endDate: ymdDate.optional(),
+  maxHoursPerDay: z.number().min(2).max(14).optional(), // applyDays pacing budget
   // setOrigin: free-text place (geocoded server-side) OR explicit coords OR clearOrigin; toggle rides along.
   place: z.string().max(200).optional(),
   origin: latLng.optional(),

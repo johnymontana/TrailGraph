@@ -6,6 +6,8 @@ import {
   removeStop,
   reorderStops,
   renameTrip,
+  setTripDates,
+  applyDayPlan,
   checkTripAlerts,
   tripCost,
   tripConditions,
@@ -50,17 +52,7 @@ export async function GET(req: Request, { params }: Ctx) {
 export async function DELETE(req: Request, { params }: Ctx) {
   const userId = await getUserId(req);
   if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
-  const { id } = await params;
-  await deleteTrip(userId, id);
-  return Response.json({ ok: true });
-}
-
-/** Sub-actions on a trip: addStop | removeStop | reorder | alerts. */
-export async function POST(req: Request, { params }: Ctx) {
-  const userId = await getUserId(req);
-  if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
-  // Cap trip mutations per user (audit C7): addStop/removeStop/reorder/optimize/fork each can fire an
-  // ORS routing call, so an unthrottled edit loop would burn the tight ORS free tier.
+  // Rate-limit deletion under the same edit budget (ADR-076): the client also confirms first.
   const rl = await rateLimit(rlUser(userId, 'tripmut'), 30, 60);
   if (!rl.ok) {
     return Response.json(
@@ -69,9 +61,34 @@ export async function POST(req: Request, { params }: Ctx) {
     );
   }
   const { id } = await params;
+  await deleteTrip(userId, id);
+  return Response.json({ ok: true });
+}
+
+/** Ops that never touch ORS routing: pure reads over the trip + external NPS/weather lookups. They get
+ * their own roomier budget (ADR-076) — the plan shell's cross-pane refresh multiplies read traffic
+ * (every trip open auto-fires an `alerts` POST), and reads must never eat the edit budget. */
+const READ_OPS = new Set(['alerts', 'cost', 'conditions', 'suggestDays', 'diff']);
+
+/** Sub-actions on a trip: addStop | removeStop | reorder | alerts. */
+export async function POST(req: Request, { params }: Ctx) {
+  const userId = await getUserId(req);
+  if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
+  const { id } = await params;
   const parsed = await parseBody(req, TripActionSchema);
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
+  // Two per-user budgets (ADR-076): `tripmut` caps the ops that fire ORS routing via recomputeSegments
+  // (audit C7 — an unthrottled edit loop would burn the tight ORS free tier); `tripread` caps the
+  // read-only checks (NPS/weather cost) without letting them starve real edits.
+  const scope = READ_OPS.has(body.op) ? 'tripread' : 'tripmut';
+  const rl = await rateLimit(rlUser(userId, scope), scope === 'tripread' ? 60 : 30, 60);
+  if (!rl.ok) {
+    return Response.json(
+      { error: 'rate_limited' },
+      { status: 429, headers: { 'Retry-After': String(Math.max(1, Math.ceil((rl.resetAt - Date.now()) / 1000))) } },
+    );
+  }
 
   switch (body.op) {
     case 'fork': {
@@ -90,6 +107,24 @@ export async function POST(req: Request, { params }: Ctx) {
       if (!name) return Response.json({ error: 'name required' }, { status: 400 });
       await renameTrip(userId, id, name);
       return Response.json({ trip: await getTrip(userId, id) });
+    }
+    case 'setDates': {
+      // Each end is independently settable (undefined = leave, null = clear); reject an inverted window.
+      if (body.startDate === undefined && body.endDate === undefined) {
+        return Response.json({ error: 'startDate or endDate required' }, { status: 400 });
+      }
+      if (body.startDate && body.endDate && body.endDate < body.startDate) {
+        return Response.json({ error: 'endDate must be on or after startDate' }, { status: 400 });
+      }
+      const ok = await setTripDates(userId, id, { startDate: body.startDate, endDate: body.endDate });
+      if (!ok) return Response.json({ error: 'not found' }, { status: 404 });
+      return Response.json({ trip: await getTrip(userId, id) });
+    }
+    case 'applyDays': {
+      // Persist the pacing to stop.day so the plan survives a reload (P3.8), then hand back the fresh trip.
+      const ok = await applyDayPlan(userId, id, body.maxHoursPerDay);
+      if (!ok) return Response.json({ error: 'not found' }, { status: 404 });
+      return Response.json({ trip: await getTrip(userId, id), metrics: await liveMetrics(userId, id) });
     }
     case 'setOrigin': {
       // Three forms: free-text place (geocoded server-side, ORS key stays private), explicit coords

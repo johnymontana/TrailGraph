@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openPane } from './helpers/pane';
 
 /**
  * Plan-ranger quality hardening — the non-ranger-dependent surfaces (e2e runs with DISABLE_EVE, so the
@@ -19,6 +20,8 @@ async function signUp(page: import('@playwright/test').Page): Promise<void> {
 test('the chat empty state offers the Surprise-me + Field-trip starters (P1.5/P2.4)', async ({ page }) => {
   await signUp(page);
   await page.goto('/plan');
+  // Under the mobile shell the chat is a hidden pane behind the Ranger tab (no-op on desktop).
+  await openPane(page, 'ranger');
   // The empty-state lead + the new starter chips (rendered statically, no ranger turn needed).
   await expect(page.getByText('Ask the ranger to plan a trip, find parks, or check conditions.')).toBeVisible();
   await expect(page.getByText(/Surprise me/)).toBeVisible();

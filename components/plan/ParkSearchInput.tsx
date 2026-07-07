@@ -79,6 +79,7 @@ export function ParkSearchInput({ onSelect }: { onSelect: (parkCode: string) => 
     <Box position="relative">
       <Input
         size="sm"
+        fontSize={{ base: 'md', md: 'sm' }} // ≥16px on base or iOS Safari auto-zooms the focused input
         placeholder="Search parks by name (e.g. Yellowstone)"
         aria-label="Add a park to this trip"
         role="combobox"
@@ -120,7 +121,7 @@ export function ParkSearchInput({ onSelect }: { onSelect: (parkCode: string) => 
                   role="option"
                   aria-selected={i === active}
                   px={3}
-                  py={2}
+                  py={{ base: 2.5, md: 2 }} // comfortable tap height on touch
                   cursor="pointer"
                   bg={i === active ? 'bg.subtle' : undefined}
                   _hover={{ bg: 'bg.subtle' }}

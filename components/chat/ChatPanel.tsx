@@ -8,6 +8,7 @@ import { Markdown } from './Markdown';
 import { ToolActivityPill } from './ToolActivityPill';
 import { summarizeActivity, type ActivityPart } from '../../lib/tool-activity';
 import { decodeSeed } from '../../lib/graph-handoff';
+import { tripIdsFromParts } from '../../lib/chat-trips';
 
 const DEFAULT_SUGGESTIONS: ChatSuggestion[] = [
   '✨ Surprise me — plan something I\'d love',
@@ -98,8 +99,10 @@ export function ChatPanel({
   const active = busy && !stopped;
   const messages = agent.data.messages;
   const bottomRef = useRef<HTMLDivElement>(null);
-  const announcedTrips = useRef<Set<string>>(new Set());
+  const threadRef = useRef<HTMLDivElement>(null);
+  const announcedTrips = useRef<Set<string>>(new Set()); // `${messageId}:${tripId}` — per-edit, not per-trip (ADR-076)
   const announcedGrades = useRef<Set<string>>(new Set());
+  const announcedActivity = useRef<Set<string>>(new Set()); // assistant message ids → ranger-activity fired
   // The trip currently open in the sibling TripBuilder (P2.1). We can't share React state across the two
   // panes, so TripBuilder broadcasts it on a window event; we attach its dates as ephemeral Eve client
   // context on every send so dated dark-sky/astro answers reflect the trip window, not tonight.
@@ -108,6 +111,52 @@ export function ChatPanel({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
+
+  // Seed the announce-dedup sets from a REPLAYED transcript on mount (ADR-076 P3.9): when the store is
+  // constructed from `initialEvents` (the /plan reload-persistence path, and /learn), the messages effects
+  // below would otherwise re-fire trips-changed / ranger-activity / quiz-graded for every historical
+  // message. This effect runs once, BEFORE those effects on the same commit (declaration order), marking
+  // the replayed messages as already-announced so only genuinely new turns dispatch. No-op with no seed.
+  const replaySeededRef = useRef(false);
+  useEffect(() => {
+    if (replaySeededRef.current || !initialEvents) return;
+    replaySeededRef.current = true;
+    for (const m of messages as { id?: string; role: string; parts: unknown[] }[]) {
+      if (m.role !== 'assistant' || !m.id) continue;
+      announcedActivity.current.add(m.id);
+      announcedGrades.current.add(m.id);
+      for (const tripId of tripIdsFromParts(m.parts as never)) {
+        announcedTrips.current.add(`${m.id}:${tripId}:stream`);
+        announcedTrips.current.add(`${m.id}:${tripId}:final`);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Snap-to-bottom on reveal (ADR-076): the autoscroll above is a spec-level no-op while the pane is
+  // display:none (the element has no layout box), and nothing re-fires on reveal — a thread that streamed
+  // into a hidden pane (mobile tab switching) used to show a stale scroll offset when opened. Watch the
+  // scroller's height: on the 0→N transition, if messages arrived while hidden, jump with behavior:'auto'
+  // (smooth-scrolling from a reset offset looks broken). Self-contained — no coupling to the shell's tab
+  // state, and it fixes the same latent issue on /learn for free.
+  const msgCountRef = useRef(0);
+  msgCountRef.current = messages.length;
+  const hiddenAtCountRef = useRef<number | null>(null);
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      if (el.clientHeight === 0) {
+        hiddenAtCountRef.current ??= msgCountRef.current;
+      } else if (hiddenAtCountRef.current != null) {
+        const grew = msgCountRef.current > hiddenAtCountRef.current;
+        hiddenAtCountRef.current = null;
+        if (grew) bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Track the TripBuilder's open trip (P2.1) so send() can attach its dates as client context.
   useEffect(() => {
@@ -130,25 +179,50 @@ export function ChatPanel({
     const codes = decodeSeed(sp.get('seed'));
     if (!codes.length) return;
     seededRef.current = true;
-    window.history.replaceState({}, '', window.location.pathname);
+    // Strip ONLY the handoff params so a refresh can't re-fire — never the whole query string: ?trip=
+    // (builder deep link) and ?pane= (shell tab) must survive this cleanup (ADR-076; the old bare-pathname
+    // replaceState wiped them, leaving deep links working only by effect-ordering luck).
+    const url = new URL(window.location.href);
+    url.searchParams.delete('seed');
+    url.searchParams.delete('from');
+    window.history.replaceState({}, '', url.toString());
     void send('Plan a trip with the parks I picked on the graph.', { seedParkCodes: codes.join(','), seedFrom: 'graph' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When the ranger saves a trip (an itinerary_preview tool result with a trip), tell the trip builder
-  // to refresh + open it — without a page reload (R3 §4.2). Dispatch once per trip id.
+  // When a ranger turn CHANGES a trip — a saved itinerary_preview OR a confirmed nested add (hike /
+  // campground, marked by `addedTo.tripId`) — tell the trip builder to refresh (and the shell to badge)
+  // without a reload (R3 §4.2, retuned by ADR-076). Deduped per (assistant message, trip): a NEW turn
+  // editing the same trip re-announces — the old once-per-trip dedup fired only on a trip's FIRST save,
+  // so every later ranger edit was silent and the open builder went stale. Scan: lib/chat-trips.ts.
   useEffect(() => {
-    for (const m of messages) {
-      if (m.role !== 'assistant') continue;
-      for (const p of m.parts as { type?: string; state?: string; output?: unknown }[]) {
-        if (p.type !== 'dynamic-tool' || p.state !== 'output-available') continue;
-        const out = p.output as { kind?: string; data?: { trip?: { id?: string } } } | undefined;
-        const tripId = out?.kind === 'itinerary_preview' ? out?.data?.trip?.id : undefined;
-        if (tripId && !announcedTrips.current.has(tripId)) {
-          announcedTrips.current.add(tripId);
-          window.dispatchEvent(new CustomEvent('trailgraph:trips-changed', { detail: { tripId } }));
-        }
+    messages.forEach((m, i) => {
+      const mm = m as { id?: string; role: string; parts: unknown[] };
+      if (mm.role !== 'assistant' || !mm.id) return;
+      // Fire once mid-stream (when the first write appears) AND once more when the turn SETTLES — the
+      // settled fire refetches the trip's final state, so a turn that edits the same trip twice (e.g.
+      // "add Zion and Bryce") isn't left showing only the first edit. `refreshTrip` fetches full current
+      // state, so a second refetch is idempotent (dayMap preserved). A message is settled once it is no
+      // longer the actively-streaming last one — hence `busy` in the deps.
+      const settled = !(busy && i === messages.length - 1);
+      for (const tripId of tripIdsFromParts(mm.parts as never)) {
+        const key = `${mm.id}:${tripId}:${settled ? 'final' : 'stream'}`;
+        if (announcedTrips.current.has(key)) continue;
+        announcedTrips.current.add(key);
+        window.dispatchEvent(new CustomEvent('trailgraph:trips-changed', { detail: { tripId } }));
       }
+    });
+  }, [messages, busy]);
+
+  // Unread signal for the plan shell (ADR-076): announce each assistant message ONCE when it first
+  // appears — mid-stream, so the Ranger tab's dot shows while a long answer is still streaming into a
+  // hidden pane. PlanShell alone decides visibility (it ignores this while the Ranger pane is active);
+  // surfaces without a listener (/learn) just drop the event. ChatPanel stays pane-agnostic.
+  useEffect(() => {
+    for (const m of messages as { id?: string; role: string; parts: unknown[] }[]) {
+      if (m.role !== 'assistant' || !m.id || announcedActivity.current.has(m.id)) continue;
+      announcedActivity.current.add(m.id);
+      window.dispatchEvent(new CustomEvent('trailgraph:ranger-activity', { detail: { messageId: m.id } }));
     }
   }, [messages]);
 
@@ -323,7 +397,7 @@ export function ChatPanel({
         </Box>
       </HStack>
 
-      <Stack flex="1" overflowY="auto" gap={5} p={4} minW={0}>
+      <Stack ref={threadRef} flex="1" overflowY="auto" gap={5} p={4} minW={0}>
         {messages.length === 0 ? (
           <Stack gap={3} color="fg.muted" pt={4}>
             <Text>{emptyHint}</Text>
@@ -341,6 +415,7 @@ export function ChatPanel({
                     cursor="pointer"
                     px={3}
                     py={1.5}
+                    minH={{ base: '9', md: 'auto' }} // finger-sized starter chips on touch
                     textAlign="start"
                     whiteSpace="normal"
                     _hover={{ bg: 'brand.muted' }}
@@ -421,7 +496,11 @@ export function ChatPanel({
         <div ref={bottomRef} />
       </Stack>
 
-      <Flex p={3} borderTopWidth="1px" borderColor="border" bg="bg.panel" gap={2} flexShrink={0}>
+      {/* pb includes the safe-area inset when this row sits at the viewport bottom (/learn, desktop /plan).
+          The inset rides a CSS variable so a host that puts its OWN bar below the chat (PlanShell's mobile
+          tab bar owns the home-indicator inset there) can zero it via --chat-safe-bottom and not double-pad
+          notched phones (ADR-076). Unset, it falls back to env() — a no-op outside notched viewports. */}
+      <Flex px={3} pt={3} pb="calc(var(--chakra-spacing-3) + var(--chat-safe-bottom, env(safe-area-inset-bottom, 0px)))" borderTopWidth="1px" borderColor="border" bg="bg.panel" gap={2} flexShrink={0}>
         <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -430,6 +509,7 @@ export function ChatPanel({
           disabled={busy}
           borderRadius="full"
           bg="bg.canvas"
+          enterKeyHint="send"
         />
         {active ? (
           <IconButton aria-label="Stop generating" colorPalette="red" borderRadius="full" onClick={stopTurn}>
